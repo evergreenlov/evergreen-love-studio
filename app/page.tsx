@@ -40,6 +40,66 @@ const kidTones = [
   { char: "骂", py: "mà", emoji: "🐯", hint: "El tigre ruge hacia abajo", mark: "↘" },
 ];
 
+type Sound = { letter: string; hanzi: string; py: string; hint: string };
+
+const pinyinFinals: Sound[] = [
+  { letter: "a", hanzi: "啊", py: "ā", hint: "como la a de ‘mamá’" },
+  { letter: "o", hanzi: "哦", py: "ō", hint: "como la o de ‘polo’, labios redondos" },
+  { letter: "e", hanzi: "鹅", py: "é", hint: "entre e y o, con la garganta relajada" },
+  { letter: "i", hanzi: "衣", py: "yī", hint: "como la i de ‘sí’" },
+  { letter: "u", hanzi: "乌", py: "wū", hint: "como la u de ‘luna’" },
+  { letter: "ü", hanzi: "鱼", py: "yú", hint: "una u dicha con labios de i (como la u francesa)" },
+  { letter: "ai", hanzi: "爱", py: "ài", hint: "como ‘ay’" },
+  { letter: "ei", hanzi: "诶", py: "éi", hint: "como ‘ei’ de ‘peine’" },
+  { letter: "ao", hanzi: "袄", py: "ǎo", hint: "como ‘au’ de ‘auto’" },
+  { letter: "ou", hanzi: "欧", py: "ōu", hint: "o + u seguidas" },
+  { letter: "an", hanzi: "安", py: "ān", hint: "a + n, como ‘pan’ sin la p" },
+  { letter: "en", hanzi: "恩", py: "ēn", hint: "e + n suave" },
+  { letter: "ang", hanzi: "昂", py: "áng", hint: "a + ng nasal, como ‘tango’ sin el ‘to’" },
+  { letter: "ong", hanzi: "红", py: "hóng", hint: "o + ng nasal (aquí suena en ‘hóng’, rojo)" },
+];
+
+const pinyinInitials: Sound[] = [
+  { letter: "b", hanzi: "波", py: "bō", hint: "como una p suave de ‘bola’" },
+  { letter: "p", hanzi: "坡", py: "pō", hint: "p con soplo de aire" },
+  { letter: "m", hanzi: "妈", py: "mā", hint: "como la m de ‘mamá’" },
+  { letter: "f", hanzi: "发", py: "fā", hint: "como la f de ‘foca’" },
+  { letter: "d", hanzi: "大", py: "dà", hint: "t suave, sin aire" },
+  { letter: "t", hanzi: "他", py: "tā", hint: "t con soplo de aire" },
+  { letter: "n", hanzi: "你", py: "nǐ", hint: "como la n de ‘nube’" },
+  { letter: "l", hanzi: "来", py: "lái", hint: "como la l de ‘luna’" },
+  { letter: "g", hanzi: "哥", py: "gē", hint: "k suave, sin aire" },
+  { letter: "k", hanzi: "看", py: "kàn", hint: "k con soplo de aire" },
+  { letter: "h", hanzi: "好", py: "hǎo", hint: "como la j suave de ‘jamón’" },
+  { letter: "j", hanzi: "家", py: "jiā", hint: "como ‘yi’ + ‘a’, muy suave" },
+  { letter: "q", hanzi: "七", py: "qī", hint: "ch suave con aire" },
+  { letter: "x", hanzi: "西", py: "xī", hint: "entre s y sh, con sonrisa" },
+  { letter: "zh", hanzi: "中", py: "zhōng", hint: "ch con la lengua doblada atrás" },
+  { letter: "ch", hanzi: "吃", py: "chī", hint: "ch fuerte con aire y lengua atrás" },
+  { letter: "sh", hanzi: "是", py: "shì", hint: "sh con la lengua doblada atrás" },
+  { letter: "r", hanzi: "人", py: "rén", hint: "r suave con zumbido, sin vibrar" },
+  { letter: "z", hanzi: "字", py: "zì", hint: "como ‘ds’ juntas" },
+  { letter: "c", hanzi: "菜", py: "cài", hint: "como ‘ts’ con aire" },
+  { letter: "s", hanzi: "三", py: "sān", hint: "como la s de ‘sol’" },
+  { letter: "y", hanzi: "一", py: "yī", hint: "como la i, apoya la vocal" },
+  { letter: "w", hanzi: "五", py: "wǔ", hint: "como la u, apoya la vocal" },
+];
+
+const kidLetters: Sound[] = [
+  { letter: "a", hanzi: "啊", py: "ā", hint: "a" },
+  { letter: "o", hanzi: "哦", py: "ō", hint: "o" },
+  { letter: "e", hanzi: "鹅", py: "é", hint: "e" },
+  { letter: "i", hanzi: "衣", py: "yī", hint: "i" },
+  { letter: "u", hanzi: "乌", py: "wū", hint: "u" },
+  { letter: "ü", hanzi: "鱼", py: "yú", hint: "ü" },
+  { letter: "b", hanzi: "波", py: "bō", hint: "b" },
+  { letter: "p", hanzi: "坡", py: "pō", hint: "p" },
+  { letter: "m", hanzi: "妈", py: "mā", hint: "m" },
+  { letter: "d", hanzi: "大", py: "dà", hint: "d" },
+  { letter: "n", hanzi: "你", py: "nǐ", hint: "n" },
+  { letter: "l", hanzi: "来", py: "lái", hint: "l" },
+];
+
 const traceChars = [
   { char: "一", py: "yī", es: "uno" },
   { char: "二", py: "èr", es: "dos" },
@@ -71,6 +131,11 @@ function shuffle<T>(items: T[]): T[] {
 function makeRound(): { word: KidWord; options: KidWord[] } {
   const [word, ...rest] = shuffle(kidWords);
   return { word, options: shuffle([word, rest[0], rest[1]]) };
+}
+
+function makeLetterRound(): { sound: Sound; options: Sound[] } {
+  const [sound, ...rest] = shuffle(kidLetters);
+  return { sound, options: shuffle([sound, rest[0], rest[1]]) };
 }
 
 function TraceBoard({ char }: { char: string }) {
@@ -132,12 +197,14 @@ export default function Home() {
   const [mode, setMode] = useState<"choose" | "kids" | "adult">("choose");
   const [name, setName] = useState("");
   const [started, setStarted] = useState(false);
-  const [section, setSection] = useState<"learn" | "tones" | "write" | "practice" | "progress">("learn");
+  const [section, setSection] = useState<"learn" | "abc" | "tones" | "write" | "practice" | "progress">("learn");
+  const [selectedSound, setSelectedSound] = useState<Sound | null>(null);
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [score, setScore] = useState(0);
   const [completed, setCompleted] = useState<string[]>([]);
-  const [kidGame, setKidGame] = useState<"home" | "toca" | "tonos" | "trazar">("home");
+  const [kidGame, setKidGame] = useState<"home" | "toca" | "tonos" | "trazar" | "letras">("home");
+  const [letterRound, setLetterRound] = useState<{ sound: Sound; options: Sound[] } | null>(null);
   const [stars, setStars] = useState(0);
   const [round, setRound] = useState<{ word: KidWord; options: KidWord[] } | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -209,6 +276,33 @@ export default function Home() {
     }
   };
 
+  const startLetterQuiz = () => {
+    const first = makeLetterRound();
+    setLetterRound(first);
+    setWrongPick(null);
+    setTimeout(() => speak(first.sound.hanzi, 0.55), 350);
+  };
+
+  const pickLetter = (option: Sound) => {
+    if (!letterRound || celebrating) return;
+    if (option.letter === letterRound.sound.letter) {
+      addStar();
+      setCelebrating(true);
+      setWrongPick(null);
+      speak("很好！", 0.75);
+      setTimeout(() => {
+        setCelebrating(false);
+        const next = makeLetterRound();
+        setLetterRound(next);
+        setTimeout(() => speak(next.sound.hanzi, 0.55), 300);
+      }, 1400);
+    } else {
+      setWrongPick(option.letter);
+      speak(letterRound.sound.hanzi, 0.5);
+      setTimeout(() => setWrongPick(null), 700);
+    }
+  };
+
   if (mode === "choose") {
     return (
       <main className="welcome-shell">
@@ -260,6 +354,9 @@ export default function Home() {
             <button className="kid-tile tile-green" onClick={() => { setKidGame("trazar"); }}>
               <span>✏️</span><b>Dibuja el carácter</b>
             </button>
+            <button className="kid-tile tile-blue" onClick={() => { setKidGame("letras"); setLetterRound(null); }}>
+              <span>🔤</span><b>Las letras chinas</b>
+            </button>
           </div>
         </section>}
 
@@ -296,6 +393,41 @@ export default function Home() {
             ))}
           </div>
           <button className="kid-small-btn" onClick={() => setKidGame("home")}>⬅️ Juegos</button>
+        </section>}
+
+        {kidGame === "letras" && !letterRound && <section className="kids-game">
+          <p className="kid-question">Toca una letra y escúchala</p>
+          <div className="kid-letter-grid">
+            {kidLetters.map((sound) => (
+              <button key={sound.letter} className="kid-letter" onClick={() => speak(sound.hanzi, 0.55)}>
+                <b>{sound.letter}</b>
+                <small>{sound.py}</small>
+              </button>
+            ))}
+          </div>
+          <button className="kid-tile tile-red quiz-tile" onClick={startLetterQuiz}>
+            <span>👂</span><b>¿Cuál suena?</b>
+          </button>
+          <button className="kid-small-btn" onClick={() => setKidGame("home")}>⬅️ Juegos</button>
+        </section>}
+
+        {kidGame === "letras" && letterRound && <section className="kids-game">
+          <button className="kid-hear" onClick={() => speak(letterRound.sound.hanzi, 0.55)}>
+            🔊<small>Escuchar otra vez</small>
+          </button>
+          <p className="kid-question">¿Qué letra suena?</p>
+          <div className="kid-options">
+            {letterRound.options.map((option) => (
+              <button
+                key={option.letter}
+                className={`kid-option kid-option-letter${wrongPick === option.letter ? " wrong" : ""}`}
+                onClick={() => pickLetter(option)}
+              >
+                <span className="kid-letter-big">{option.letter}</span>
+              </button>
+            ))}
+          </div>
+          <button className="kid-small-btn" onClick={() => setLetterRound(null)}>⬅️ Las letras</button>
         </section>}
 
         {kidGame === "trazar" && <section className="kids-game">
@@ -361,8 +493,8 @@ export default function Home() {
 
       <nav className="tabs" aria-label="Secciones de la lección">
         {([
-          ["learn", "📖", "Aprender"], ["tones", "🔊", "Pronunciar"], ["write", "✍️", "Escribir"],
-          ["practice", "🎯", "Practicar"], ["progress", "📊", "Progreso"],
+          ["learn", "📖", "Aprender"], ["abc", "🔤", "Abecedario"], ["tones", "🔊", "Pronunciar"],
+          ["write", "✍️", "Escribir"], ["practice", "🎯", "Practicar"], ["progress", "📊", "Progreso"],
         ] as const).map(([id, icon, label]) => (
           <button key={id} className={section === id ? "active" : ""} onClick={() => setSection(id)}><span>{icon}</span>{label}</button>
         ))}
@@ -382,6 +514,37 @@ export default function Home() {
           </div>
           <aside className="culture"><span>🏮</span><div><b>Un detalle cultural</b><p>En China, un saludo suele acompañarse con una sonrisa o una leve inclinación. Entre amigos cercanos, es frecuente preguntar “¿Has comido?” como muestra de cariño.</p></div></aside>
           <button className="next" onClick={() => setSection("tones")}>Practicar pronunciación <span>→</span></button>
+        </section>}
+
+        {section === "abc" && <section>
+          <div className="section-heading"><div><p className="kicker">EL ABECEDARIO CHINO</p><h2>Pinyin: tus vocales y consonantes</h2></div><span className="pill">🔊 Toca y escucha</span></div>
+          <p className="lead">El pinyin es el abecedario oficial del chino, con letras latinas. Igual que en español: <b>consonante + vocal + tono = sílaba</b>. Por ejemplo: m + a + tono 1 = <b>mā</b> (妈, mamá). Toca cualquier letra para escucharla en una palabra real.</p>
+          {selectedSound && <article className="abc-detail">
+            <div className="abc-detail-letter">{selectedSound.letter}</div>
+            <div>
+              <b>{selectedSound.hanzi} · {selectedSound.py}</b>
+              <p>Suena {selectedSound.hint}.</p>
+            </div>
+            <button className="listen-all" onClick={() => speak(selectedSound.hanzi, 0.55)}>🔊 Escuchar</button>
+          </article>}
+          <h3 className="abc-group">Las “vocales” (finales)</h3>
+          <div className="abc-grid">
+            {pinyinFinals.map((sound) => (
+              <button key={sound.letter} className={`abc-key${selectedSound?.letter === sound.letter ? " active" : ""}`} onClick={() => { setSelectedSound(sound); speak(sound.hanzi, 0.55); }}>
+                <b>{sound.letter}</b><small>{sound.py}</small>
+              </button>
+            ))}
+          </div>
+          <h3 className="abc-group">Las “consonantes” (iniciales)</h3>
+          <div className="abc-grid">
+            {pinyinInitials.map((sound) => (
+              <button key={sound.letter} className={`abc-key${selectedSound?.letter === sound.letter ? " active" : ""}`} onClick={() => { setSelectedSound(sound); speak(sound.hanzi, 0.55); }}>
+                <b>{sound.letter}</b><small>{sound.py}</small>
+              </button>
+            ))}
+          </div>
+          <aside className="tip"><b>💡 Dato útil</b><p>El chino solo tiene unas 400 sílabas posibles — menos que el español. Los niños en China aprenden primero este abecedario en la escuela, igual que tú aprendiste a-e-i-o-u, y después van añadiendo los caracteres.</p></aside>
+          <button className="next" onClick={() => setSection("tones")}>Ahora, los tonos <span>→</span></button>
         </section>}
 
         {section === "tones" && <section>

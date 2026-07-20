@@ -97,3 +97,27 @@ footer{display:flex;justify-content:space-between;padding:20px 35px;color:var(--
 .burst-0{left:18%;top:60%} .burst-1{left:30%;top:35%} .burst-2{left:44%;top:65%} .burst-3{left:56%;top:30%} .burst-4{left:68%;top:60%} .burst-5{left:80%;top:38%} .burst-6{left:12%;top:32%} .burst-7{left:88%;top:64%}
 @keyframes fly { 0%{transform:translateY(0) scale(.5);opacity:0} 25%{opacity:1} 100%{transform:translateY(-130px) scale(1.25);opacity:0} }
 @media (prefers-reduced-motion: reduce) { .burst { animation: none; opacity: .9; } .kid-option.wrong { animation: none; } .praise { animation: none; } }
+
+/* ===== Abecedario pinyin (adultos) ===== */
+.abc-group { font-family: Georgia, serif; font-size: 22px; margin: 26px 0 12px; }
+.abc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 10px; }
+.abc-key { border: 2px solid var(--line); border-radius: 14px; background: white; padding: 10px 6px; display: grid; justify-items: center; gap: 2px; transition: transform .1s ease, border-color .1s ease; }
+.abc-key:hover, .abc-key:focus-visible { transform: translateY(-2px); border-color: var(--gold); }
+.abc-key.active { border-color: var(--red); background: #fff4f0; }
+.abc-key b { font-size: 24px; line-height: 1.1; }
+.abc-key small { color: var(--muted); }
+.abc-detail { display: flex; align-items: center; gap: 18px; background: white; border: 2px solid var(--gold); border-radius: 18px; padding: 16px 20px; margin: 6px 0 10px; flex-wrap: wrap; }
+.abc-detail-letter { font-size: 54px; font-weight: 800; color: var(--red); font-family: Georgia, serif; line-height: 1; min-width: 70px; text-align: center; }
+.abc-detail b { font-size: 19px; }
+.abc-detail p { margin: 4px 0 0; color: var(--muted); }
+.abc-detail > div { flex: 1; min-width: 200px; }
+
+/* ===== Las letras chinas (peques) ===== */
+.tile-blue { background: linear-gradient(135deg, #5b8fc7, #3d6da3); }
+.kid-letter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 14px; width: 100%; margin-bottom: 20px; }
+.kid-letter { border: 3px solid var(--line); border-radius: 22px; background: white; padding: 16px 8px; display: grid; justify-items: center; gap: 2px; transition: transform .12s ease, border-color .12s ease; }
+.kid-letter:hover, .kid-letter:focus-visible { transform: scale(1.07); border-color: var(--gold); }
+.kid-letter b { font-size: 42px; line-height: 1.05; color: var(--ink); font-family: Georgia, serif; }
+.kid-letter small { color: var(--muted); font-size: 15px; font-weight: 700; }
+.kid-option-letter .kid-letter-big { font-size: 64px; font-weight: 800; font-family: Georgia, serif; color: var(--ink); line-height: 1; }
+.quiz-tile { max-width: 340px; justify-content: center; margin-bottom: 8px; }
