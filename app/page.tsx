@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Vocab = { hanzi: string; pinyin: string; spanish: string; example: string };
 
@@ -20,6 +20,34 @@ const tones = [
   { char: "骂", py: "mà", label: "4.º descendente", mark: "↘" },
 ];
 
+type KidWord = { hanzi: string; pinyin: string; es: string; emoji: string };
+
+const kidWords: KidWord[] = [
+  { hanzi: "猫", pinyin: "māo", es: "gato", emoji: "🐱" },
+  { hanzi: "狗", pinyin: "gǒu", es: "perro", emoji: "🐶" },
+  { hanzi: "鱼", pinyin: "yú", es: "pez", emoji: "🐟" },
+  { hanzi: "鸟", pinyin: "niǎo", es: "pájaro", emoji: "🐦" },
+  { hanzi: "苹果", pinyin: "píngguǒ", es: "manzana", emoji: "🍎" },
+  { hanzi: "水", pinyin: "shuǐ", es: "agua", emoji: "💧" },
+  { hanzi: "你好", pinyin: "nǐ hǎo", es: "hola", emoji: "👋" },
+  { hanzi: "谢谢", pinyin: "xièxie", es: "gracias", emoji: "🙏" },
+];
+
+const kidTones = [
+  { char: "妈", py: "mā", emoji: "🐻", hint: "El oso canta plano y alto", mark: "—" },
+  { char: "麻", py: "má", emoji: "🐵", hint: "El mono sube al árbol", mark: "↗" },
+  { char: "马", py: "mǎ", emoji: "🐸", hint: "La rana baja y salta", mark: "∨" },
+  { char: "骂", py: "mà", emoji: "🐯", hint: "El tigre ruge hacia abajo", mark: "↘" },
+];
+
+const traceChars = [
+  { char: "一", py: "yī", es: "uno" },
+  { char: "二", py: "èr", es: "dos" },
+  { char: "三", py: "sān", es: "tres" },
+  { char: "人", py: "rén", es: "persona" },
+  { char: "口", py: "kǒu", es: "boca" },
+];
+
 function speak(text: string, rate = 0.72) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
@@ -31,7 +59,77 @@ function speak(text: string, rate = 0.72) {
   window.speechSynthesis.speak(utterance);
 }
 
+function shuffle<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function makeRound(): { word: KidWord; options: KidWord[] } {
+  const [word, ...rest] = shuffle(kidWords);
+  return { word, options: shuffle([word, rest[0], rest[1]]) };
+}
+
+function TraceBoard({ char }: { char: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+
+  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return { x: ((e.clientX - rect.left) / rect.width) * canvas.width, y: ((e.clientY - rect.top) / rect.height) * canvas.height };
+  };
+
+  const start = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    drawing.current = true;
+    const ctx = canvasRef.current!.getContext("2d")!;
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return;
+    const ctx = canvasRef.current!.getContext("2d")!;
+    ctx.lineWidth = 22;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#c94435";
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current!;
+    canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  useEffect(() => { clear(); }, [char]);
+
+  return (
+    <div className="trace-board">
+      <span className="trace-template" aria-hidden="true">{char}</span>
+      <canvas
+        ref={canvasRef}
+        width={320}
+        height={320}
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={() => { drawing.current = false; }}
+        onPointerLeave={() => { drawing.current = false; }}
+        aria-label={`Traza el carácter ${char}`}
+      />
+      <button className="kid-small-btn" onClick={clear}>🧽 Borrar</button>
+    </div>
+  );
+}
+
 export default function Home() {
+  const [mode, setMode] = useState<"choose" | "kids" | "adult">("choose");
   const [name, setName] = useState("");
   const [started, setStarted] = useState(false);
   const [section, setSection] = useState<"learn" | "tones" | "write" | "practice" | "progress">("learn");
@@ -39,12 +137,20 @@ export default function Home() {
   const [feedback, setFeedback] = useState("");
   const [score, setScore] = useState(0);
   const [completed, setCompleted] = useState<string[]>([]);
+  const [kidGame, setKidGame] = useState<"home" | "toca" | "tonos" | "trazar">("home");
+  const [stars, setStars] = useState(0);
+  const [round, setRound] = useState<{ word: KidWord; options: KidWord[] } | null>(null);
+  const [celebrating, setCelebrating] = useState(false);
+  const [wrongPick, setWrongPick] = useState<string | null>(null);
+  const [traceIndex, setTraceIndex] = useState(0);
 
   useEffect(() => {
     const savedName = localStorage.getItem("lingomaster-name");
     const savedScore = Number(localStorage.getItem("lingomaster-score") || 0);
+    const savedStars = Number(localStorage.getItem("lingomaster-stars") || 0);
     if (savedName) { setName(savedName); setStarted(true); }
     setScore(savedScore);
+    setStars(savedStars);
   }, []);
 
   const begin = () => {
@@ -66,6 +172,154 @@ export default function Home() {
       setFeedback("Casi. La respuesta es 你好 (nǐ hǎo). Piensa: ‘tú + bien’ = hola.");
     }
   };
+
+  const addStar = () => {
+    setStars((current) => {
+      const next = current + 1;
+      localStorage.setItem("lingomaster-stars", String(next));
+      return next;
+    });
+  };
+
+  const startToca = () => {
+    setKidGame("toca");
+    const first = makeRound();
+    setRound(first);
+    setWrongPick(null);
+    setTimeout(() => speak(first.word.hanzi, 0.6), 350);
+  };
+
+  const pickOption = (option: KidWord) => {
+    if (!round || celebrating) return;
+    if (option.hanzi === round.word.hanzi) {
+      addStar();
+      setCelebrating(true);
+      setWrongPick(null);
+      speak("很好！", 0.75);
+      setTimeout(() => {
+        setCelebrating(false);
+        const next = makeRound();
+        setRound(next);
+        setTimeout(() => speak(next.word.hanzi, 0.6), 300);
+      }, 1400);
+    } else {
+      setWrongPick(option.hanzi);
+      speak(round.word.hanzi, 0.55);
+      setTimeout(() => setWrongPick(null), 700);
+    }
+  };
+
+  if (mode === "choose") {
+    return (
+      <main className="welcome-shell">
+        <div className="sun-disc" aria-hidden="true">你好</div>
+        <section className="welcome-card mode-card">
+          <p className="eyebrow">TU TUTOR PERSONAL DE MANDARÍN</p>
+          <h1>LingoMaster <span>AI</span></h1>
+          <p className="hanzi-hero">中文</p>
+          <p className="intro">¿Quién va a aprender hoy?</p>
+          <div className="mode-grid">
+            <button className="mode-btn kids" onClick={() => { setMode("kids"); setKidGame("home"); }}>
+              <span className="mode-emoji">🧸</span>
+              <b>Peques</b>
+              <small>Juegos, dibujos y sonidos</small>
+            </button>
+            <button className="mode-btn adult" onClick={() => setMode("adult")}>
+              <span className="mode-emoji">📚</span>
+              <b>Adultos</b>
+              <small>Lección completa paso a paso</small>
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (mode === "kids") {
+    return (
+      <main className="kids-shell">
+        {celebrating && <div className="celebration" aria-hidden="true">
+          {["⭐", "🎉", "⭐", "✨", "🌟", "🎊", "⭐", "✨"].map((icon, index) => <span key={index} className={`burst burst-${index}`}>{icon}</span>)}
+          <div className="praise">很好! ¡Muy bien!</div>
+        </div>}
+
+        <header className="kids-topbar">
+          <button className="kid-small-btn" onClick={() => { setMode("choose"); setKidGame("home"); }}>🏠 Salir</button>
+          <div className="star-count" aria-label={`${stars} estrellas`}>⭐ {stars}</div>
+        </header>
+
+        {kidGame === "home" && <section className="kids-home">
+          <h1 className="kids-title">¡A jugar! <span>玩</span></h1>
+          <div className="kids-menu">
+            <button className="kid-tile tile-red" onClick={startToca}>
+              <span>👂</span><b>Escucha y toca</b>
+            </button>
+            <button className="kid-tile tile-gold" onClick={() => { setKidGame("tonos"); }}>
+              <span>🎵</span><b>Animalitos que cantan</b>
+            </button>
+            <button className="kid-tile tile-green" onClick={() => { setKidGame("trazar"); }}>
+              <span>✏️</span><b>Dibuja el carácter</b>
+            </button>
+          </div>
+        </section>}
+
+        {kidGame === "toca" && round && <section className="kids-game">
+          <button className="kid-hear" onClick={() => speak(round.word.hanzi, 0.6)}>
+            🔊<small>Escuchar otra vez</small>
+          </button>
+          <p className="kid-question">¿Qué escuchaste?</p>
+          <div className="kid-options">
+            {round.options.map((option) => (
+              <button
+                key={option.hanzi}
+                className={`kid-option${wrongPick === option.hanzi ? " wrong" : ""}`}
+                onClick={() => pickOption(option)}
+              >
+                <span className="kid-emoji">{option.emoji}</span>
+                <small>{option.es}</small>
+              </button>
+            ))}
+          </div>
+          <button className="kid-small-btn" onClick={() => setKidGame("home")}>⬅️ Juegos</button>
+        </section>}
+
+        {kidGame === "tonos" && <section className="kids-game">
+          <p className="kid-question">Toca un animalito y repite su canción</p>
+          <div className="kid-tone-grid">
+            {kidTones.map((tone) => (
+              <button key={tone.py} className="kid-tone" onClick={() => { speak(tone.char, 0.5); }}>
+                <span className="kid-emoji">{tone.emoji}</span>
+                <b>{tone.py}</b>
+                <span className="kid-mark">{tone.mark}</span>
+                <small>{tone.hint}</small>
+              </button>
+            ))}
+          </div>
+          <button className="kid-small-btn" onClick={() => setKidGame("home")}>⬅️ Juegos</button>
+        </section>}
+
+        {kidGame === "trazar" && <section className="kids-game">
+          <p className="kid-question">Dibuja encima con tu dedo</p>
+          <div className="trace-picker">
+            {traceChars.map((item, index) => (
+              <button
+                key={item.char}
+                className={`kid-small-btn${traceIndex === index ? " active" : ""}`}
+                onClick={() => { setTraceIndex(index); speak(item.char, 0.6); }}
+              >{item.char}</button>
+            ))}
+          </div>
+          <TraceBoard char={traceChars[traceIndex].char} />
+          <p className="trace-caption">{traceChars[traceIndex].py} · {traceChars[traceIndex].es}</p>
+          <div className="trace-actions">
+            <button className="kid-small-btn" onClick={() => speak(traceChars[traceIndex].char, 0.6)}>🔊 Escuchar</button>
+            <button className="kid-small-btn" onClick={() => { addStar(); speak("很好！", 0.75); }}>✅ ¡Listo!</button>
+          </div>
+          <button className="kid-small-btn" onClick={() => setKidGame("home")}>⬅️ Juegos</button>
+        </section>}
+      </main>
+    );
+  }
 
   if (!started) {
     return (
@@ -90,7 +344,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-mark">语</div>
+        <button className="brand-mark" onClick={() => setMode("choose")} aria-label="Cambiar de modo">语</button>
         <div><strong>LingoMaster</strong><small>Mandarín paso a paso</small></div>
         <div className="streak">🔥 <b>1</b><span>días</span></div>
         <button className="avatar" aria-label="Perfil">{name.charAt(0).toUpperCase()}</button>
