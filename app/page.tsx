@@ -140,7 +140,9 @@ function makeLetterRound(): { sound: Sound; options: Sound[] } {
 
 function TraceBoard({ char }: { char: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
+  // Un solo puntero activo a la vez: permite apoyar la palma en el iPad
+  // mientras se escribe con el Apple Pencil sin que deje rayones.
+  const activePointer = useRef<number | null>(null);
 
   const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
@@ -148,8 +150,15 @@ function TraceBoard({ char }: { char: string }) {
     return { x: ((e.clientX - rect.left) / rect.width) * canvas.width, y: ((e.clientY - rect.top) / rect.height) * canvas.height };
   };
 
+  const strokeWidth = (e: React.PointerEvent<HTMLCanvasElement>) =>
+    e.pointerType === "pen" && e.pressure > 0 ? 10 + e.pressure * 28 : 22;
+
   const start = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    drawing.current = true;
+    // Si ya hay un dedo/palma dibujando y llega el lápiz, el lápiz manda;
+    // si ya dibuja el lápiz, cualquier otro toque se ignora.
+    if (activePointer.current !== null && e.pointerType !== "pen") return;
+    activePointer.current = e.pointerId;
+    e.currentTarget.setPointerCapture(e.pointerId);
     const ctx = canvasRef.current!.getContext("2d")!;
     const { x, y } = getPos(e);
     ctx.beginPath();
@@ -157,15 +166,23 @@ function TraceBoard({ char }: { char: string }) {
   };
 
   const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
+    if (activePointer.current !== e.pointerId) return;
     const ctx = canvasRef.current!.getContext("2d")!;
-    ctx.lineWidth = 22;
+    ctx.lineWidth = strokeWidth(e);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = "#c94435";
     const { x, y } = getPos(e);
     ctx.lineTo(x, y);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const end = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePointer.current !== e.pointerId) return;
+    activePointer.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const clear = () => {
@@ -184,8 +201,8 @@ function TraceBoard({ char }: { char: string }) {
         height={320}
         onPointerDown={start}
         onPointerMove={move}
-        onPointerUp={() => { drawing.current = false; }}
-        onPointerLeave={() => { drawing.current = false; }}
+        onPointerUp={end}
+        onPointerCancel={end}
         aria-label={`Traza el carácter ${char}`}
       />
       <button className="kid-small-btn" onClick={clear}>🧽 Borrar</button>
@@ -431,7 +448,7 @@ export default function Home() {
         </section>}
 
         {kidGame === "trazar" && <section className="kids-game">
-          <p className="kid-question">Dibuja encima con tu dedo</p>
+          <p className="kid-question">Dibuja encima con tu dedo o tu lápiz</p>
           <div className="trace-picker">
             {traceChars.map((item, index) => (
               <button

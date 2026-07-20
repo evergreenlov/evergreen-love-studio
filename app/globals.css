@@ -83,7 +83,7 @@ footer{display:flex;justify-content:space-between;padding:20px 35px;color:var(--
 .trace-picker { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 12px; }
 .trace-picker .kid-small-btn { font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 24px; width: 58px; height: 58px; padding: 0; }
 .trace-board { position: relative; width: min(320px, 86vw); background: rgba(255,255,255,.8); border-radius: 24px; }
-.trace-board canvas { width: 100%; height: auto; border: 3px dashed #d9b98a; border-radius: 24px; background: transparent; touch-action: none; display: block; position: relative; z-index: 1; }
+.trace-board canvas { width: 100%; height: auto; border: 3px dashed #d9b98a; border-radius: 24px; background: transparent; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; display: block; position: relative; z-index: 1; }
 .trace-template { position: absolute; inset: 0; display: grid; place-items: center; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 210px; color: rgba(36,32,28,.18); z-index: 0; pointer-events: none; }
 .trace-board .kid-small-btn { position: absolute; right: 10px; bottom: 10px; z-index: 2; padding: 6px 14px; font-size: 14px; }
 .trace-caption { font-size: 20px; font-weight: 700; color: var(--muted); margin: 10px 0 4px; }
