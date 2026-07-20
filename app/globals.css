@@ -121,3 +121,25 @@ footer{display:flex;justify-content:space-between;padding:20px 35px;color:var(--
 .kid-letter small { color: var(--muted); font-size: 15px; font-weight: 700; }
 .kid-option-letter .kid-letter-big { font-size: 64px; font-weight: 800; font-family: Georgia, serif; color: var(--ink); line-height: 1; }
 .quiz-tile { max-width: 340px; justify-content: center; margin-bottom: 8px; }
+
+/* ===== Vocabulario ampliado ===== */
+.vocab-group-title { font-family: Georgia, serif; font-size: 22px; margin: 28px 0 12px; }
+.phrase-list { display: grid; gap: 10px; }
+.phrase-card { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "hanzi play" "py play" "es play"; text-align: left; border: 2px solid var(--line); border-radius: 16px; background: white; padding: 14px 18px; gap: 2px; transition: border-color .12s ease, transform .12s ease; }
+.phrase-card:hover, .phrase-card:focus-visible { border-color: var(--gold); transform: translateY(-2px); }
+.phrase-hanzi { grid-area: hanzi; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 24px; }
+.phrase-py { grid-area: py; color: var(--red); font-weight: 700; }
+.phrase-es { grid-area: es; color: var(--muted); }
+.phrase-play { grid-area: play; align-self: center; font-size: 22px; }
+
+/* ===== Quiz ===== */
+.quiz-options { display: grid; gap: 10px; margin: 14px 0; }
+.quiz-option { border: 2px solid var(--line); border-radius: 14px; background: white; padding: 15px 18px; font-size: 18px; font-weight: 700; text-align: left; transition: border-color .12s ease, background .12s ease; }
+.quiz-option:hover, .quiz-option:focus-visible { border-color: var(--gold); }
+.quiz-option.right { border-color: #47804d; background: #eef7ef; }
+.quiz-option.missed { border-color: var(--red); background: #fdf0ee; }
+.quiz-option.dim { opacity: .55; }
+.quiz-result { text-align: center; display: grid; justify-items: center; gap: 12px; }
+.quiz-big-score { font-family: Georgia, serif; font-size: 64px; font-weight: 800; color: var(--red); line-height: 1; }
+.adult-trace { display: grid; justify-items: center; gap: 4px; margin-top: 26px; text-align: center; }
+.adult-trace .lead { margin: 0 0 12px; }

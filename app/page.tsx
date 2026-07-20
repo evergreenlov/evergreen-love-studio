@@ -4,13 +4,83 @@ import { useEffect, useRef, useState } from "react";
 
 type Vocab = { hanzi: string; pinyin: string; spanish: string; example: string };
 
-const vocabulary: Vocab[] = [
-  { hanzi: "你", pinyin: "nǐ", spanish: "tú", example: "你好！ Nǐ hǎo!" },
-  { hanzi: "好", pinyin: "hǎo", spanish: "bien / bueno", example: "很好。 Hěn hǎo." },
-  { hanzi: "你好", pinyin: "nǐ hǎo", spanish: "hola", example: "你好，Ana！" },
-  { hanzi: "我", pinyin: "wǒ", spanish: "yo", example: "我是 María。" },
-  { hanzi: "叫", pinyin: "jiào", spanish: "llamarse", example: "我叫 Luis。" },
-  { hanzi: "谢谢", pinyin: "xièxie", spanish: "gracias", example: "谢谢你！" },
+const vocabGroups: { title: string; words: Vocab[] }[] = [
+  {
+    title: "Saludos y cortesía",
+    words: [
+      { hanzi: "你好", pinyin: "nǐ hǎo", spanish: "hola", example: "你好，Ana！" },
+      { hanzi: "再见", pinyin: "zàijiàn", spanish: "adiós", example: "再见！ Zàijiàn!" },
+      { hanzi: "谢谢", pinyin: "xièxie", spanish: "gracias", example: "谢谢你！" },
+      { hanzi: "不客气", pinyin: "bú kèqi", spanish: "de nada", example: "—谢谢！ —不客气。" },
+      { hanzi: "对不起", pinyin: "duìbuqǐ", spanish: "perdón / lo siento", example: "对不起！" },
+      { hanzi: "请", pinyin: "qǐng", spanish: "por favor", example: "请坐。 Qǐng zuò. (Siéntate, por favor)" },
+    ],
+  },
+  {
+    title: "Palabras básicas",
+    words: [
+      { hanzi: "我", pinyin: "wǒ", spanish: "yo", example: "我是 María。" },
+      { hanzi: "你", pinyin: "nǐ", spanish: "tú", example: "你好！ Nǐ hǎo!" },
+      { hanzi: "他", pinyin: "tā", spanish: "él", example: "他叫 Luis。" },
+      { hanzi: "她", pinyin: "tā", spanish: "ella", example: "她叫 Ana。" },
+      { hanzi: "叫", pinyin: "jiào", spanish: "llamarse", example: "我叫 Luis。" },
+      { hanzi: "是", pinyin: "shì", spanish: "ser", example: "我是 María。" },
+      { hanzi: "好", pinyin: "hǎo", spanish: "bien / bueno", example: "很好。 Hěn hǎo." },
+      { hanzi: "很", pinyin: "hěn", spanish: "muy", example: "我很好。 Wǒ hěn hǎo." },
+      { hanzi: "不", pinyin: "bù", spanish: "no", example: "不好。 Bù hǎo." },
+      { hanzi: "吗", pinyin: "ma", spanish: "¿…? (convierte en pregunta)", example: "你好吗？ Nǐ hǎo ma?" },
+    ],
+  },
+  {
+    title: "Números del 1 al 10",
+    words: [
+      { hanzi: "一", pinyin: "yī", spanish: "uno", example: "一、二、三！" },
+      { hanzi: "二", pinyin: "èr", spanish: "dos", example: "二月 èryuè (febrero)" },
+      { hanzi: "三", pinyin: "sān", spanish: "tres", example: "三个 sān gè (tres cosas)" },
+      { hanzi: "四", pinyin: "sì", spanish: "cuatro", example: "四天 sì tiān (cuatro días)" },
+      { hanzi: "五", pinyin: "wǔ", spanish: "cinco", example: "五点 wǔ diǎn (las cinco)" },
+      { hanzi: "六", pinyin: "liù", spanish: "seis", example: "六岁 liù suì (seis años)" },
+      { hanzi: "七", pinyin: "qī", spanish: "siete", example: "七天 qī tiān (una semana)" },
+      { hanzi: "八", pinyin: "bā", spanish: "ocho", example: "八点 bā diǎn (las ocho)" },
+      { hanzi: "九", pinyin: "jiǔ", spanish: "nueve", example: "九月 jiǔyuè (septiembre)" },
+      { hanzi: "十", pinyin: "shí", spanish: "diez", example: "十个 shí gè (diez cosas)" },
+    ],
+  },
+];
+
+const totalWords = vocabGroups.reduce((sum, group) => sum + group.words.length, 0);
+
+const phrases = [
+  { hanzi: "你叫什么名字？", pinyin: "Nǐ jiào shénme míngzi?", spanish: "¿Cómo te llamas?" },
+  { hanzi: "我叫……", pinyin: "Wǒ jiào…", spanish: "Me llamo…" },
+  { hanzi: "你好吗？", pinyin: "Nǐ hǎo ma?", spanish: "¿Cómo estás?" },
+  { hanzi: "我很好，谢谢！", pinyin: "Wǒ hěn hǎo, xièxie!", spanish: "Estoy muy bien, ¡gracias!" },
+];
+
+type QuizItem = { q: string; audio?: string; options: string[]; correct: number; explain: string };
+
+const quiz: QuizItem[] = [
+  { q: "Escucha y elige el significado", audio: "你好", options: ["hola", "adiós", "gracias"], correct: 0, explain: "你好 (nǐ hǎo) = hola. Literalmente ‘tú + bien’." },
+  { q: "¿Cómo se dice ‘gracias’?", options: ["谢谢 xièxie", "再见 zàijiàn", "对不起 duìbuqǐ"], correct: 0, explain: "谢谢 (xièxie) = gracias. 再见 es adiós y 对不起 es perdón." },
+  { q: "Escucha el número", audio: "五", options: ["cinco (五)", "tres (三)", "ocho (八)"], correct: 0, explain: "五 (wǔ) = cinco, con tercer tono: baja y sube." },
+  { q: "‘Me llamo Ana’ se dice…", options: ["我叫 Ana", "你叫 Ana", "我很 Ana"], correct: 0, explain: "我 (yo) + 叫 (llamarse) = 我叫. Con 你 dirías ‘te llamas’." },
+  { q: "¿Qué significa 你好吗？", options: ["¿Cómo estás?", "¿Cómo te llamas?", "¡Hasta mañana!"], correct: 0, explain: "你好 (estás bien) + 吗 (partícula de pregunta) = ¿Cómo estás?" },
+  { q: "Si alguien te dice 谢谢, respondes…", options: ["不客气 bú kèqi", "对不起 duìbuqǐ", "请 qǐng"], correct: 0, explain: "不客气 (bú kèqi) = de nada. Literalmente ‘no seas tan cortés’." },
+];
+
+function makeQuizSet(): QuizItem[] {
+  return quiz.map((item) => {
+    const order = shuffle(item.options.map((_, index) => index));
+    return { ...item, options: order.map((i) => item.options[i]), correct: order.indexOf(item.correct) };
+  });
+}
+
+const adultTraceChars = [
+  { char: "人", py: "rén", es: "persona", strokes: 2 },
+  { char: "你", py: "nǐ", es: "tú", strokes: 7 },
+  { char: "好", py: "hǎo", es: "bien", strokes: 6 },
+  { char: "我", py: "wǒ", es: "yo", strokes: 7 },
+  { char: "十", py: "shí", es: "diez", strokes: 2 },
 ];
 
 const tones = [
@@ -216,9 +286,13 @@ export default function Home() {
   const [started, setStarted] = useState(false);
   const [section, setSection] = useState<"learn" | "abc" | "tones" | "write" | "practice" | "progress">("learn");
   const [selectedSound, setSelectedSound] = useState<Sound | null>(null);
-  const [answer, setAnswer] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [quizSet, setQuizSet] = useState<QuizItem[]>(quiz);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizPicked, setQuizPicked] = useState<number | null>(null);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizDone, setQuizDone] = useState(false);
   const [score, setScore] = useState(0);
+  const [adultTraceIndex, setAdultTraceIndex] = useState(0);
   const [completed, setCompleted] = useState<string[]>([]);
   const [kidGame, setKidGame] = useState<"home" | "toca" | "tonos" | "trazar" | "letras">("home");
   const [letterRound, setLetterRound] = useState<{ sound: Sound; options: Sound[] } | null>(null);
@@ -235,6 +309,7 @@ export default function Home() {
     if (savedName) { setName(savedName); setStarted(true); }
     setScore(savedScore);
     setStars(savedStars);
+    setQuizSet(makeQuizSet());
   }, []);
 
   const begin = () => {
@@ -244,17 +319,36 @@ export default function Home() {
     localStorage.setItem("lingomaster-name", student);
   };
 
-  const check = () => {
-    const normalized = answer.trim().toLowerCase();
-    if (["你好", "nǐ hǎo", "ni hao", "nǐhǎo"].includes(normalized)) {
-      setFeedback("✓ 太棒了！Tài bàng le! — ¡Excelente! 你好 significa ‘hola’. ");
-      const next = Math.max(score, 1);
-      setScore(next);
-      localStorage.setItem("lingomaster-score", String(next));
-      setCompleted((items) => Array.from(new Set([...items, "saludo"])));
-    } else {
-      setFeedback("Casi. La respuesta es 你好 (nǐ hǎo). Piensa: ‘tú + bien’ = hola.");
+  const pickQuiz = (index: number) => {
+    if (quizPicked !== null) return;
+    setQuizPicked(index);
+    if (index === quizSet[quizIndex].correct) {
+      setQuizScore((s) => s + 1);
+      speak("很好！", 0.75);
     }
+  };
+
+  const nextQuiz = () => {
+    if (quizIndex + 1 < quiz.length) {
+      setQuizIndex(quizIndex + 1);
+      setQuizPicked(null);
+      const audio = quizSet[quizIndex + 1].audio;
+      if (audio) setTimeout(() => speak(audio, 0.6), 350);
+    } else {
+      setQuizDone(true);
+      const best = Math.max(score, quizScore);
+      setScore(best);
+      localStorage.setItem("lingomaster-score", String(best));
+      if (quizScore >= 4) setCompleted((items) => Array.from(new Set([...items, "saludo"])));
+    }
+  };
+
+  const restartQuiz = () => {
+    setQuizSet(makeQuizSet());
+    setQuizIndex(0);
+    setQuizPicked(null);
+    setQuizScore(0);
+    setQuizDone(false);
   };
 
   const addStar = () => {
@@ -519,18 +613,31 @@ export default function Home() {
 
       <div className="content">
         {section === "learn" && <section>
-          <div className="section-heading"><div><p className="kicker">VOCABULARIO NUEVO</p><h2>Tu primer saludo</h2></div><button className="listen-all" onClick={() => speak("你好。我叫。谢谢。")}>🔊 Escuchar todo</button></div>
-          <div className="vocab-grid">
-            {vocabulary.map((word) => <article className="vocab-card" key={word.hanzi}>
-              <button className="sound" onClick={() => speak(word.hanzi)} aria-label={`Escuchar ${word.pinyin}`}>🔊</button>
-              <div className="big-hanzi">{word.hanzi}</div>
-              <div className="pinyin">{word.pinyin}</div>
-              <div className="translation">{word.spanish}</div>
-              <small>{word.example}</small>
-            </article>)}
+          <div className="section-heading"><div><p className="kicker">VOCABULARIO NUEVO · {totalWords} PALABRAS</p><h2>Saludos, básicos y números</h2></div><button className="listen-all" onClick={() => speak("你好。再见。谢谢。")}>🔊 Escuchar saludos</button></div>
+          {vocabGroups.map((group) => <div key={group.title}>
+            <h3 className="vocab-group-title">{group.title}</h3>
+            <div className="vocab-grid">
+              {group.words.map((word) => <article className="vocab-card" key={word.hanzi + word.spanish}>
+                <button className="sound" onClick={() => speak(word.hanzi)} aria-label={`Escuchar ${word.pinyin}`}>🔊</button>
+                <div className="big-hanzi">{word.hanzi}</div>
+                <div className="pinyin">{word.pinyin}</div>
+                <div className="translation">{word.spanish}</div>
+                <small>{word.example}</small>
+              </article>)}
+            </div>
+          </div>)}
+          <h3 className="vocab-group-title">Frases útiles — tu primera conversación</h3>
+          <div className="phrase-list">
+            {phrases.map((phrase) => <button className="phrase-card" key={phrase.hanzi} onClick={() => speak(phrase.hanzi, 0.6)}>
+              <span className="phrase-hanzi">{phrase.hanzi}</span>
+              <span className="phrase-py">{phrase.pinyin}</span>
+              <span className="phrase-es">{phrase.spanish}</span>
+              <span className="phrase-play">🔊</span>
+            </button>)}
           </div>
+          <aside className="tip"><b>💡 La gramática buena noticia</b><p>El chino no conjuga verbos ni tiene género, plural ni artículos: 我叫 sirve para ‘me llamo’ siempre, y 好 nunca cambia. El orden es como en español: sujeto + verbo + resto. Lo difícil son los tonos — lo demás es más fácil que el español.</p></aside>
           <aside className="culture"><span>🏮</span><div><b>Un detalle cultural</b><p>En China, un saludo suele acompañarse con una sonrisa o una leve inclinación. Entre amigos cercanos, es frecuente preguntar “¿Has comido?” como muestra de cariño.</p></div></aside>
-          <button className="next" onClick={() => setSection("tones")}>Practicar pronunciación <span>→</span></button>
+          <button className="next" onClick={() => setSection("abc")}>Ahora, el abecedario <span>→</span></button>
         </section>}
 
         {section === "abc" && <section>
@@ -587,20 +694,56 @@ export default function Home() {
               <div className="mnemonic">🧠 Parece una persona caminando con dos piernas.</div>
             </article>
           </div>
-          <div className="copy-practice"><b>✍️ Copia 人 tres veces</b><div className="copy-boxes"><span>人</span><span></span><span></span><span></span></div><p>Traza con el dedo o lápiz sobre los cuadros vacíos.</p></div>
+          <div className="adult-trace">
+            <h3 className="vocab-group-title">✍️ Practica con tu dedo o tu lápiz</h3>
+            <p className="lead">Elige un carácter y trázalo encima de la guía. En iPad, el Apple Pencil responde a la presión.</p>
+            <div className="trace-picker">
+              {adultTraceChars.map((item, index) => (
+                <button
+                  key={item.char}
+                  className={`kid-small-btn${adultTraceIndex === index ? " active" : ""}`}
+                  onClick={() => { setAdultTraceIndex(index); speak(item.char, 0.6); }}
+                >{item.char}</button>
+              ))}
+            </div>
+            <div className="adult-trace-board">
+              <TraceBoard char={adultTraceChars[adultTraceIndex].char} />
+            </div>
+            <p className="trace-caption">{adultTraceChars[adultTraceIndex].py} · {adultTraceChars[adultTraceIndex].es} · {adultTraceChars[adultTraceIndex].strokes} trazos</p>
+          </div>
           <button className="next" onClick={() => setSection("practice")}>Comprobar lo aprendido <span>→</span></button>
         </section>}
 
-        {section === "practice" && <section>
-          <div className="section-heading"><div><p className="kicker">EVALUACIÓN RÁPIDA</p><h2>¿Qué significa “hola”?</h2></div><span className="pill">1 de 3</span></div>
-          <article className="quiz-card"><button className="quiz-audio" onClick={() => speak("你好")}>🔊 Escucha la respuesta</button><label htmlFor="answer">Escríbelo en caracteres o pīnyīn:</label><input id="answer" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Tu respuesta…"/><button className="primary" onClick={check}>Comprobar</button>{feedback && <div className={feedback.startsWith("✓") ? "feedback good" : "feedback"}>{feedback}</div>}</article>
+        {section === "practice" && !quizDone && <section>
+          <div className="section-heading"><div><p className="kicker">EVALUACIÓN</p><h2>{quizSet[quizIndex].q}</h2></div><span className="pill">{quizIndex + 1} de {quiz.length}</span></div>
+          <article className="quiz-card">
+            {quizSet[quizIndex].audio && <button className="quiz-audio" onClick={() => speak(quizSet[quizIndex].audio!, 0.6)}>🔊 Escuchar</button>}
+            <div className="quiz-options">
+              {quizSet[quizIndex].options.map((option, index) => {
+                const state = quizPicked === null ? "" : index === quizSet[quizIndex].correct ? " right" : index === quizPicked ? " missed" : " dim";
+                return <button key={option} className={`quiz-option${state}`} onClick={() => pickQuiz(index)}>{option}</button>;
+              })}
+            </div>
+            {quizPicked !== null && <div className={quizPicked === quizSet[quizIndex].correct ? "feedback good" : "feedback"}>
+              {quizPicked === quizSet[quizIndex].correct ? "✓ 太棒了！Tài bàng le! — ¡Excelente! " : "Casi. "}{quizSet[quizIndex].explain}
+            </div>}
+            {quizPicked !== null && <button className="primary" onClick={nextQuiz}>{quizIndex + 1 < quiz.length ? "Siguiente pregunta →" : "Ver mi resultado"}</button>}
+          </article>
           <div className="mini-game"><span>⚡</span><div><b>Reto rápido</b><p>Toca los tonos en orden: mā, má, mǎ, mà.</p></div><button onClick={() => { tones.forEach((t, i) => setTimeout(() => speak(t.char, .55), i * 950)); }}>Jugar</button></div>
-          <button className="next" onClick={() => setSection("progress")}>Ver mi progreso <span>→</span></button>
+        </section>}
+
+        {section === "practice" && quizDone && <section>
+          <div className="section-heading"><div><p className="kicker">RESULTADO</p><h2>{quizScore >= 5 ? "¡Impresionante!" : quizScore >= 4 ? "¡Muy bien!" : "¡Buen intento!"}</h2></div><span className="pill">{quizScore} de {quiz.length}</span></div>
+          <article className="quiz-card quiz-result">
+            <div className="quiz-big-score">{quizScore}/{quiz.length}</div>
+            <p>{quizScore >= 4 ? "Dominas los saludos y los números básicos. 加油 (jiā yóu) — ¡sigue así!" : "Repasa el vocabulario en la pestaña Aprender y vuelve a intentarlo — la repetición es la clave del chino."}</p>
+            <div className="repeat-actions"><button onClick={restartQuiz}>↻ Repetir el quiz</button><button onClick={() => setSection("progress")}>Ver mi progreso →</button></div>
+          </article>
         </section>}
 
         {section === "progress" && <section>
           <div className="section-heading"><div><p className="kicker">TU VIAJE</p><h2>¡Buen comienzo, {name}!</h2></div><span className="pill">Nivel Fundamentos</span></div>
-          <div className="progress-card"><div className="progress-score"><span>{score}/3</span><small>ejercicios</small></div><div className="stats"><div><b>6</b><span>Palabras nuevas</span></div><div><b>1</b><span>Carácter practicado</span></div><div><b>1</b><span>Radical aprendido</span></div><div><b>{completed.length ? "✓" : "—"}</b><span>Saludo dominado</span></div></div></div>
+          <div className="progress-card"><div className="progress-score"><span>{score}/{quiz.length}</span><small>quiz</small></div><div className="stats"><div><b>{totalWords}</b><span>Palabras nuevas</span></div><div><b>{adultTraceChars.length}</b><span>Caracteres para trazar</span></div><div><b>{pinyinFinals.length + pinyinInitials.length}</b><span>Sonidos del pinyin</span></div><div><b>{completed.length ? "✓" : "—"}</b><span>Quiz aprobado</span></div></div></div>
           <div className="path"><h3>Tu ruta de aprendizaje</h3><div><span className="done">✓</span><i></i><span className="current">1</span><i></i><span>2</span><i></i><span>3</span></div><p>Bienvenida · Tonos · Saludos</p></div>
           <blockquote><b>加油！</b><span>Jiā yóu! — ¡Tú puedes!</span><p>学习是一段旅程。El aprendizaje es un viaje.</p></blockquote>
           <button className="next" onClick={() => setSection("learn")}>Repetir la lección <span>↻</span></button>
