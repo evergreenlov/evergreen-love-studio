@@ -169,7 +169,8 @@
     },
     box: {
       label: 'Caja', noOffset: true,
-      props: [['uniones', 'Uniones', JOINT_OPTS], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
+      props: [['uniones', 'Uniones', JOINT_OPTS], ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }],
+        ['nAncho', 'Dedos a lo ancho'], ['nProf', 'Dedos a lo profundo'], ['nAlto', 'Dedos a lo alto'], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
         ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
@@ -188,15 +189,15 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset']);
-  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo']);
+  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
   const PROMOTE_NAMES = {
     w: 'ancho', h: 'alto', d: 'diametro', r: 'radio', n: 'lados', t: 'grosor', dedo: 'dedo', kerf: 'kerf', tam: 'tam_texto',
     rot: 'giro', x: 'pos_x', y: 'pos_y', x2: 'fin_x', y2: 'fin_y', largo: 'largo_corte', puente: 'puente', paso: 'paso_bisagra',
-    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
+    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nAncho: 'dedos_ancho', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
     off: 'contorno', repN: 'cantidad', repM: 'filas', repDx: 'paso_x', repDy: 'paso_y', repCx: 'centro_x', repCy: 'centro_y', repA: 'angulo',
   };
 
@@ -366,10 +367,11 @@
   }
 
   // Panel rectangular con uniones de dedos. Borde: plano | dedos | ranuras.
-  function panelPoints(W, H, t, fw, modes, kerf) {
+  // counts (opcional): número de segmentos por borde [arriba, derecha, abajo, izquierda] cuando se elige "por cantidad"
+  function panelPoints(W, H, t, fw, modes, kerf, counts) {
     const L = [W, H, W, H];
     const edges = L.map((ln, k) => {
-      let n = fw > 0 ? Math.floor(ln / fw) : 1;
+      let n = counts && counts[k] ? counts[k] : fw > 0 ? Math.floor(ln / fw) : 1;
       if (!(n >= 1)) n = 1;
       if (n > 999) n = 999;
       if (n % 2 === 0) n--;
@@ -440,6 +442,14 @@
   }
 
   /* ----- Caja paramétrica ----- */
+  // Dedos "por cantidad": N dedos en un borde = 2N − 1 segmentos (dedo, hueco, dedo…), igual en las dos piezas de la unión
+  const FINGER_KEYS = { W: 'nAncho', D: 'nProf', H: 'nAlto' };
+  function fingerSegs(s, du, dv) {
+    if (s.p.dedoModo !== 'cantidad') return null;
+    const seg = d => 2 * Math.max(1, Math.min(200, Math.round(num(s, FINGER_KEYS[d], 3)) || 1)) - 1;
+    return [seg(du), seg(dv), seg(du), seg(dv)];
+  }
+
   // Devuelve las piezas de la caja (en mm, cada una con su origen arriba a la izquierda) y cómo se arman en 3D.
   function boxModel(s, forView = false) {
     const t = len(s, 't', 3), fw = len(s, 'dedo', 10), sep = len(s, 'sep', 5);
@@ -462,13 +472,13 @@
     if (fingers) {
       const T = lid ? 'ranuras' : 'plano';
       const Hf = slide ? lidBottom : H;
-      add('Frente', W, Hf, 'front', panelPoints(W, Hf, t, fw, [T, 'dedos', 'ranuras', 'dedos'], kerf));
-      add('Atrás', W, H, 'back', panelPoints(W, H, t, fw, [T, 'dedos', 'ranuras', 'dedos'], kerf));
-      const side = slide ? slideSidePoints(D, H, t, fw, Hf, mTop, slotH, D - 2 * t, kerf) : panelPoints(D, H, t, fw, [T, 'ranuras', 'ranuras', 'ranuras'], kerf);
+      add('Frente', W, Hf, 'front', panelPoints(W, Hf, t, fw, [T, 'dedos', 'ranuras', 'dedos'], kerf, fingerSegs(s, 'W', 'H')));
+      add('Atrás', W, H, 'back', panelPoints(W, H, t, fw, [T, 'dedos', 'ranuras', 'dedos'], kerf, fingerSegs(s, 'W', 'H')));
+      const side = slide ? slideSidePoints(D, H, t, fw, Hf, mTop, slotH, D - 2 * t, kerf, fingerSegs(s, 'D', 'H')) : panelPoints(D, H, t, fw, [T, 'ranuras', 'ranuras', 'ranuras'], kerf, fingerSegs(s, 'D', 'H'));
       add('Lado izquierdo', D, H, 'left', side);
       add('Lado derecho', D, H, 'right', side);
-      add('Base', W, D, 'bottom', panelPoints(W, D, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf));
-      if (lid) add('Tapa', W, D, 'top', panelPoints(W, D, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf));
+      add('Base', W, D, 'bottom', panelPoints(W, D, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf, fingerSegs(s, 'W', 'D')));
+      if (lid) add('Tapa', W, D, 'top', panelPoints(W, D, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf, fingerSegs(s, 'W', 'D')));
     } else {
       // Sin dedos: la base y la tapa cubren todo; frente y atrás van entre ellas; los lados, entre frente y atrás.
       const hIn = H - t - (lid ? t : 0), hFront = slide ? lidBottom - t : hIn;
@@ -592,11 +602,11 @@
     const add = (q) => { panels.push({ holes: [], ...q }); return panels[panels.length - 1]; };
     // Mueble (sin frente)
     if (fingers) {
-      add({ name: 'Mueble atrás', w: W, h: H, place: 'back', pts: panelPoints(W, H, t, fw, ['ranuras', 'dedos', 'ranuras', 'dedos'], kerf) });
-      const side = panelPoints(D, H, t, fw, ['ranuras', 'ranuras', 'ranuras', 'plano'], kerf);
+      add({ name: 'Mueble atrás', w: W, h: H, place: 'back', pts: panelPoints(W, H, t, fw, ['ranuras', 'dedos', 'ranuras', 'dedos'], kerf, fingerSegs(s, 'W', 'H')) });
+      const side = panelPoints(D, H, t, fw, ['ranuras', 'ranuras', 'ranuras', 'plano'], kerf, fingerSegs(s, 'D', 'H'));
       add({ name: 'Mueble lado izq.', w: D, h: H, place: 'left', pts: side });
       add({ name: 'Mueble lado der.', w: D, h: H, place: 'right', pts: side });
-      const plate = panelPoints(W, D, t, fw, ['plano', 'dedos', 'dedos', 'dedos'], kerf);
+      const plate = panelPoints(W, D, t, fw, ['plano', 'dedos', 'dedos', 'dedos'], kerf, fingerSegs(s, 'W', 'D'));
       add({ name: 'Mueble base', w: W, h: D, place: 'bottom', pts: plate });
       add({ name: 'Mueble techo', w: W, h: D, place: 'top', pts: plate });
     } else {
@@ -650,13 +660,13 @@
       const dw = (nm, w, h, pts, axes) => add({ name: `Cajón${tag} ${nm}`, w, h, pts, drawer: true, drawerIndex: top, axes: { ...axes, out: [0, 0, 0] } });
       let base;
       if (fingers) {
-        const fb = panelPoints(Wd, Hd, t, fw, ['plano', 'dedos', 'ranuras', 'dedos'], kerf);
-        const sd = panelPoints(Dd, Hd, t, fw, ['plano', 'ranuras', 'ranuras', 'ranuras'], kerf);
+        const fb = panelPoints(Wd, Hd, t, fw, ['plano', 'dedos', 'ranuras', 'dedos'], kerf, fingerSegs(s, 'W', 'H'));
+        const sd = panelPoints(Dd, Hd, t, fw, ['plano', 'ranuras', 'ranuras', 'ranuras'], kerf, fingerSegs(s, 'D', 'H'));
         dw('frente', Wd, Hd, fb, { eu: [1, 0, 0], ev: [0, -1, 0], ew: [0, 0, 1], o: [x0, y0 + Hd, z0] });
         dw('atrás', Wd, Hd, fb, { eu: [-1, 0, 0], ev: [0, -1, 0], ew: [0, 0, -1], o: [x0 + Wd, y0 + Hd, z0 + Dd] });
         dw('lado izq.', Dd, Hd, sd, { eu: [0, 0, 1], ev: [0, -1, 0], ew: [1, 0, 0], o: [x0, y0 + Hd, z0] });
         dw('lado der.', Dd, Hd, sd, { eu: [0, 0, 1], ev: [0, -1, 0], ew: [-1, 0, 0], o: [x0 + Wd, y0 + Hd, z0] });
-        base = dw('base', Wd, Dd, panelPoints(Wd, Dd, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf), { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [x0, y0, z0] });
+        base = dw('base', Wd, Dd, panelPoints(Wd, Dd, t, fw, ['dedos', 'dedos', 'dedos', 'dedos'], kerf, fingerSegs(s, 'W', 'D')), { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [x0, y0, z0] });
       } else {
         const hIn = Hd - t, yTop = y0 + t + hIn;
         dw('frente', Wd, hIn, rect(Wd, hIn), { eu: [1, 0, 0], ev: [0, -1, 0], ew: [0, 0, 1], o: [x0, yTop, z0] });
@@ -690,16 +700,16 @@
 
   // Lado para tapa deslizante (con dedos): canto de arriba liso, ranura abierta por el frente
   // y dedos del frente solo en la altura del frente (Hf).
-  function slideSidePoints(D, H, t, fw, Hf, mTop, slotH, slotLen, kerf) {
-    const segs = (ln, mode) => {
-      let n = fw > 0 ? Math.floor(ln / fw) : 1;
+  function slideSidePoints(D, H, t, fw, Hf, mTop, slotH, slotLen, kerf, counts) {
+    const segs = (ln, mode, cnt) => {
+      let n = cnt || (fw > 0 ? Math.floor(ln / fw) : 1);
       if (!(n >= 1)) n = 1;
       if (n > 999) n = 999;
       if (n % 2 === 0) n--;
       const s = ln / n;
       return Array.from({ length: n }, (_, i) => [i * s, (i + 1) * s, mode === 'dedos' ? (i % 2 ? t : 0) : (i % 2 ? 0 : t)]);
     };
-    const back = segs(H, 'ranuras'), bottom = segs(D, 'ranuras'), front = segs(Hf, 'ranuras');
+    const back = segs(H, 'ranuras', counts && counts[1]), bottom = segs(D, 'ranuras', counts && counts[0]), front = segs(Hf, 'ranuras', counts && counts[1]);
     const at = (kk, u, o) => kk === 1 ? [D - o, u] : kk === 2 ? [D - u, H - o] : [o, H - u];
     const pts = [[0, 0], [D - back[0][2], 0]];
     const edge = (kk, list, us, ue) => {
@@ -1614,7 +1624,11 @@
           asset ? h('button', { class: 'danger', onclick: () => { delete s.p.grabadoLogo; checkpoint(); fullRender(); } }, 'Quitar') : null));
         if (asset && asset.kind === 'image') box.append(h('p', { class: 'tip' }, 'Las imágenes PNG/JPG se graban como foto. Para un grabado más nítido usa el logo en SVG.'));
       } else if (kind && typeof kind === 'object') {
-        box.append(propRow(label, selectEl(kind, s.p[key] || Object.keys(kind)[0], label, v => { s.p[key] = v; checkpoint(); fullRender(); })));
+        box.append(propRow(label, selectEl(kind, s.p[key] || Object.keys(kind)[0], label, v => {
+          s.p[key] = v;
+          if (s.type === 'box' && key === 'dedoModo' && v === 'cantidad') fingerDefaults(s);
+          checkpoint(); fullRender();
+        })));
       } else if (s.type === 'box' && key === 'dedo' && s.p.uniones === 'planas') {
         continue;
       } else if (s.type === 'box' && SLIDE_KEYS.has(key)) {
@@ -1648,6 +1662,7 @@
         if (s.type === 'box' && key === 'holguraC') row.querySelector('input').placeholder = 'auto (1 mm por lado)';
         if (s.type === 'box' && key === 'grabadoTam') row.querySelector('input').placeholder = 'auto';
         box.append(row);
+        if (s.type === 'box' && key === 'nAlto') box.append(h('p', { class: 'tip', id: 'fingerTip' }));
       }
     }
 
@@ -1662,7 +1677,7 @@
     })));
     for (const [key, label] of REP_FIELDS[s.p.rep] || []) box.append(exprRow(s, key, label));
 
-    if (s.type === 'box') updateCompTip(s);
+    if (s.type === 'box') { updateCompTip(s); updateFingerTip(s); }
     if (s.type === 'import') {
       const a = doc.assets && doc.assets[s.p.asset];
       if (a) {
@@ -1697,10 +1712,35 @@
       h('button', { class: 'danger', onclick: deleteSel }, 'Eliminar')));
   }
 
+  // Cantidad de dedos equivalente al ancho de dedo actual (para que al cambiar de modo la caja no cambie)
+  function fingerDefaults(s) {
+    const fw = len(s, 'dedo', 10);
+    const n = mm => { let k = fw > 0 ? Math.floor(mm / fw) : 1; if (k < 1) k = 1; if (k % 2 === 0) k--; return String((k + 1) / 2); };
+    const W = len(s, 'ancho', 100), D = len(s, 'profundo', 80), H = len(s, 'alto', 60);
+    if (!s.p.nAncho) s.p.nAncho = n(W);
+    if (!s.p.nProf) s.p.nProf = n(D);
+    if (!s.p.nAlto) s.p.nAlto = n(H);
+  }
+  // Muestra cuánto mide cada dedo con la cantidad elegida
+  function updateFingerTip(s) {
+    const el = $('#fingerTip');
+    if (!el) return;
+    const m = boxModel(s, true);
+    if (!m) { el.textContent = ''; return; }
+    const u = v => fmt(v / unitMM, isInch() ? 3 : 1);
+    const seg = k => 2 * Math.max(1, Math.round(num(s, k, 3)) || 1) - 1;
+    const W = m.drawer ? m.W : m.W, D = m.D, H = m.H;
+    el.textContent = `Cada dedo mide ≈ ${u(W / seg('nAncho'))} ${unitLabel()} a lo ancho, ${u(D / seg('nProf'))} a lo profundo y ${u(H / seg('nAlto'))} a lo alto.`;
+  }
+
   // Campos de la caja que no aplican según las opciones elegidas
   function boxFieldHidden(s, key) {
     const drawer = s.p.cajon === 'si';
     if (key === 'holguraC' || key === 'nCaj') return !drawer;
+    const planas = s.p.uniones === 'planas', byCount = s.p.dedoModo === 'cantidad';
+    if (key === 'dedoModo') return planas;
+    if (key === 'nAncho' || key === 'nProf' || key === 'nAlto') return planas || !byCount;
+    if (key === 'dedo') return planas || byCount;
     if (drawer && key === 'tapa') return true;
     if (key === 'borde' || key === 'holgura') return drawer || s.p.tapa !== 'deslizante';
     if (key === 'agarre') return !(drawer || s.p.tapa === 'deslizante');
@@ -2781,7 +2821,7 @@
   function liveRender() {
     evaluateParams(); drawCanvas(); refreshHints();
     const one = sel.size === 1 && byId([...sel][0]);
-    if (one && one.type === 'box') updateCompTip(one);
+    if (one && one.type === 'box') { updateCompTip(one); updateFingerTip(one); }
     if (v3.open) build3D();
   }
   function fullRender() {
