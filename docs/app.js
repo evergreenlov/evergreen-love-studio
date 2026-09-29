@@ -177,6 +177,15 @@
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
         ['grabadoEn', 'Grabar en', ENGRAVE_OPTS], ['grabadoTexto', 'Texto', 'text'], ['grabadoTam', 'Tamaño del texto'], ['logoTam', 'Ancho del logo']],
     },
+    basket: {
+      label: 'Canasta', noOffset: true,
+      props: [['ancho', 'Ancho'], ['alto', 'Alto'], ['profundo', 'Largo'], ['t', 'Grosor material'], ['radio', 'Radio del fondo'],
+        ['nTab', 'Cantidad de tablillas'], ['sepTab', 'Separación tablillas'],
+        ['asa', 'Asa', { si: 'Con asa en arco', no: 'Sin asa' }], ['asaAlto', 'Alto del asa'], ['asaArco', 'Curva del asa'], ['asaAncho', 'Ancho del asa'],
+        ['asaTexto', 'Texto en el asa', 'text'],
+        ['frente', 'Marco decorativo', { si: 'Con marco al frente', no: 'Sin marco' }], ['marco', 'Ancho del marco'],
+        ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ['x', 'X'], ['y', 'Y'], ROT],
+    },
     import: {
       label: 'Archivo importado',
       props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['prop', 'Proporción', { si: 'Mantener proporción', no: 'Ancho y alto libres' }], ROT],
@@ -189,15 +198,15 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo']);
-  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente']);
+  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
   const PROMOTE_NAMES = {
     w: 'ancho', h: 'alto', d: 'diametro', r: 'radio', n: 'lados', t: 'grosor', dedo: 'dedo', kerf: 'kerf', tam: 'tam_texto',
     rot: 'giro', x: 'pos_x', y: 'pos_y', x2: 'fin_x', y2: 'fin_y', largo: 'largo_corte', puente: 'puente', paso: 'paso_bisagra',
-    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nAncho: 'dedos_ancho', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
+    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nTab: 'tablillas', sepTab: 'sep_tablillas', radio: 'radio_fondo', asaAlto: 'alto_asa', asaArco: 'curva_asa', asaAncho: 'ancho_asa', marco: 'marco', nAncho: 'dedos_ancho', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
     off: 'contorno', repN: 'cantidad', repM: 'filas', repDx: 'paso_x', repDy: 'paso_y', repCx: 'centro_x', repCy: 'centro_y', repA: 'angulo',
   };
 
@@ -698,6 +707,108 @@
     return { W, D, H, t, fingers, sep, panels, dividers: [], layout, drawer: { Wd, Hd, Dd, c, n } };
   }
 
+  /* ----- Canasta paramétrica ----- */
+  // Laterales en U (con poste del asa), tablillas alrededor de la U con pestañas a ranuras, asa en arco y marco opcional.
+  // Plano de cada pieza: u a la derecha, v hacia abajo (mm). 3D: X ancho, Y alto, Z largo (frente en Z = 0).
+  function basketModel(s, forView = false) {
+    const t = len(s, 't', 3), sep = len(s, 'sep', 5), kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
+    const W = len(s, 'ancho', 150), H = len(s, 'alto', 110), D = len(s, 'profundo', 220);
+    const given = key => s.p[key] && String(s.p[key]).trim();
+    const R = Math.max(0, Math.min(given('radio') ? len(s, 'radio') : Math.min(W / 2, H * 0.6), W / 2, H));
+    const N = Math.max(2, Math.min(40, Math.round(num(s, 'nTab', 7)) || 7));
+    const g = given('sepTab') ? len(s, 'sepTab') : 4;
+    const asa = (s.p.asa || 'si') === 'si';
+    const hA = given('asaAlto') ? len(s, 'asaAlto') : Math.max(40, H * 0.8);
+    const rise = given('asaArco') ? len(s, 'asaArco') : D * 0.18;
+    const bw = given('asaAncho') ? len(s, 'asaAncho') : 22;
+    const marco = given('marco') ? len(s, 'marco') : Math.max(10, 3 * t);
+    if (![t, sep, kerf, W, H, D, R, g, hA, rise, bw, marco].every(Number.isFinite) || t <= 0 || W <= 6 * t || H <= 4 * t || D <= 6 * t) return null;
+    // Recorrido de la U (sin el borde de arriba): lado izq. ↓, curva, fondo, curva, lado der. ↑
+    const segsU = [
+      { L: H - R, at: a => [[0, a], [0, 1]] },
+      { L: Math.PI * R / 2, at: a => { const th = Math.PI - a / (R || 1); return [[R + R * Math.cos(th), H - R + R * Math.sin(th)], [Math.sin(th), -Math.cos(th)]]; } },
+      { L: W - 2 * R, at: a => [[R + a, H], [1, 0]] },
+      { L: Math.PI * R / 2, at: a => { const th = Math.PI / 2 - a / (R || 1); return [[W - R + R * Math.cos(th), H - R + R * Math.sin(th)], [Math.sin(th), -Math.cos(th)]]; } },
+      { L: H - R, at: a => [[W, H - R - a], [0, -1]] },
+    ];
+    const Lp = segsU.reduce((a, q) => a + q.L, 0);
+    const pointAt = a => {
+      for (const q of segsU) { if (a <= q.L + 1e-9 || q === segsU[segsU.length - 1]) { const [p, tn] = q.at(Math.min(a, q.L)); return { p, tn, n: [tn[1], -tn[0]] }; } a -= q.L; }
+    };
+    const sw = (Lp - (N - 1) * g) / N; // ancho de cada tablilla
+    if (!(sw > 2 * t + 2)) return null;
+    const tw = Math.max(Math.min(sw * 0.5, 30), Math.min(sw - 2, 6)); // ancho de la pestaña
+    // Contorno de la U (con poste arriba si hay asa), sentido horario en pantalla
+    const arcPtsPlan = (cx, cy, r, a0, a1) => arcPts(cx, cy, r, a0, a1).slice(1);
+    const wp = Math.max(bw * 0.9, 3 * t + 8), vHead = -(hA - wp / 2);
+    const outline = [[0, 0]];
+    if (asa) outline.push([W / 2 - wp / 2, 0], [W / 2 - wp / 2, vHead], ...arcPtsPlan(W / 2, vHead, wp / 2, Math.PI, 2 * Math.PI), [W / 2 + wp / 2, 0]);
+    outline.push([W, 0], [W, H - R]);
+    if (R > 0) outline.push(...arcPtsPlan(W - R, H - R, R, 0, Math.PI / 2));
+    outline.push([R, H]);
+    if (R > 0) outline.push(...arcPtsPlan(R, H - R, R, Math.PI / 2, Math.PI));
+    const outlineU = outline.filter(([x, y]) => y >= 0);
+    const grow = (pts, d) => d ? (offsetPolys([{ closed: true, pts }], d)[0] || { pts }).pts : pts;
+    const rot = (c, tn, n, a, b) => [[-a, -b], [a, -b], [a, b], [-a, b]].map(([u, v]) => [c[0] + tn[0] * u + n[0] * v, c[1] + tn[1] * u + n[1] * v]);
+    const endHoles = [];
+    const panels = [];
+    const top = [0, 0 - (asa ? hA : 0)];
+    const shiftV = asa ? hA : 0; // el plano se corre hacia abajo para que empiece en v = 0
+    const sh = pts => pts.map(([u, v]) => [u, v + shiftV]);
+    // Tablillas
+    for (let i = 0; i < N; i++) {
+      const c = i * (sw + g) + sw / 2;
+      const { p, tn, n } = pointAt(c);
+      const sc = [p[0] + n[0] * t / 2, p[1] + n[1] * t / 2];
+      endHoles.push(grow(rot(sc, tn, n, tw / 2, t / 2), -k));
+      const a0 = (sw - tw) / 2, b0 = (sw + tw) / 2;
+      const pts = kerfOffset([[t, 0], [D - t, 0], [D - t, a0], [D, a0], [D, b0], [D - t, b0], [D - t, sw], [t, sw], [t, b0], [0, b0], [0, a0], [t, a0]], k);
+      const p3 = [p[0], H - p[1], 0], ev = [tn[0], -tn[1], 0], ew = [n[0], -n[1], 0];
+      panels.push({ name: `Tablilla ${i + 1}`, w: D, h: sw, holes: [], pts,
+        axes: { eu: [0, 0, 1], ev, ew, o: [p3[0] - ev[0] * sw / 2, p3[1] - ev[1] * sw / 2, 0], out: [-ew[0], -ew[1], 0] } });
+    }
+    // Ranura del asa en la cabeza del poste
+    const tabH = Math.min(bw * 0.6, wp - 6);
+    if (asa) endHoles.push(grow([[W / 2 - t / 2, vHead - tabH / 2], [W / 2 + t / 2, vHead - tabH / 2], [W / 2 + t / 2, vHead + tabH / 2], [W / 2 - t / 2, vHead + tabH / 2]], -k));
+    const endPts = sh(grow(outline, k)), holes = endHoles.map(sh);
+    const hEnd = H + shiftV;
+    panels.push({ name: 'Lateral frente', w: W, h: hEnd, pts: endPts, holes: holes.map(x => x.slice()),
+      axes: { eu: [1, 0, 0], ev: [0, -1, 0], ew: [0, 0, 1], o: [0, H + shiftV, 0], out: [0, 0, -1] } });
+    panels.push({ name: 'Lateral atrás', w: W, h: hEnd, pts: endPts, holes: holes.map(x => x.slice()),
+      axes: { eu: [-1, 0, 0], ev: [0, -1, 0], ew: [0, 0, -1], o: [W, H + shiftV, D], out: [0, 0, 1] } });
+    // Marco decorativo: mismo contorno con una ventana (se pega al frente y tapa las ranuras)
+    if ((s.p.frente || 'no') === 'si') {
+      const win = offsetPolys([{ closed: true, pts: outlineU }], -marco).map(pl => sh(grow(pl.pts, -k)));
+      panels.push({ name: 'Marco decorativo', w: W, h: hEnd, pts: endPts, holes: win,
+        axes: { eu: [1, 0, 0], ev: [0, -1, 0], ew: [0, 0, 1], o: [0, H + shiftV, -t], out: [0, 0, -1.6] } });
+    }
+    // Asa en arco: banda curva con pestañas que atraviesan los postes
+    if (asa) {
+      const Lc = D, c = Lc - 2 * t, r = (c * c / 4 + rise * rise) / (2 * rise || 1), cy = -rise + r;
+      const arcY = x => rise > 0 ? cy - Math.sqrt(Math.max(0, r * r - (x - Lc / 2) ** 2)) : 0;
+      const n = 40, xs = Array.from({ length: n + 1 }, (_, i) => t + c * i / n);
+      const a0 = (bw - tabH) / 2, b0 = (bw + tabH) / 2;
+      const pts = [...xs.map(x => [x, arcY(x)]),
+        [Lc - t, a0], [Lc, a0], [Lc, b0], [Lc - t, b0], [Lc - t, bw],
+        ...xs.slice().reverse().map(x => [x, arcY(x) + bw]),
+        [t, bw], [t, b0], [0, b0], [0, a0], [t, a0]];
+      const band = grow(cleanPolygon(pts), k).map(([u, v]) => [u, v + rise]);
+      const q = { name: 'Asa', w: Lc, h: bw + rise, holes: [], pts: band,
+        axes: { eu: [0, 0, 1], ev: [0, -1, 0], ew: [1, 0, 0], o: [W / 2 - t / 2, H + hA - wp / 2 + bw / 2 + rise, 0], out: [0, 1, 0] } };
+      // Texto a lo largo del arco (una letra por posición, girada según la curva)
+      const str = String(s.p.asaTexto || '').trim();
+      if (str) {
+        const size = bw * 0.5, adv = size * 0.62, total = adv * (str.length - 1);
+        q.texts = [...str].map((ch, i) => {
+          const x = Lc / 2 - total / 2 + i * adv, dy = (arcY(x + 0.5) - arcY(x - 0.5));
+          return { x, y: arcY(x) + bw / 2 + size * 0.35 + rise, size, str: ch, rot: Math.atan2(dy, 1) / DEG, anchor: 'middle' };
+        }).filter(tx => tx.str.trim());
+      }
+      panels.push(q);
+    }
+    return { W, D, H: H + (asa ? hA : 0), t, fingers: true, sep, panels, dividers: [], layout: [panels], basket: { sw, N } };
+  }
+
   // Lado para tapa deslizante (con dedos): canto de arriba liso, ranura abierta por el frente
   // y dedos del frente solo en la altura del frente (Hf).
   function slideSidePoints(D, H, t, fw, Hf, mTop, slotH, slotLen, kerf, counts) {
@@ -822,8 +933,9 @@
         it.polys.push({ closed: true, pts: pts.map(p => [p[0] + x, p[1] + y]) });
         break;
       }
-      case 'box': {
-        const m = boxModel(s);
+      case 'box':
+      case 'basket': {
+        const m = s.type === 'basket' ? basketModel(s) : boxModel(s);
         if (!m) return null;
         const x0 = len(s, 'x'), y0 = len(s, 'y');
         // Plano de corte: [frente, atrás] / [lados] / [base, tapa]
@@ -842,8 +954,10 @@
           x += q.w + m.sep;
           shelf = Math.max(shelf, q.h);
         }
-        const eng = boxEngraving(s, m, placed);
-        if (eng) return [it, eng];
+        const eng = boxEngraving(s, m, placed) || { op: 'grabado', polys: [], texts: [], images: [] };
+        // Textos propios de las piezas (p. ej. el texto del asa de la canasta)
+        for (const [q, [px, py]] of placed) for (const tx of q.texts || []) eng.texts.push({ ...tx, x: tx.x + px, y: tx.y + py });
+        if (eng.polys.length || eng.texts.length || eng.images.length) return [it, eng];
         break;
       }
       case 'import': {
@@ -1609,6 +1723,8 @@
         continue;
       } else if (s.type === 'import' && key === 'h' && s.p.prop !== 'no') {
         continue;
+      } else if (s.type === 'basket' && ((['asaAlto', 'asaArco', 'asaAncho', 'asaTexto'].includes(key) && s.p.asa === 'no') || (key === 'marco' && s.p.frente !== 'si'))) {
+        continue;
       } else if (s.type === 'box' && key === 'grabadoEn') {
         box.append(h('div', { class: 'insp-sub' }, 'Grabado (nombre o logo)'));
         box.append(propRow(label, selectEl(kind, s.p.grabadoEn || 'auto', label, v => { s.p.grabadoEn = v; checkpoint(); fullRender(); })));
@@ -1700,6 +1816,11 @@
         ? (m.drawer.n > 1 ? `${m.drawer.n} cajones. ` : '') + `Cada cajón por dentro: ${fmt((m.drawer.Wd - 2 * m.t) / unitMM, isInch() ? 3 : 1)} × ${fmt((m.drawer.Dd - 2 * m.t) / unitMM, isInch() ? 3 : 1)} × ${fmt((m.drawer.Hd - m.t) / unitMM, isInch() ? 3 : 1)} ${unitLabel()} (ancho × fondo × alto). El frente decorativo se pega al frente del cajón.`
         : 'Las medidas no alcanzan para el cajón: agranda la caja o baja la holgura.'));
     }
+    if (s.type === 'basket') {
+      box.append(h('p', { class: 'tip', id: 'basketTip' }));
+      updateBasketTip(s);
+      box.append(h('button', { class: 'primary wide', onclick: () => open3D(s.id) }, 'Ver canasta armada en 3D'));
+    }
     if (s.type === 'box') {
       box.append(h('button', { class: 'primary wide', onclick: () => open3D(s.id) }, 'Ver caja armada en 3D'));
       if (!boxModel(s)) box.append(h('p', { class: 'tip err-tip' }, 'Revisa las medidas: la caja debe ser más grande que dos veces el grosor.'));
@@ -1732,6 +1853,16 @@
     const seg = k => 2 * Math.max(1, Math.round(num(s, k, 3)) || 1) - 1;
     const W = m.drawer ? m.W : m.W, D = m.D, H = m.H;
     el.textContent = `Cada dedo mide ≈ ${u(W / seg('nAncho'))} ${unitLabel()} a lo ancho, ${u(D / seg('nProf'))} a lo profundo y ${u(H / seg('nAlto'))} a lo alto.`;
+  }
+
+  function updateBasketTip(s) {
+    const el = $('#basketTip');
+    if (!el) return;
+    const m = basketModel(s, true);
+    el.classList.toggle('err-tip', !m);
+    el.textContent = m
+      ? `${m.basket.N} tablillas de ${fmt(m.basket.sw / unitMM, isInch() ? 3 : 1)} ${unitLabel()} de ancho. Las ranuras miden lo mismo que el grosor, así que siempre encajan con tu madera.`
+      : 'Las medidas no alcanzan: usa menos tablillas, menos separación o una canasta más grande.';
   }
 
   /* ----- Escalar varias piezas juntas ----- */
@@ -2629,6 +2760,19 @@
   const tv = (mm, units) => units === 'in' ? fmt(Math.round(mm / 25.4 * 16) / 16) : fmt(mm);
   const node = (type, name, op, p, children) => ({ id: uid(), type, name, op, p, ...(children ? { children } : {}) });
 
+  function basketTemplate(units, sheet) {
+    const d = newDoc(units);
+    if (sheet) d.sheet = { ...sheet };
+    d.name = 'Canasta';
+    d.params = [['ancho', tv(150, units)], ['alto', tv(110, units)], ['largo', tv(220, units)], ['grosor', units === 'in' ? '0.125' : '3'],
+      ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
+    d.shapes = [node('basket', 'Canasta', 'corte', {
+      ancho: 'ancho', alto: 'alto', profundo: 'largo', t: 'grosor', nTab: '7', sepTab: tv(4, units), asa: 'si', asaTexto: "HAPPY MOTHER'S DAY",
+      frente: 'si', kerf: 'kerf', sep: 'sep', x: '0', y: '0', rot: '0', rep: 'no',
+    })];
+    return d;
+  }
+
   function keychainTemplate(units, sheet) {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
@@ -2680,6 +2824,7 @@
     'box-planas': (u, s) => boxTemplate('planas', u, s),
     'box-slide': (u, s) => boxTemplate('dedos', u, s, 'deslizante'),
     'box-drawer': (u, s) => boxTemplate('dedos', u, s, 'si', 'si'),
+    basket: basketTemplate,
     keychain: keychainTemplate,
     coasters: coasterTemplate,
     hinge: hingeTemplate,
@@ -2746,7 +2891,7 @@
       });
       v3.group.remove(c);
     }
-    const m = s && boxModel(s, true);
+    const m = s && (s.type === 'basket' ? basketModel(s, true) : boxModel(s, true));
     v3.model = m;
     $('#view3dMsg').hidden = !!m;
     if (!m) { $('#view3dMsg').textContent = 'Las medidas de la caja no son válidas: revisa que sea más grande que dos veces el grosor.'; return; }
@@ -2863,8 +3008,8 @@
   }
   function open3D(id) {
     if (!id) {
-      const pick = [...sel].map(byId).find(s => s && s.type === 'box');
-      const any = allShapes().find(s => s.type === 'box');
+      const pick = [...sel].map(byId).find(s => s && (s.type === 'box' || s.type === 'basket'));
+      const any = allShapes().find(s => s.type === 'box' || s.type === 'basket');
       id = (pick || any || {}).id;
     }
     if (!id) { msg('La vista 3D muestra objetos Caja. Crea una con Plantillas → Caja o con la herramienta Caja (K).'); return; }
@@ -2892,6 +3037,7 @@
     evaluateParams(); drawCanvas(); refreshHints();
     const one = sel.size === 1 && byId([...sel][0]);
     if (one && one.type === 'box') { updateCompTip(one); updateFingerTip(one); }
+    if (one && one.type === 'basket') updateBasketTip(one);
     if (v3.open) build3D();
   }
   function fullRender() {
