@@ -1763,9 +1763,9 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
-        shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1)
-          ? h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')
-          : null,
+        ...(shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1)
+          ? [h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')]
+          : []),
         ...scaleSection(shapes),
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
         h('div', { class: 'insp-sub' }, 'Combinar'),
@@ -2403,28 +2403,9 @@
         if (el.closest('defs, clipPath, mask, symbol, marker, pattern')) continue;
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
-        const L = el.getTotalLength();
         const m = el.getCTM();
-        if (!(L > 0) || !m) continue;
-        const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
-        const n = Math.min(6000, Math.max(24, Math.ceil(L * scale / 0.4)));
-        const step = L / n;
-        let cur = [], prev = null;
-        const flush = () => {
-          if (cur.length >= 2) {
-            const a = cur[0], b = cur[cur.length - 1];
-            const closed = Math.hypot(a[0] - b[0], a[1] - b[1]) < step * scale * 2 || /^(rect|circle|ellipse|polygon)$/i.test(el.nodeName);
-            polys.push({ closed, pts: closed && cur.length > 2 ? cur.slice(0, -1) : cur });
-          }
-          cur = [];
-        };
-        for (let i = 0; i <= n; i++) {
-          const pt = el.getPointAtLength(Math.min(L, i * step));
-          const q = [m.a * pt.x + m.c * pt.y + m.e, m.b * pt.x + m.d * pt.y + m.f];
-          if (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) > step * scale * 3) flush(); // salto = nuevo subtrazo
-          cur.push(q); prev = q;
-        }
-        flush();
+        if (!m) continue;
+        polys.push(...svgShapePolys(el, m, 1, 0.3));
       }
     } finally { host.remove(); }
     if (!polys.length) throw new Error('no se encontraron figuras (si el logo tiene textos, conviértelos a trazos en tu programa de diseño)');
@@ -2561,6 +2542,125 @@
     return 'corte';
   }
 
+  // Lee la geometría de un elemento SVG directamente (rápido aun con miles de trazos) y la aplana en polilíneas.
+  // m: matriz del elemento (getCTM); k: factor a mm; tolMM: precisión de las curvas.
+  function svgShapePolys(el, m, k, tolMM) {
+    const A = (n, d = 0) => { const v = parseFloat(el.getAttribute(n)); return Number.isFinite(v) ? v : d; };
+    let d = '';
+    switch (el.nodeName.toLowerCase()) {
+      case 'path': d = el.getAttribute('d') || ''; break;
+      case 'rect': {
+        const x = A('x'), y = A('y'), w = A('width'), hh = A('height');
+        let rx = A('rx', NaN), ry = A('ry', NaN);
+        if (!Number.isFinite(rx)) rx = Number.isFinite(ry) ? ry : 0;
+        if (!Number.isFinite(ry)) ry = rx;
+        rx = Math.min(rx, w / 2); ry = Math.min(ry, hh / 2);
+        d = rx > 0 && ry > 0
+          ? `M${x + rx} ${y}H${x + w - rx}A${rx} ${ry} 0 0 1 ${x + w} ${y + ry}V${y + hh - ry}A${rx} ${ry} 0 0 1 ${x + w - rx} ${y + hh}H${x + rx}A${rx} ${ry} 0 0 1 ${x} ${y + hh - ry}V${y + ry}A${rx} ${ry} 0 0 1 ${x + rx} ${y}Z`
+          : `M${x} ${y}H${x + w}V${y + hh}H${x}Z`;
+        break;
+      }
+      case 'circle': case 'ellipse': {
+        const cx = A('cx'), cy = A('cy'), rx = el.nodeName === 'circle' ? A('r') : A('rx'), ry = el.nodeName === 'circle' ? A('r') : A('ry');
+        d = `M${cx - rx} ${cy}A${rx} ${ry} 0 1 0 ${cx + rx} ${cy}A${rx} ${ry} 0 1 0 ${cx - rx} ${cy}Z`;
+        break;
+      }
+      case 'line': d = `M${A('x1')} ${A('y1')}L${A('x2')} ${A('y2')}`; break;
+      case 'polyline': case 'polygon': {
+        const nums = (el.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number);
+        const pts = [];
+        for (let i = 0; i + 1 < nums.length; i += 2) pts.push(`${nums[i]} ${nums[i + 1]}`);
+        d = pts.length ? 'M' + pts.join('L') + (el.nodeName.toLowerCase() === 'polygon' ? 'Z' : '') : '';
+        break;
+      }
+    }
+    const scale = (Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1) * k;
+    const out = flattenPathD(d, tolMM / scale);
+    return out.map(pl => ({ closed: pl.closed, pts: pl.pts.map(([x, y]) => [(m.a * x + m.c * y + m.e) * k, (m.b * x + m.d * y + m.f) * k]) }))
+      .filter(pl => pl.pts.length >= 2);
+  }
+
+  // Convierte el atributo "d" de un path SVG en polilíneas (líneas, curvas de Bézier y arcos, absolutos y relativos).
+  function flattenPathD(d, tol) {
+    const toks = d.match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+    const out = [];
+    let i = 0, cmd = '', x = 0, y = 0, sx = 0, sy = 0, lc = null, lq = null, cur = null;
+    const isNum = () => i < toks.length && !/^[a-zA-Z]$/.test(toks[i]);
+    const num = () => parseFloat(toks[i++]);
+    const flag = () => { const t = toks[i]; if (t.length > 1 && /^[01]/.test(t)) { toks[i] = t.slice(1); return +t[0]; } i++; return +t; };
+    const start = (px, py) => { if (cur && cur.pts.length > 1) out.push(cur); cur = { closed: false, pts: [[px, py]] }; sx = px; sy = py; };
+    const lineTo = (px, py) => { if (!cur) start(x, y); cur.pts.push([px, py]); };
+    const cubic = (x1, y1, x2, y2, x3, y3) => {
+      const L = Math.hypot(x1 - x, y1 - y) + Math.hypot(x2 - x1, y2 - y1) + Math.hypot(x3 - x2, y3 - y2);
+      const n = Math.max(2, Math.min(200, Math.ceil(Math.sqrt(L / (tol || 1e-3)))));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n, u = 1 - t;
+        lineTo(u * u * u * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3, u * u * u * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3);
+      }
+    };
+    const arc = (rx, ry, phi, fa, fs, x2, y2) => {
+      if (!rx || !ry) { lineTo(x2, y2); return; }
+      rx = Math.abs(rx); ry = Math.abs(ry);
+      const c = Math.cos(phi * DEG), s = Math.sin(phi * DEG);
+      const dx = (x - x2) / 2, dy = (y - y2) / 2, x1p = c * dx + s * dy, y1p = -s * dx + c * dy;
+      const lam = x1p * x1p / (rx * rx) + y1p * y1p / (ry * ry);
+      if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+      const nu = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p, de = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+      let co = Math.sqrt(Math.max(0, nu / (de || 1)));
+      if (fa === fs) co = -co;
+      const cxp = co * rx * y1p / ry, cyp = -co * ry * x1p / rx;
+      const cx = c * cxp - s * cyp + (x + x2) / 2, cy = s * cxp + c * cyp + (y + y2) / 2;
+      const ang = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+      const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+      let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+      if (!fs && dt > 0) dt -= 2 * Math.PI; else if (fs && dt < 0) dt += 2 * Math.PI;
+      const R = Math.max(rx, ry), step = 2 * Math.acos(Math.max(-1, 1 - Math.min(tol / R, 1)));
+      const n = Math.max(2, Math.min(720, Math.ceil(Math.abs(dt) / (step || 0.1))));
+      for (let k = 1; k <= n; k++) {
+        const t = t1 + dt * k / n;
+        lineTo(cx + rx * Math.cos(t) * c - ry * Math.sin(t) * s, cy + rx * Math.cos(t) * s + ry * Math.sin(t) * c);
+      }
+    };
+    while (i < toks.length) {
+      if (/^[a-zA-Z]$/.test(toks[i])) cmd = toks[i++];
+      else if (!cmd) { i++; continue; }
+      const rel = cmd !== cmd.toUpperCase(), C = cmd.toUpperCase();
+      if (C === 'Z') {
+        if (cur) { cur.closed = true; out.push(cur); cur = null; }
+        x = sx; y = sy; lc = lq = null;
+        continue;
+      }
+      do {
+        const ox = rel ? x : 0, oy = rel ? y : 0;
+        switch (C) {
+          case 'M': { const px = num() + ox, py = num() + oy; start(px, py); x = px; y = py; cmd = rel ? 'l' : 'L'; lc = lq = null; break; }
+          case 'L': { const px = num() + ox, py = num() + oy; lineTo(px, py); x = px; y = py; lc = lq = null; break; }
+          case 'H': { const px = num() + ox; lineTo(px, y); x = px; lc = lq = null; break; }
+          case 'V': { const py = num() + oy; lineTo(x, py); y = py; lc = lq = null; break; }
+          case 'C': { const x1 = num() + ox, y1 = num() + oy, x2 = num() + ox, y2 = num() + oy, x3 = num() + ox, y3 = num() + oy; cubic(x1, y1, x2, y2, x3, y3); lc = [x2, y2]; lq = null; x = x3; y = y3; break; }
+          case 'S': { const x1 = lc ? 2 * x - lc[0] : x, y1 = lc ? 2 * y - lc[1] : y, x2 = num() + ox, y2 = num() + oy, x3 = num() + ox, y3 = num() + oy; cubic(x1, y1, x2, y2, x3, y3); lc = [x2, y2]; lq = null; x = x3; y = y3; break; }
+          case 'Q': case 'T': {
+            let qx, qy;
+            if (C === 'Q') { qx = num() + ox; qy = num() + oy; } else { qx = lq ? 2 * x - lq[0] : x; qy = lq ? 2 * y - lq[1] : y; }
+            const x3 = num() + ox, y3 = num() + oy;
+            cubic(x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y), x3 + 2 / 3 * (qx - x3), y3 + 2 / 3 * (qy - y3), x3, y3);
+            lq = [qx, qy]; lc = null; x = x3; y = y3; break;
+          }
+          case 'A': { const rx = num(), ry = num(), phi = num(), fa = flag(), fs = flag(), px = num() + ox, py = num() + oy; arc(rx, ry, phi, fa, fs, px, py); x = px; y = py; lc = lq = null; break; }
+          default: i++;
+        }
+      } while (isNum());
+    }
+    if (cur && cur.pts.length > 1) out.push(cur);
+    // Si el trazo termina donde empezó, se considera cerrado
+    for (const pl of out) {
+      const a = pl.pts[0], b = pl.pts[pl.pts.length - 1];
+      if (!pl.closed && pl.pts.length > 2 && Math.hypot(a[0] - b[0], a[1] - b[1]) < Math.max(tol * 2, 1e-6)) pl.closed = true;
+      if (pl.closed && pl.pts.length > 2) { const z = pl.pts[pl.pts.length - 1]; if (Math.hypot(a[0] - z[0], a[1] - z[1]) < 1e-9) pl.pts.pop(); }
+    }
+    return out;
+  }
+
   function importSvgFile(text, name) {
     const parsed = new DOMParser().parseFromString(text, 'image/svg+xml');
     const root = parsed.documentElement;
@@ -2601,28 +2701,9 @@
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
         const op = opFromStyle(cs);
         if (!op) continue; // relleno blanco: fondo
-        const L = el.getTotalLength(), m = el.getCTM();
-        if (!(L > 0) || !m) continue;
-        const k = 25.4 / 96; // px CSS → mm
-        const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) * k || k;
-        const n = Math.min(8000, Math.max(16, Math.ceil(L * scale / 0.25)));
-        const step = L / n;
-        let cur = [], prev = null;
-        const flush = () => {
-          if (cur.length >= 2) {
-            const a = cur[0], b = cur[cur.length - 1];
-            const closed = Math.hypot(a[0] - b[0], a[1] - b[1]) < step * scale * 2 || /^(rect|circle|ellipse|polygon)$/i.test(el.nodeName);
-            polys.push({ closed, op, pts: closed && cur.length > 2 ? cur.slice(0, -1) : cur });
-          }
-          cur = [];
-        };
-        for (let i = 0; i <= n; i++) {
-          const pt = el.getPointAtLength(Math.min(L, i * step));
-          const q = [(m.a * pt.x + m.c * pt.y + m.e) * k, (m.b * pt.x + m.d * pt.y + m.f) * k];
-          if (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) > step * scale * 3) flush();
-          cur.push(q); prev = q;
-        }
-        flush();
+        const m = el.getCTM();
+        if (!m) continue;
+        for (const pl of svgShapePolys(el, m, 25.4 / 96, 0.05)) polys.push({ ...pl, op }); // px CSS → mm
       }
     } finally { host.remove(); }
     if (!polys.length && !texts.length) throw new Error('no se encontraron figuras');
@@ -3155,7 +3236,54 @@
   $('#docName').addEventListener('change', checkpoint);
 
   const menu = $('#menuTemplates');
-  $('#btnTemplates').onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+  $('#btnTemplates').onclick = e => { e.stopPropagation(); if (menu.hidden) buildUserTemplates(); menu.hidden = !menu.hidden; };
+
+  /* ----- Mis plantillas: diseños guardados en este navegador para reusarlos ----- */
+  const TPL_KEY = 'evergreen-love-studio:plantillas';
+  function readUserTemplates() {
+    try { return JSON.parse(localStorage.getItem(TPL_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function writeUserTemplates(list) {
+    try { localStorage.setItem(TPL_KEY, JSON.stringify(list)); return true; }
+    catch (e) { msg('No hay espacio en el navegador para más plantillas. Guarda el diseño como archivo (Guardar) y ábrelo cuando lo necesites.'); return false; }
+  }
+  function buildUserTemplates() {
+    const box = $('#userTemplates');
+    box.replaceChildren();
+    const list = readUserTemplates();
+    box.append(h('div', { class: 'menu-title' }, 'Mis plantillas'));
+    if (!list.length) box.append(h('p', { class: 'menu-empty' }, 'Todavía no tienes. Abre o importa un diseño y usa "Guardar como plantilla".'));
+    for (const tpl of list) {
+      box.append(h('div', { class: 'menu-row' },
+        h('button', { class: 'menu-item', title: 'Abrir esta plantilla', onclick: () => {
+          menu.hidden = true;
+          if (doc.shapes.length && !confirm(`Abrir la plantilla "${tpl.name}" reemplaza el diseño actual (puedes volver con Deshacer). ¿Continuar?`)) return;
+          checkpoint();
+          loadDoc(JSON.parse(JSON.stringify(tpl.doc)));
+          checkpoint(); fullRender(); fitView();
+          msg(`Plantilla abierta: ${tpl.name}`);
+        } }, tpl.name),
+        h('button', { class: 'icon-btn del', title: 'Borrar esta plantilla', 'aria-label': 'Borrar ' + tpl.name, onclick: ev => {
+          ev.stopPropagation();
+          if (!confirm(`¿Borrar la plantilla "${tpl.name}"? Tu diseño actual no se toca.`)) return;
+          writeUserTemplates(readUserTemplates().filter(x => x.id !== tpl.id));
+          buildUserTemplates();
+        } }, '×')));
+    }
+  }
+  $('#btnSaveTemplate').onclick = e => {
+    e.stopPropagation();
+    menu.hidden = true;
+    if (!doc.shapes.length) { msg('El diseño está vacío: primero abre, importa o dibuja algo.'); return; }
+    const name = (prompt('Nombre de la plantilla:', doc.name || 'Mi plantilla') || '').trim();
+    if (!name) return;
+    const list = readUserTemplates();
+    const same = list.find(x => x.name === name);
+    if (same && !confirm(`Ya tienes una plantilla "${name}". ¿Reemplazarla?`)) return;
+    const entry = { id: same ? same.id : uid(), name, date: new Date().toISOString(), doc: JSON.parse(JSON.stringify({ ...doc, name })) };
+    const next = same ? list.map(x => x.id === same.id ? entry : x) : [...list, entry];
+    if (writeUserTemplates(next)) msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
+  };
   document.addEventListener('click', () => { menu.hidden = true; });
   menu.addEventListener('click', e => {
     const b = e.target.closest('[data-template]');
