@@ -1559,6 +1559,9 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
+        shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector')
+          ? h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')
+          : null,
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
         h('div', { class: 'insp-sub' }, 'Combinar'),
         sameList
@@ -2194,6 +2197,17 @@
     sel = new Set([s.id]);
     checkpoint(); fullRender(); fitView();
     const size = `${fmt(w / unitMM, 2)} × ${fmt(w * asset.h / asset.w / unitMM, 2)} ${unitLabel()}`;
+    // Si el archivo trae varias piezas, cada una queda como objeto independiente (Deshacer las vuelve a juntar)
+    const pieces = asset.kind === 'vector' ? splitPieces(asset.polys).length : 1;
+    if (pieces > 1 && pieces <= 300) {
+      const created = splitImport(s, false);
+      if (created) {
+        sel = new Set(created.map(c => c.id));
+        checkpoint(); fullRender();
+        msg(`Importado: ${file.name} · ${size} · ${created.length} piezas independientes (Deshacer para dejarlas juntas)` + (asset.warning ? ` · ${asset.warning}` : ''));
+        return;
+      }
+    }
     msg(`Importado: ${file.name} · ${size}` + (asset.kind === 'vector' ? ` · ${asset.polys.length} trazo(s)` : '') + (asset.warning ? ` · ${asset.warning}` : ''));
   }
 
@@ -2432,15 +2446,36 @@
   }
 
   // Convierte un archivo importado en varios objetos (uno por pieza) en la misma posición
+  // Separa uno o varios objetos importados; cada pieza queda como objeto independiente en su mismo lugar.
   function explodeImport(s, eachStroke = false) {
+    const created = splitImport(s, eachStroke);
+    if (!created) return;
+    sel = new Set(created.map(c => c.id));
+    checkpoint(); fullRender();
+    msg(`Separado en ${created.length} piezas: ahora puedes mover, borrar o cambiar cada una.`);
+  }
+  function explodeMany(shapes) {
+    const all = [];
+    for (const s of shapes) { const c = splitImport(s, false); if (c) all.push(...c); }
+    if (!all.length) { msg('No hay piezas para separar.'); return; }
+    sel = new Set(all.map(c => c.id));
+    checkpoint(); fullRender();
+    msg(`Separado en ${all.length} piezas independientes.`);
+  }
+  function splitImport(s, eachStroke = false) {
     const a = doc.assets[s.p.asset];
-    if ((num(s, 'rot', 0) || 0) !== 0) { msg('Pon la rotación en 0 antes de separar las piezas.'); return; }
+    if (!a || a.kind !== 'vector') return null;
     const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w'));
     const sy = (s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * a.h / a.w) / (a.h / a.w);
+    // Si el objeto está rotado, la rotación se aplica a cada pieza (quedan en el mismo lugar, con rotación 0)
+    const rot = num(s, 'rot', 0) || 0;
+    const rm = rot ? mR(rot, x + w / 2, y + a.h * sy / 2) : null;
+    const place = ([u, v]) => { const p = [x + u * w, y + v * sy]; return rm ? apply(rm, p) : p; };
     const list = listOf(s.id), at = list.indexOf(s);
     const groups = eachStroke ? a.polys.map(pl => [pl]) : splitPieces(a.polys);
+    if (groups.length < 2 && !(a.texts || []).length) return null;
     const created = groups.map((group, k) => {
-      const polys = group.map(pl => ({ ...pl, pts: pl.pts.map(([u, v]) => [x + u * w, y + v * sy]) }));
+      const polys = group.map(pl => ({ ...pl, pts: pl.pts.map(place) }));
       const asset = vectorAsset(polys, `${a.name} · pieza ${k + 1}`);
       const id = 'a' + uid();
       doc.assets[id] = asset;
@@ -2450,7 +2485,7 @@
     });
     if ((a.texts || []).length) {
       // Los textos pasan juntos a un objeto propio
-      const texts = a.texts.map(t => ({ ...t, x: x + t.x * w, y: y + t.y * sy, size: t.size * w }));
+      const texts = a.texts.map(t => { const [tx, ty] = place([t.x, t.y]); return { ...t, x: tx, y: ty, size: t.size * w, rot: (t.rot || 0) + rot }; });
       const asset = vectorAsset([], `${a.name} · textos`, { texts });
       const id = 'a' + uid();
       doc.assets[id] = asset;
@@ -2459,9 +2494,7 @@
       created.push({ id: uid(), type: 'import', name: `${s.name} textos`, op: s.op, p: { asset: id, x: fmt(px / unitMM), y: fmt(py / unitMM), w: fmt(asset.realW / unitMM, 3), h: fmt(asset.realH / unitMM, 3), prop: 'si', rot: '0' } });
     }
     list.splice(at, 1, ...created);
-    sel = new Set(created.map(c => c.id));
-    checkpoint(); fullRender();
-    msg(`Separado en ${created.length} piezas: ahora puedes mover, borrar o cambiar cada una.`);
+    return created;
   }
 
   /* ================= Plantillas ================= */
