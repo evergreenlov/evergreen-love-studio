@@ -856,6 +856,11 @@
           if (!byOp.has(op)) byOp.set(op, { op, polys: [], texts: [], images: [] });
           byOp.get(op).polys.push({ closed: pl.closed, pts: pl.pts.map(([u, v]) => [x + u * w, y + v * sy]) });
         }
+        for (const t of a.texts || []) {
+          const op = s.op === 'archivo' ? (t.op || 'grabado') : s.op;
+          if (!byOp.has(op)) byOp.set(op, { op, polys: [], texts: [], images: [] });
+          byOp.get(op).texts.push({ ...t, x: x + t.x * w, y: y + t.y * sy, size: t.size * w });
+        }
         const list = [...byOp.values()];
         return list.length ? list : null;
       }
@@ -1917,6 +1922,8 @@
       '<?xml version="1.0" encoding="UTF-8"?>',
       `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${r4(w)}mm" height="${r4(hgt)}mm" viewBox="${r4(x)} ${r4(y)} ${r4(w)} ${r4(hgt)}">`,
       `<!-- ${esc(doc.name)} · Evergreen Love Studio · rojo = corte, negro = grabado, azul = marcado -->`,
+      // Copia del diseño editable: al abrir este SVG en Evergreen Love Studio se recupera todo (los programas de corte la ignoran)
+      `<metadata id="evergreen-love-studio">${designPayload()}</metadata>`,
     ];
     for (const op of Object.keys(OPS)) {
       const group = items.filter(it => it.op === op);
@@ -1958,6 +1965,10 @@
     const out = [];
     const g = (code, val) => { out.push(String(code), String(val)); };
     const dxfStr = s => s.replace(/[^\x20-\x7E]/g, c => '\\U+' + c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0'));
+    // Copia del diseño editable en comentarios (código 999), que los programas de CAD y corte ignoran
+    const payload = designPayload();
+    g(999, 'Evergreen Love Studio: ' + dxfStr(doc.name || ''));
+    for (let i = 0; i < payload.length; i += 200) g(999, 'ELS:' + payload.slice(i, i + 200));
     g(0, 'SECTION'); g(2, 'HEADER');
     g(9, '$ACADVER'); g(1, 'AC1009');
     g(9, '$INSUNITS'); g(70, 4);
@@ -2127,10 +2138,45 @@
   /* ================= Importar SVG, DXF e imágenes como objetos editables ================= */
   const OP_BY_NAME = n => /grab|engrav/i.test(n) ? 'grabado' : /marc|score/i.test(n) ? 'marcado' : null;
 
+  // Diseño completo en base64 (UTF-8) para guardarlo dentro de los archivos exportados
+  function designPayload() {
+    const bytes = new TextEncoder().encode(JSON.stringify(doc));
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function readPayload(b64) {
+    const bin = atob(b64.replace(/\s+/g, ''));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  // ¿El archivo fue exportado por esta aplicación? Devuelve el diseño guardado dentro
+  function embeddedDesign(text, isDxf) {
+    try {
+      if (isDxf) {
+        const parts = [], lines = text.split(/\r?\n/);
+        for (let i = 0; i + 1 < lines.length; i++) if (lines[i].trim() === '999' && lines[i + 1].startsWith('ELS:')) parts.push(lines[i + 1].slice(4).trim());
+        return parts.length ? readPayload(parts.join('')) : null;
+      }
+      const m = /<metadata id="evergreen-love-studio">([\s\S]*?)<\/metadata>/.exec(text);
+      return m ? readPayload(m[1]) : null;
+    } catch (e) { return null; }
+  }
+
   async function importFile(file) {
     let asset;
-    if (/\.dxf$/i.test(file.name)) asset = importDxf(await file.text(), file.name);
-    else if (/\.svg$/i.test(file.name) || /svg/.test(file.type)) asset = importSvgFile(await file.text(), file.name);
+    const isDxf = /\.dxf$/i.test(file.name), isSvg = /\.svg$/i.test(file.name) || /svg/.test(file.type);
+    const text = isDxf || isSvg ? await file.text() : null;
+    const design = text && embeddedDesign(text, isDxf);
+    if (design && confirm(`"${file.name}" se hizo con Evergreen Love Studio.\n\nAceptar: abrirlo como diseño editable (con sus medidas, parámetros y opciones). Reemplaza el diseño actual; puedes volver con Deshacer.\nCancelar: agregarlo al diseño actual como figuras.`)) {
+      checkpoint();
+      loadDoc(design);
+      checkpoint(); fullRender(); fitView();
+      msg('Diseño abierto para editar: ' + file.name);
+      return;
+    }
+    if (isDxf) asset = importDxf(text, file.name);
+    else if (isSvg) asset = importSvgFile(text, file.name);
     else { asset = await importImageLogo(file); asset.realW = 50; }
     const id = 'a' + uid();
     doc.assets = doc.assets || {};
@@ -2154,14 +2200,18 @@
   // Normaliza trazos en mm a ancho 1 (para poder escalarlos) y guarda su tamaño real
   function vectorAsset(polys, name, extra = {}) {
     polys = polys.filter(pl => pl.pts.length >= 2);
-    if (!polys.length) throw new Error('no se encontraron figuras');
+    const texts = extra.texts || [];
+    if (!polys.length && !texts.length) throw new Error('no se encontraron figuras');
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const pl of polys) for (const [x, y] of pl.pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+    const add = ([x, y]) => { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; };
+    for (const pl of polys) pl.pts.forEach(add);
+    for (const t of texts) textCorners(t).forEach(add);
     const W = (x1 - x0) || 1, H = (y1 - y0) || 1;
     const r6 = v => Math.round(v * 1e6) / 1e6;
     return {
       kind: 'vector', name, w: 1, h: H / W, realW: W, realH: H, ...extra,
       polys: polys.map(pl => ({ closed: pl.closed, op: pl.op, pts: pl.pts.map(([x, y]) => [r6((x - x0) / W), r6((y - y0) / W)]) })),
+      texts: texts.map(t => ({ ...t, x: r6((t.x - x0) / W), y: r6((t.y - y0) / W), size: r6(t.size / W) })),
     };
   }
 
@@ -2194,10 +2244,22 @@
     const svgNode = document.importNode(root, true);
     host.append(svgNode);
     document.body.append(host);
-    const polys = [];
+    const polys = [], texts = [];
     let skippedText = 0;
     try {
-      skippedText = svgNode.querySelectorAll('text').length;
+      // Textos: se conservan como texto (posición, tamaño, giro y operación según su color)
+      for (const el of svgNode.querySelectorAll('text')) {
+        if (el.closest('defs, clipPath, mask, symbol')) continue;
+        const str = el.textContent.trim(), m = el.getCTM();
+        if (!str || !m) { skippedText++; continue; }
+        const cs = getComputedStyle(el), k = 25.4 / 96;
+        const x = parseFloat(el.getAttribute('x')) || 0, y = parseFloat(el.getAttribute('y')) || 0;
+        const size = parseFloat(cs.fontSize) * Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) * k;
+        texts.push({
+          x: (m.a * x + m.c * y + m.e) * k, y: (m.b * x + m.d * y + m.f) * k, size, str,
+          rot: Math.atan2(m.b, m.a) / DEG, anchor: cs.textAnchor === 'middle' ? 'middle' : null, op: opFromStyle(cs) || 'grabado',
+        });
+      }
       for (const el of svgNode.querySelectorAll('path, rect, circle, ellipse, polygon, polyline, line')) {
         if (el.closest('defs, clipPath, mask, symbol, marker, pattern')) continue;
         const cs = getComputedStyle(el);
@@ -2228,8 +2290,8 @@
         flush();
       }
     } finally { host.remove(); }
-    if (!polys.length) throw new Error('no se encontraron figuras' + (skippedText ? ' (los textos deben convertirse a trazos)' : ''));
-    return vectorAsset(polys, name, skippedText ? { warning: `${skippedText} texto(s) sin convertir a trazos no se importaron` } : {});
+    if (!polys.length && !texts.length) throw new Error('no se encontraron figuras');
+    return vectorAsset(polys, name, { texts, ...(skippedText ? { warning: `${skippedText} texto(s) vacíos no se importaron` } : {}) });
   }
 
   // DXF: líneas, polilíneas (con arcos), círculos, arcos, elipses y splines. Unidades según $INSUNITS.
@@ -2386,6 +2448,16 @@
       const px = Math.min(...all.map(p => p[0])), py = Math.min(...all.map(p => p[1]));
       return { id: uid(), type: 'import', name: `${s.name} ${k + 1}`, op: s.op, p: { asset: id, x: fmt(px / unitMM), y: fmt(py / unitMM), w: fmt(asset.realW / unitMM, 3), h: fmt(asset.realH / unitMM, 3), prop: 'si', rot: '0' } };
     });
+    if ((a.texts || []).length) {
+      // Los textos pasan juntos a un objeto propio
+      const texts = a.texts.map(t => ({ ...t, x: x + t.x * w, y: y + t.y * sy, size: t.size * w }));
+      const asset = vectorAsset([], `${a.name} · textos`, { texts });
+      const id = 'a' + uid();
+      doc.assets[id] = asset;
+      const corners = texts.flatMap(textCorners);
+      const px = Math.min(...corners.map(p => p[0])), py = Math.min(...corners.map(p => p[1]));
+      created.push({ id: uid(), type: 'import', name: `${s.name} textos`, op: s.op, p: { asset: id, x: fmt(px / unitMM), y: fmt(py / unitMM), w: fmt(asset.realW / unitMM, 3), h: fmt(asset.realH / unitMM, 3), prop: 'si', rot: '0' } });
+    }
     list.splice(at, 1, ...created);
     sel = new Set(created.map(c => c.id));
     checkpoint(); fullRender();
