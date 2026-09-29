@@ -242,3 +242,10 @@ button.wide { width: 100%; margin-top: 10px; }
 .logo-name { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .engrave-img { opacity: .75; }
 .dot.op-archivo { background: linear-gradient(90deg, var(--cut) 50%, var(--engrave) 50%); }
+
+/* Controles para escalar y girar */
+.handle { fill: var(--panel); stroke: var(--sel); stroke-width: 1.5px; pointer-events: all; }
+.handle.nw, .handle.se { cursor: nwse-resize; }
+.handle.ne, .handle.sw { cursor: nesw-resize; }
+.handle.rot { cursor: grab; fill: var(--sel); }
+.handle-line { stroke: var(--sel); stroke-width: 1px; pointer-events: none; }

@@ -1272,6 +1272,7 @@
       if (!evalCache.has(id)) renderItems(items, svgEl('g', { class: 'child-sel' }, layerOverlay), ' child', false);
       svgEl('rect', { x: b.x - pad, y: b.y - pad, width: b.w + 2 * pad, height: b.h + 2 * pad, class: 'sel-box', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
+    drawHandles();
     if (drag && drag.mode === 'marquee') {
       const b = rectFrom(drag.start, drag.cur);
       svgEl('rect', { x: b.x, y: b.y, width: b.w, height: b.h, class: 'marquee', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
@@ -1283,6 +1284,77 @@
   }
 
   const rectFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) });
+
+  /* ----- Controles sobre el lienzo: esquinas para escalar, círculo para girar ----- */
+  // Solo objetos principales (no los de adentro de un grupo)
+  const handleTargets = () => [...sel].filter(id => evalCache.has(id)).map(byId).filter(Boolean);
+  function selectionBox() {
+    const ts = handleTargets();
+    return ts.length ? unionBox(ts.map(s => bboxOfItems(worldCache.get(s.id) || []))) : null;
+  }
+  function drawHandles() {
+    if (drag && (drag.mode === 'move' || drag.mode === 'marquee' || drag.mode === 'draw' || drag.mode === 'pan')) return;
+    const ts = handleTargets();
+    const b = selectionBox();
+    if (!ts.length || !b) return;
+    const px = 1 / view.s, hs = 9 * px, pad = 3 * px;
+    const canScale = ts.every(s => SCALABLE.has(s.type));
+    const canRotate = ts.every(s => s.type !== 'line');
+    const x0 = b.x - pad, y0 = b.y - pad, x1 = b.x + b.w + pad, y1 = b.y + b.h + pad;
+    if (canRotate) {
+      const cx = (x0 + x1) / 2, ry = y0 - 26 * px;
+      svgEl('path', { d: `M${cx} ${y0}V${ry}`, class: 'handle-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      svgEl('circle', { cx, cy: ry, r: 6 * px, class: 'handle rot', 'data-handle': 'rot', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    }
+    if (canScale) {
+      for (const [name, x, y] of [['nw', x0, y0], ['ne', x1, y0], ['se', x1, y1], ['sw', x0, y1]]) {
+        svgEl('rect', { x: x - hs / 2, y: y - hs / 2, width: hs, height: hs, class: 'handle ' + name, 'data-handle': name, 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      }
+    }
+  }
+  function startHandleDrag(kind, p) {
+    const ts = handleTargets(), b = selectionBox();
+    if (!b) return null;
+    const orig = ts.map(s => ({ s, p: { ...s.p } }));
+    const C = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    if (kind === 'rot') {
+      // Centro de cada objeto (para girar varios juntos alrededor del centro común)
+      const centers = ts.map(s => { const bb = bboxOfItems(worldCache.get(s.id) || []); return { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 }; });
+      return { mode: 'rotate', C, a0: Math.atan2(p.y - C.y, p.x - C.x), orig, centers };
+    }
+    // La esquina opuesta queda fija
+    const A = { x: kind.includes('w') ? b.x + b.w : b.x, y: kind.includes('n') ? b.y + b.h : b.y };
+    return { mode: 'scale', A, start: p, orig };
+  }
+  function applyHandleDrag(d, p, e) {
+    for (const o of d.orig) o.s.p = { ...o.p };
+    if (d.mode === 'scale') {
+      const v0 = { x: d.start.x - d.A.x, y: d.start.y - d.A.y }, v = { x: p.x - d.A.x, y: p.y - d.A.y };
+      let k = (v.x * v0.x + v.y * v0.y) / ((v0.x * v0.x + v0.y * v0.y) || 1);
+      k = Math.max(0.02, k);
+      if (!e.altKey) k = Math.round(k * 100) / 100; // pasos de 1 %
+      rewriteScale(d.orig.map(o => o.s), null, d.A.x / unitMM, d.A.y / unitMM, k);
+      $('#stCoords').textContent = `Escala ${fmt(k * 100, 0)} %`;
+    } else {
+      let deg = (Math.atan2(p.y - d.C.y, p.x - d.C.x) - d.a0) / DEG;
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+      deg = Math.round(deg * 10) / 10;
+      const a = deg * DEG, c = Math.cos(a), sn = Math.sin(a);
+      d.orig.forEach((o, i) => {
+        const s = o.s;
+        s.p.rot = shiftExpr(o.p.rot || '0', deg);
+        if (d.orig.length > 1) {
+          // Mueve el centro de cada objeto alrededor del centro común
+          const q = d.centers[i], dx = q.x - d.C.x, dy = q.y - d.C.y;
+          const nx = d.C.x + dx * c - dy * sn, ny = d.C.y + dx * sn + dy * c;
+          moveShape(s, { ...s.p }, nx - q.x, ny - q.y);
+        }
+      });
+      $('#stCoords').textContent = `Giro ${fmt(deg, 1)}°` + (e.shiftKey ? '' : ' (Shift: de 15° en 15°)');
+    }
+    d.changed = true;
+    evaluateParams(); drawCanvas();
+  }
 
   function toWorld(e) {
     const r = svg.getBoundingClientRect();
@@ -1375,6 +1447,11 @@
       return;
     }
     if (e.button !== 0) return;
+    const handle = tool === 'select' && e.target.closest && e.target.closest('[data-handle]');
+    if (handle) {
+      drag = startHandleDrag(handle.dataset.handle, p);
+      return;
+    }
     if (tool === 'select') {
       const hit = e.target.closest && e.target.closest('[data-id]');
       const id = hit && hit.dataset.id;
@@ -1439,6 +1516,8 @@
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
       view.y = drag.vy - (e.clientY - drag.sy) / view.s;
       drawCanvas();
+    } else if (drag.mode === 'scale' || drag.mode === 'rotate') {
+      applyHandleDrag(drag, p, e);
     } else if (drag.mode === 'move') {
       const dx = snapV(p.x - drag.start.x, e), dy = snapV(p.y - drag.start.y, e);
       if (!drag.moved && Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * view.s < 3) return;
@@ -1466,6 +1545,7 @@
     drag = null;
     stage.classList.remove('panning');
     if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
+    else if ((d.mode === 'scale' || d.mode === 'rotate') && d.changed) { checkpoint(); buildInspector(); drawCanvas(); }
     else if (d.mode === 'marquee') { buildInspector(); buildObjects(); drawCanvas(); }
     else if (d.mode === 'draw') addShape(shapeFromDrag(d.start, d.cur, true));
   }
