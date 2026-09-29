@@ -241,3 +241,4 @@ button.wide { width: 100%; margin-top: 10px; }
 .logo-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 6px; }
 .logo-name { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .engrave-img { opacity: .75; }
+.dot.op-archivo { background: linear-gradient(90deg, var(--cut) 50%, var(--engrave) 50%); }

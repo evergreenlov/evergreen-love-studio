@@ -15,7 +15,8 @@
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="actions">
     <button id="btnNew" title="Nuevo diseño">Nuevo</button>
-    <button id="btnOpen" title="Abrir diseño (Ctrl+O)">Abrir</button>
+    <button id="btnOpen" title="Abrir un diseño guardado (.json) o importar SVG, DXF, PNG o JPG (Ctrl+O)">Abrir</button>
+    <button id="btnImport" title="Importar un archivo SVG, DXF, PNG o JPG para editarlo">Importar</button>
     <button id="btnSave" title="Guardar diseño en tu computadora (Ctrl+S)">Guardar</button>
     <span class="divider"></span>
     <button id="btnUndo" class="icon-btn" title="Deshacer (Ctrl+Z)" aria-label="Deshacer">↶</button>
@@ -37,7 +38,7 @@
     <button id="btnExportDxf" title="Descargar DXF (en mm)">DXF</button>
     <button id="btnExport" class="primary" title="Descargar SVG para xTool Creative Space">Exportar SVG</button>
   </div>
-  <input type="file" id="fileInput" accept=".json,application/json" hidden>
+  <input type="file" id="fileInput" accept=".json,application/json,.svg,image/svg+xml,.dxf,.png,.jpg,.jpeg,image/png,image/jpeg" hidden>
 </header>
 
 <div class="main">

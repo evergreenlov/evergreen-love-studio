@@ -138,6 +138,7 @@
 
   /* ================= Tipos de figura ================= */
   const OPS = { corte: 'Corte', grabado: 'Grabado', marcado: 'Marcado' };
+  const IMPORT_OPS = { archivo: 'Según colores del archivo', ...OPS };
   const EDGE_OPTS = { plano: 'Plano', dedos: 'Dedos (salen)', ranuras: 'Ranuras (entran)' };
   const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
@@ -175,6 +176,10 @@
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
         ['grabadoEn', 'Grabar en', ENGRAVE_OPTS], ['grabadoTexto', 'Texto', 'text'], ['grabadoTam', 'Tamaño del texto'], ['logoTam', 'Ancho del logo']],
     },
+    import: {
+      label: 'Archivo importado',
+      props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['prop', 'Proporción', { si: 'Mantener proporción', no: 'Ancho y alto libres' }], ROT],
+    },
     group: { label: 'Grupo', props: [['mode', 'Tipo de grupo', 'mode'], ['x', 'Mover X'], ['y', 'Mover Y'], ROT] },
   };
   // Propiedades comunes (contorno y repetición)
@@ -183,7 +188,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset']);
   const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -830,6 +835,29 @@
         const eng = boxEngraving(s, m, placed);
         if (eng) return [it, eng];
         break;
+      }
+      case 'import': {
+        const a = doc.assets && doc.assets[s.p.asset];
+        if (!a) return null;
+        const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w'));
+        const aspect = a.h / a.w;
+        const h = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * aspect;
+        if (![x, y, w, h].every(Number.isFinite) || !w || !h) return null;
+        if (a.kind === 'image') {
+          it.op = OPS[s.op] ? s.op : 'grabado';
+          it.images.push({ href: a.href, x, y, w, h, rot: 0 });
+          break;
+        }
+        // Trazos normalizados (ancho 1): se escalan al tamaño pedido; con "archivo" cada trazo usa su color
+        const sy = h / aspect;
+        const byOp = new Map();
+        for (const pl of a.polys) {
+          const op = s.op === 'archivo' ? (pl.op || 'corte') : s.op;
+          if (!byOp.has(op)) byOp.set(op, { op, polys: [], texts: [], images: [] });
+          byOp.get(op).polys.push({ closed: pl.closed, pts: pl.pts.map(([u, v]) => [x + u * w, y + v * sy]) });
+        }
+        const list = [...byOp.values()];
+        return list.length ? list : null;
       }
       case 'hinge':
         it.polys.push(...hingeLines(len(s, 'x'), len(s, 'y'), Math.abs(len(s, 'w')), Math.abs(len(s, 'h')),
@@ -1553,12 +1581,14 @@
       propRow('Nombre', name),
     );
     const isPlainGroup = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
-    if (!isPlainGroup) box.append(propRow('Operación', selectEl(OPS, s.op, 'Operación', v => { s.op = v; checkpoint(); fullRender(); })));
+    if (!isPlainGroup) box.append(propRow('Operación', selectEl(s.type === 'import' ? IMPORT_OPS : OPS, s.op, 'Operación', v => { s.op = v; checkpoint(); fullRender(); })));
 
     for (const [key, label, kind] of TYPES[s.type].props) {
       if (kind === 'edge') {
         box.append(propRow(label, selectEl(EDGE_OPTS, s.p[key] || 'plano', label, v => { s.p[key] = v; checkpoint(); liveRender(); })));
       } else if (s.type === 'box' && boxFieldHidden(s, key)) {
+        continue;
+      } else if (s.type === 'import' && key === 'h' && s.p.prop !== 'no') {
         continue;
       } else if (s.type === 'box' && key === 'grabadoEn') {
         box.append(h('div', { class: 'insp-sub' }, 'Grabado (nombre o logo)'));
@@ -1625,6 +1655,21 @@
     for (const [key, label] of REP_FIELDS[s.p.rep] || []) box.append(exprRow(s, key, label));
 
     if (s.type === 'box') updateCompTip(s);
+    if (s.type === 'import') {
+      const a = doc.assets && doc.assets[s.p.asset];
+      if (a) {
+        const pieces = a.kind === 'vector' ? splitPieces(a.polys).length : 1;
+        box.append(h('p', { class: 'tip' }, `${a.name} · ${a.kind === 'image' ? 'imagen para grabar' : `${a.polys.length} trazo(s)`}.`
+          + (a.kind === 'vector' ? ' Puedes combinarlo con otras figuras (Unir/Restar), darle contorno o repetirlo.' : '')));
+        if (a.kind === 'vector' && pieces > 1) {
+          box.append(h('button', { class: 'wide', onclick: () => explodeImport(s) }, `Separar en ${pieces} piezas (cada una con sus agujeros)`));
+        }
+        if (a.kind === 'vector' && a.polys.length > 1 && a.polys.length <= 300) {
+          box.append(h('button', { class: 'wide', onclick: () => explodeImport(s, true) }, `Separar cada trazo (${a.polys.length})`));
+        }
+        if (a.realW) box.append(h('button', { class: 'wide', onclick: () => { s.p.w = fmt(a.realW / unitMM); s.p.prop = 'si'; checkpoint(); fullRender(); } }, 'Volver al tamaño original'));
+      }
+    }
     if (s.type === 'box' && s.p.cajon === 'si') {
       const m = boxModel(s, true);
       box.append(h('p', { class: 'tip', id: 'drawerTip' }, m
@@ -1816,7 +1861,7 @@
     if (mode !== 'grupo' && members.every(s => TYPES[s.type].open)) { msg('Unir y restar funcionan con figuras cerradas (no líneas ni texto).'); return; }
     const at = list.indexOf(members[0]);
     const label = { grupo: 'Grupo', unir: 'Unión', restar: 'Resta', intersectar: 'Intersección' }[mode];
-    const g = { id: uid(), type: 'group', name: nextName(label), op: members[0].op, p: { mode, x: '0', y: '0', rot: '0' }, children: members };
+    const g = { id: uid(), type: 'group', name: nextName(label), op: OPS[members[0].op] ? members[0].op : 'corte', p: { mode, x: '0', y: '0', rot: '0' }, children: members };
     for (const m of members) list.splice(list.indexOf(m), 1);
     list.splice(at, 0, g);
     sel = new Set([g.id]);
@@ -1956,7 +2001,7 @@
     const base = newDoc(d.units === 'in' ? 'in' : 'mm');
     const clean = s => {
       const c = { op: 'corte', ...s, id: s.id || uid(), p: { ...s.p } };
-      if (!OPS[c.op]) c.op = 'corte';
+      if (!OPS[c.op] && !(c.type === 'import' && c.op === 'archivo')) c.op = 'corte';
       if (c.type === 'group') c.children = (s.children || []).filter(k => k && TYPES[k.type]).map(clean);
       return c;
     };
@@ -1965,10 +2010,15 @@
     sel.clear();
   }
 
-  $('#fileInput').addEventListener('change', e => {
+  $('#fileInput').addEventListener('change', async e => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    // SVG, DXF e imágenes se importan como objetos editables dentro del diseño actual
+    if (/\.(svg|dxf|png|jpe?g)$/i.test(file.name) || /^image\//.test(file.type)) {
+      try { await importFile(file); } catch (err) { msg('No se pudo importar ese archivo: ' + err.message); }
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -2072,6 +2122,274 @@
       };
       reader.readAsDataURL(file);
     });
+  }
+
+  /* ================= Importar SVG, DXF e imágenes como objetos editables ================= */
+  const OP_BY_NAME = n => /grab|engrav/i.test(n) ? 'grabado' : /marc|score/i.test(n) ? 'marcado' : null;
+
+  async function importFile(file) {
+    let asset;
+    if (/\.dxf$/i.test(file.name)) asset = importDxf(await file.text(), file.name);
+    else if (/\.svg$/i.test(file.name) || /svg/.test(file.type)) asset = importSvgFile(await file.text(), file.name);
+    else { asset = await importImageLogo(file); asset.realW = 50; }
+    const id = 'a' + uid();
+    doc.assets = doc.assets || {};
+    doc.assets[id] = asset;
+    // Se coloca a la derecha de lo que ya hay en el diseño
+    evaluateParams(); evaluateAll();
+    const b = unionBox([...evalCache.values()].map(r => r.bbox));
+    const x = b ? b.x + b.w + 10 : 0, y = b ? b.y : 0;
+    const w = asset.realW || 100;
+    const s = {
+      id: uid(), type: 'import', name: file.name.replace(/\.[^.]+$/, ''), op: asset.kind === 'image' ? 'grabado' : 'archivo',
+      p: { asset: id, x: fmt(x / unitMM), y: fmt(y / unitMM), w: fmt(w / unitMM, 3), h: fmt(w * asset.h / asset.w / unitMM, 3), prop: 'si', rot: '0' },
+    };
+    doc.shapes.push(s);
+    sel = new Set([s.id]);
+    checkpoint(); fullRender(); fitView();
+    const size = `${fmt(w / unitMM, 2)} × ${fmt(w * asset.h / asset.w / unitMM, 2)} ${unitLabel()}`;
+    msg(`Importado: ${file.name} · ${size}` + (asset.kind === 'vector' ? ` · ${asset.polys.length} trazo(s)` : '') + (asset.warning ? ` · ${asset.warning}` : ''));
+  }
+
+  // Normaliza trazos en mm a ancho 1 (para poder escalarlos) y guarda su tamaño real
+  function vectorAsset(polys, name, extra = {}) {
+    polys = polys.filter(pl => pl.pts.length >= 2);
+    if (!polys.length) throw new Error('no se encontraron figuras');
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const pl of polys) for (const [x, y] of pl.pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+    const W = (x1 - x0) || 1, H = (y1 - y0) || 1;
+    const r6 = v => Math.round(v * 1e6) / 1e6;
+    return {
+      kind: 'vector', name, w: 1, h: H / W, realW: W, realH: H, ...extra,
+      polys: polys.map(pl => ({ closed: pl.closed, op: pl.op, pts: pl.pts.map(([x, y]) => [r6((x - x0) / W), r6((y - y0) / W)]) })),
+    };
+  }
+
+  const MM_PER = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: 25.4 / 96, '': 25.4 / 96 };
+  // Color → operación: rojo = corte, azul = marcado, relleno oscuro sin trazo = grabado
+  function opFromStyle(cs) {
+    const rgb = c => { const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?/.exec(c || ''); return m && (m[4] === undefined || +m[4] > 0) ? [+m[1], +m[2], +m[3]] : null; };
+    const st = cs.stroke !== 'none' ? rgb(cs.stroke) : null, fl = cs.fill !== 'none' ? rgb(cs.fill) : null;
+    const kind = ([r, g, b]) => r > 150 && g < 110 && b < 110 ? 'corte' : b > 150 && r < 110 && g < 160 ? 'marcado' : null;
+    if (st) return kind(st) || 'corte';
+    if (fl) { if (fl[0] > 240 && fl[1] > 240 && fl[2] > 240) return null; return kind(fl) || 'grabado'; }
+    return 'corte';
+  }
+
+  function importSvgFile(text, name) {
+    const parsed = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const root = parsed.documentElement;
+    if (!root || root.nodeName.toLowerCase() !== 'svg') throw new Error('no es un SVG válido');
+    root.querySelectorAll('script, foreignObject').forEach(e => e.remove());
+    for (const el of root.querySelectorAll('*')) for (const a of [...el.attributes]) if (/^on/i.test(a.name)) el.removeAttribute(a.name);
+    // Tamaño real: width/height con unidades; sin unidades se toman como píxeles (96 por pulgada)
+    const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    const dim = (attr, fallback) => {
+      const m = /^([\d.]+)\s*(mm|cm|in|pt|pc|px)?$/.exec((root.getAttribute(attr) || '').trim());
+      return m ? +m[1] * MM_PER[m[2] || ''] : fallback * MM_PER.px;
+    };
+    const wMM = dim('width', vb.length === 4 ? vb[2] : 1000), hMM = dim('height', vb.length === 4 ? vb[3] : 1000);
+    root.setAttribute('width', wMM + 'mm'); root.setAttribute('height', hMM + 'mm');
+    const host = h('div', { style: 'position:fixed;left:-30000px;top:0;opacity:0;pointer-events:none' });
+    const svgNode = document.importNode(root, true);
+    host.append(svgNode);
+    document.body.append(host);
+    const polys = [];
+    let skippedText = 0;
+    try {
+      skippedText = svgNode.querySelectorAll('text').length;
+      for (const el of svgNode.querySelectorAll('path, rect, circle, ellipse, polygon, polyline, line')) {
+        if (el.closest('defs, clipPath, mask, symbol, marker, pattern')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const op = opFromStyle(cs);
+        if (!op) continue; // relleno blanco: fondo
+        const L = el.getTotalLength(), m = el.getCTM();
+        if (!(L > 0) || !m) continue;
+        const k = 25.4 / 96; // px CSS → mm
+        const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) * k || k;
+        const n = Math.min(8000, Math.max(16, Math.ceil(L * scale / 0.25)));
+        const step = L / n;
+        let cur = [], prev = null;
+        const flush = () => {
+          if (cur.length >= 2) {
+            const a = cur[0], b = cur[cur.length - 1];
+            const closed = Math.hypot(a[0] - b[0], a[1] - b[1]) < step * scale * 2 || /^(rect|circle|ellipse|polygon)$/i.test(el.nodeName);
+            polys.push({ closed, op, pts: closed && cur.length > 2 ? cur.slice(0, -1) : cur });
+          }
+          cur = [];
+        };
+        for (let i = 0; i <= n; i++) {
+          const pt = el.getPointAtLength(Math.min(L, i * step));
+          const q = [(m.a * pt.x + m.c * pt.y + m.e) * k, (m.b * pt.x + m.d * pt.y + m.f) * k];
+          if (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) > step * scale * 3) flush();
+          cur.push(q); prev = q;
+        }
+        flush();
+      }
+    } finally { host.remove(); }
+    if (!polys.length) throw new Error('no se encontraron figuras' + (skippedText ? ' (los textos deben convertirse a trazos)' : ''));
+    return vectorAsset(polys, name, skippedText ? { warning: `${skippedText} texto(s) sin convertir a trazos no se importaron` } : {});
+  }
+
+  // DXF: líneas, polilíneas (con arcos), círculos, arcos, elipses y splines. Unidades según $INSUNITS.
+  function importDxf(text, name) {
+    const lines = text.split(/\r?\n/);
+    const pairs = [];
+    for (let i = 0; i + 1 < lines.length; i += 2) pairs.push([parseInt(lines[i].trim(), 10), lines[i + 1].trim()]);
+    let unit = 1;
+    const UNITS = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
+    const iu = pairs.findIndex(([c, v]) => c === 9 && v === '$INSUNITS');
+    if (iu >= 0 && pairs[iu + 1] && UNITS[pairs[iu + 1][1]]) unit = UNITS[pairs[iu + 1][1]];
+    const start = pairs.findIndex(([c, v], i) => c === 2 && v === 'ENTITIES' && pairs[i - 1] && pairs[i - 1][1] === 'SECTION');
+    if (start < 0) throw new Error('no tiene sección ENTITIES');
+    const ents = [];
+    let cur = null;
+    for (let i = start + 1; i < pairs.length; i++) {
+      const [c, v] = pairs[i];
+      if (c === 0) {
+        if (v === 'ENDSEC') break;
+        cur = { type: v, codes: [] };
+        ents.push(cur);
+      } else if (cur) cur.codes.push([c, v]);
+    }
+    const get = (e, c, d = 0) => { const f = e.codes.find(x => x[0] === c); return f ? parseFloat(f[1]) : d; };
+    const layerOp = e => { const l = (e.codes.find(x => x[0] === 8) || [0, ''])[1]; const col = get(e, 62, 0); return OP_BY_NAME(l) || (col === 5 ? 'marcado' : 'corte'); };
+    const segs = [], polys = [];
+    let skipped = 0;
+    const bulgePts = (p1, p2, b) => {
+      if (!b) return [];
+      const th = 4 * Math.atan(b), dx = p2[0] - p1[0], dy = p2[1] - p1[1], c = Math.hypot(dx, dy);
+      if (!c) return [];
+      const r = c / (2 * Math.sin(th / 2)), d = r * Math.cos(th / 2);
+      const cx = (p1[0] + p2[0]) / 2 - dy / c * d, cy = (p1[1] + p2[1]) / 2 + dx / c * d;
+      const a1 = Math.atan2(p1[1] - cy, p1[0] - cx), n = Math.max(4, Math.ceil(Math.abs(th) / (Math.PI / 36)));
+      return Array.from({ length: n - 1 }, (_, i) => [cx + Math.abs(r) * Math.cos(a1 + th * (i + 1) / n), cy + Math.abs(r) * Math.sin(a1 + th * (i + 1) / n)]);
+    };
+    const polyFrom = (verts, closed, op) => {
+      const pts = [];
+      verts.forEach((v, i) => {
+        pts.push([v.x, v.y]);
+        const nx = verts[i + 1] || (closed ? verts[0] : null);
+        if (nx) pts.push(...bulgePts([v.x, v.y], [nx.x, nx.y], v.b));
+      });
+      if (pts.length >= 2) polys.push({ closed, op, pts });
+    };
+    const arc = (cx, cy, r, a0, a1) => {
+      if (a1 <= a0) a1 += 360;
+      const n = Math.max(6, Math.ceil((a1 - a0) / 5));
+      return Array.from({ length: n + 1 }, (_, i) => { const a = (a0 + (a1 - a0) * i / n) * DEG; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; });
+    };
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i], op = layerOp(e);
+      if (e.type === 'LINE') segs.push({ op, pts: [[get(e, 10), get(e, 20)], [get(e, 11), get(e, 21)]] });
+      else if (e.type === 'LWPOLYLINE') {
+        const verts = [];
+        for (const [c, v] of e.codes) {
+          if (c === 10) verts.push({ x: +v, y: 0, b: 0 });
+          else if (c === 20 && verts.length) verts[verts.length - 1].y = +v;
+          else if (c === 42 && verts.length) verts[verts.length - 1].b = +v;
+        }
+        polyFrom(verts, (get(e, 70) & 1) === 1, op);
+      } else if (e.type === 'POLYLINE') {
+        const verts = [];
+        let j = i + 1;
+        for (; j < ents.length && ents[j].type === 'VERTEX'; j++) verts.push({ x: get(ents[j], 10), y: get(ents[j], 20), b: get(ents[j], 42) });
+        polyFrom(verts, (get(e, 70) & 1) === 1, op);
+        i = j; // salta SEQEND
+      } else if (e.type === 'CIRCLE') {
+        const pts = arc(get(e, 10), get(e, 20), get(e, 40), 0, 360); pts.pop();
+        polys.push({ closed: true, op, pts });
+      } else if (e.type === 'ARC') segs.push({ op, pts: arc(get(e, 10), get(e, 20), get(e, 40), get(e, 50), get(e, 51)) });
+      else if (e.type === 'ELLIPSE') {
+        const cx = get(e, 10), cy = get(e, 20), mx = get(e, 11), my = get(e, 21), ratio = get(e, 40, 1);
+        let t0 = get(e, 41, 0), t1 = get(e, 42, 2 * Math.PI);
+        if (t1 <= t0) t1 += 2 * Math.PI;
+        const R = Math.hypot(mx, my), rot = Math.atan2(my, mx), n = Math.max(12, Math.ceil((t1 - t0) / (Math.PI / 36)));
+        const pts = Array.from({ length: n + 1 }, (_, k) => { const t = t0 + (t1 - t0) * k / n, px = R * Math.cos(t), py = R * ratio * Math.sin(t); return [cx + px * Math.cos(rot) - py * Math.sin(rot), cy + px * Math.sin(rot) + py * Math.cos(rot)]; });
+        if (Math.abs(t1 - t0 - 2 * Math.PI) < 1e-6) { pts.pop(); polys.push({ closed: true, op, pts }); } else segs.push({ op, pts });
+      } else if (e.type === 'SPLINE') {
+        const pts = [], fit = e.codes.some(([c]) => c === 11);
+        for (const [c, v] of e.codes) {
+          if (c === (fit ? 11 : 10)) pts.push([+v, 0]);
+          else if (c === (fit ? 21 : 20) && pts.length) pts[pts.length - 1][1] = +v;
+        }
+        if (pts.length >= 2) ((get(e, 70) & 1) ? polys.push({ closed: true, op, pts }) : segs.push({ op, pts }));
+      } else if (!['VERTEX', 'SEQEND', 'POINT'].includes(e.type)) skipped++;
+    }
+    // Une líneas y arcos sueltos que se tocan en cadenas (y las cierra si vuelven al inicio)
+    const near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.01; // tolerancia en unidades del DXF
+    const pool = segs.slice();
+    while (pool.length) {
+      const chain = pool.shift();
+      let pts = chain.pts.slice(), grew = true;
+      while (grew) {
+        grew = false;
+        for (let k = 0; k < pool.length; k++) {
+          const q = pool[k].pts;
+          if (pool[k].op !== chain.op) continue;
+          const end = pts[pts.length - 1], st = pts[0];
+          if (near(end, q[0])) pts = pts.concat(q.slice(1));
+          else if (near(end, q[q.length - 1])) pts = pts.concat(q.slice(0, -1).reverse());
+          else if (near(st, q[q.length - 1])) pts = q.slice(0, -1).concat(pts);
+          else if (near(st, q[0])) pts = q.slice(1).reverse().concat(pts);
+          else continue;
+          pool.splice(k, 1); grew = true; break;
+        }
+      }
+      const closed = pts.length > 2 && near(pts[0], pts[pts.length - 1]);
+      polys.push({ closed, op: chain.op, pts: closed ? pts.slice(0, -1) : pts });
+    }
+    // DXF tiene la Y hacia arriba; el lienzo hacia abajo
+    const mm = polys.map(pl => ({ ...pl, pts: pl.pts.map(([x, y]) => [x * unit, -y * unit]) }));
+    return vectorAsset(mm, name, skipped ? { warning: `${skipped} elemento(s) no compatibles (textos, bloques o rellenos) no se importaron` } : {});
+  }
+
+  // Agrupa trazos en piezas: cada contorno exterior con los agujeros que tiene adentro
+  function splitPieces(polys) {
+    const box = pl => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pl.pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return { x0, y0, x1, y1 }; };
+    const inside = ([x, y], pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+    const items = polys.map((pl, i) => ({ pl, i, b: box(pl), parent: -1 }));
+    const closed = items.filter(it => it.pl.closed);
+    for (const it of items) {
+      let best = null;
+      for (const o of closed) {
+        if (o === it || o.b.x0 > it.b.x0 || o.b.y0 > it.b.y0 || o.b.x1 < it.b.x1 || o.b.y1 < it.b.y1) continue;
+        if (!inside(it.pl.pts[0], o.pl.pts)) continue;
+        const area = (o.b.x1 - o.b.x0) * (o.b.y1 - o.b.y0);
+        if (!best || area < best.area) best = { o, area };
+      }
+      it.parent = best ? best.o.i : -1;
+    }
+    // Sube hasta el contorno exterior (profundidad par = exterior)
+    const depth = it => { let d = 0, p = it.parent; while (p >= 0 && d < 50) { d++; p = items[p].parent; } return d; };
+    const rootOf = it => { let r = it; while (r.parent >= 0 && depth(r) % 2 === 1) r = items[r.parent]; return r; };
+    const groups = new Map();
+    for (const it of items) { const r = rootOf(it); if (!groups.has(r.i)) groups.set(r.i, []); groups.get(r.i).push(it.pl); }
+    return [...groups.values()].slice(0, 300);
+  }
+
+  // Convierte un archivo importado en varios objetos (uno por pieza) en la misma posición
+  function explodeImport(s, eachStroke = false) {
+    const a = doc.assets[s.p.asset];
+    if ((num(s, 'rot', 0) || 0) !== 0) { msg('Pon la rotación en 0 antes de separar las piezas.'); return; }
+    const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w'));
+    const sy = (s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * a.h / a.w) / (a.h / a.w);
+    const list = listOf(s.id), at = list.indexOf(s);
+    const groups = eachStroke ? a.polys.map(pl => [pl]) : splitPieces(a.polys);
+    const created = groups.map((group, k) => {
+      const polys = group.map(pl => ({ ...pl, pts: pl.pts.map(([u, v]) => [x + u * w, y + v * sy]) }));
+      const asset = vectorAsset(polys, `${a.name} · pieza ${k + 1}`);
+      const id = 'a' + uid();
+      doc.assets[id] = asset;
+      const all = polys.flatMap(pl => pl.pts);
+      const px = Math.min(...all.map(p => p[0])), py = Math.min(...all.map(p => p[1]));
+      return { id: uid(), type: 'import', name: `${s.name} ${k + 1}`, op: s.op, p: { asset: id, x: fmt(px / unitMM), y: fmt(py / unitMM), w: fmt(asset.realW / unitMM, 3), h: fmt(asset.realH / unitMM, 3), prop: 'si', rot: '0' } };
+    });
+    list.splice(at, 1, ...created);
+    sel = new Set(created.map(c => c.id));
+    checkpoint(); fullRender();
+    msg(`Separado en ${created.length} piezas: ahora puedes mover, borrar o cambiar cada una.`);
   }
 
   /* ================= Plantillas ================= */
@@ -2380,6 +2698,7 @@
     checkpoint(); doc = newDoc(doc.units); sel.clear(); checkpoint(); fullRender(); fitView();
   };
   $('#btnOpen').onclick = () => $('#fileInput').click();
+  $('#btnImport').onclick = () => $('#fileInput').click();
   $('#btnSave').onclick = saveFile;
   $('#btnExport').onclick = exportSVG;
   $('#btnExportDxf').onclick = exportDXF;
