@@ -1569,9 +1569,10 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
-        shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector')
+        shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1)
           ? h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')
           : null,
+        ...scaleSection(shapes),
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
         h('div', { class: 'insp-sub' }, 'Combinar'),
         sameList
@@ -1731,6 +1732,75 @@
     const seg = k => 2 * Math.max(1, Math.round(num(s, k, 3)) || 1) - 1;
     const W = m.drawer ? m.W : m.W, D = m.D, H = m.H;
     el.textContent = `Cada dedo mide ≈ ${u(W / seg('nAncho'))} ${unitLabel()} a lo ancho, ${u(D / seg('nProf'))} a lo profundo y ${u(H / seg('nAlto'))} a lo alto.`;
+  }
+
+  /* ----- Escalar varias piezas juntas ----- */
+  const SCALE_POS_X = ['x', 'x2', 'repCx'], SCALE_POS_Y = ['y', 'y2', 'repCy'];
+  const SCALE_SIZE = ['w', 'h', 'r', 'd', 'tam', 'repDx', 'repDy', 'largo', 'puente', 'paso'];
+  const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge']);
+
+  function scaleSection(shapes) {
+    const ok = shapes.filter(s => SCALABLE.has(s.type));
+    if (!ok.length) return [];
+    const pct = h('input', { value: '100', type: 'number', min: '1', step: 'any', 'aria-label': 'Escala en porcentaje' });
+    const hasParam = doc.params.some(p => p.name === 'escala');
+    return [
+      h('div', { class: 'insp-sub' }, 'Tamaño de todo lo seleccionado'),
+      propRow('Escala %', pct),
+      h('div', { class: 'btn-grid' },
+        h('button', { title: 'Cambia el tamaño de todas las piezas a la vez, manteniendo sus posiciones', onclick: () => scaleShapes(ok, parseFloat(pct.value)) }, 'Escalar juntas'),
+        h('button', { title: 'Conecta las piezas al parámetro "escala": cambias ese número y todo se ajusta a la vez', onclick: () => linkScale(ok) }, hasParam ? 'Vincular a "escala"' : 'Crear parámetro "escala"')),
+      h('p', { class: 'tip' }, 'Ojo: al escalar también cambian las ranuras. Si el diseño es para madera de 3 mm y lo agrandas al 150 %, las ranuras quedan para 4.5 mm.'
+        + (shapes.length > ok.length ? ' Las cajas y los grupos no se escalan aquí: cámbialos con sus propias medidas.' : '')),
+    ];
+  }
+
+  // Aplica a cada medida: posiciones respecto a la esquina (X0, Y0) de la selección; tamaños multiplicados.
+  function rewriteScale(shapes, factorText, X0, Y0, kNum) {
+    const mul = (e, v) => factorText ? `${e} * ${factorText}` : fmt(v * kNum);
+    const pos = (e, o) => {
+      if (e === undefined || e === '') return e;
+      if (isNumeric(e)) { const d = parseFloat(e) - o; return factorText ? `${fmt(o)} + ${fmt(d)} * ${factorText}` : fmt(o + d * kNum); }
+      return `${fmt(o)} + ((${e}) - ${fmt(o)}) * ${factorText || fmt(kNum)}`;
+    };
+    const size = e => {
+      if (e === undefined || e === '') return e;
+      if (isNumeric(e)) return mul(fmt(parseFloat(e)), parseFloat(e));
+      return `(${e}) * ${factorText || fmt(kNum)}`;
+    };
+    for (const s of shapes) {
+      for (const key of SCALE_POS_X) if (key in s.p) s.p[key] = pos(s.p[key], X0);
+      for (const key of SCALE_POS_Y) if (key in s.p) s.p[key] = pos(s.p[key], Y0);
+      for (const key of SCALE_SIZE) if (key in s.p) s.p[key] = size(s.p[key]);
+    }
+  }
+  function selectionCorner(shapes) {
+    evaluateParams(); evaluateAll();
+    const b = unionBox(shapes.map(s => bboxOfItems(worldCache.get(s.id) || [])));
+    return b ? [b.x / unitMM, b.y / unitMM] : null;
+  }
+  function scaleShapes(shapes, pct) {
+    if (!(pct > 0)) { msg('Escribe un porcentaje mayor que 0.'); return; }
+    const c = selectionCorner(shapes);
+    if (!c) return;
+    rewriteScale(shapes, null, c[0], c[1], pct / 100);
+    checkpoint(); fullRender();
+    msg(`${shapes.length} piezas escaladas al ${fmt(pct)} %.`);
+  }
+  // Conecta las piezas a "escala" (en %) sin cambiar su tamaño actual; luego basta con cambiar ese parámetro.
+  function linkScale(shapes) {
+    const c = selectionCorner(shapes);
+    if (!c) return;
+    let p = doc.params.find(q => q.name === 'escala');
+    if (!p) { p = { name: 'escala', expr: '100' }; doc.params.unshift(p); }
+    const cur = (vars.escala > 0 ? vars.escala : 100) / 100;
+    // Se toma el tamaño actual como si fuera el de "escala" actual, para que nada salte al vincular
+    if (Math.abs(cur - 1) > 1e-9) rewriteScale(shapes, null, c[0], c[1], 1 / cur);
+    rewriteScale(shapes, 'escala / 100', c[0], c[1], 1);
+    checkpoint(); fullRender();
+    msg(`${shapes.length} piezas conectadas al parámetro "escala" (arriba en Parámetros). Cambia 100 por 120, 80… y todo se ajusta a la vez.`);
+    const inp = [...document.querySelectorAll('#params .pname')].find(i => i.value === 'escala');
+    if (inp) { const ex = inp.parentElement.querySelector('.pexpr'); if (ex) { ex.focus(); ex.select(); } }
   }
 
   // Campos de la caja que no aplican según las opciones elegidas
