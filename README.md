@@ -6,4 +6,4 @@ Funciona completo en el navegador, sin servidor ni cuentas. Los diseños se guar
 
 Librerías incluidas en `lib/`: Clipper (Boost Software License), Three.js r128 y OrbitControls (MIT).
 
-Sitio publicado: https://evergreenlov.github.io/lingomaster-mandarin/ (se sirve desde la carpeta `docs/`).
+Sitio publicado: https://evergreenlov.github.io/evergreen-love-studio/ (se sirve desde la carpeta `docs/`).
