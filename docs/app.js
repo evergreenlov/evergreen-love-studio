@@ -1101,7 +1101,7 @@
           const px = x, py = y;
           placed.set(q, [px, py]);
           const mv = ([u, v]) => [u + px, v + py];
-          it.polys.push({ closed: true, pts: q.pts.map(mv) });
+          it.polys.push({ closed: true, pts: q.pts.map(mv), name: q.name });
           for (const hl of q.holes || []) it.polys.push({ closed: true, pts: hl.map(mv) });
           for (const ln of q.lines || []) it.polys.push({ closed: false, pts: ln.map(mv) }); // cortes de la bisagra viva
           x += q.w + m.sep;
@@ -1169,7 +1169,7 @@
     const dr = Math.atan2(m[1], m[0]) / DEG;
     return items.map(it => ({
       op: it.op,
-      polys: it.polys.map(p => ({ closed: p.closed, pts: p.pts.map(q => apply(m, q)) })),
+      polys: it.polys.map(p => ({ ...p, pts: p.pts.map(q => apply(m, q)) })),
       texts: it.texts.map(t => { const [x, y] = apply(m, [t.x, t.y]); return { ...t, x, y, rot: t.rot + dr }; }),
       images: (it.images || []).map(g => { const [x, y] = apply(m, [g.x, g.y]); return { ...g, x, y, rot: g.rot + dr }; }),
     }));
@@ -1920,8 +1920,8 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
-        ...(shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1)
-          ? [h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')]
+        ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
+          ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
           : []),
         ...alignmentSection(shapes),
         ...scaleSection(shapes),
@@ -2118,10 +2118,11 @@
       box.append(h('button', { class: 'primary wide', onclick: () => open3D(s.id) }, 'Ver caja armada en 3D'));
       if (!boxModel(s)) box.append(h('p', { class: 'tip err-tip' }, 'Revisa las medidas: la caja debe ser más grande que dos veces el grosor.'));
     }
+    if (SEPARABLE.has(s.type)) box.append(h('p', { class: 'tip' }, 'Desagrupar convierte cada pieza en un objeto independiente (con sus agujeros, bisagra y grabado) para moverla o editarla por separado. Después ya no cambian con los parámetros; puedes volver con Deshacer.'));
     const list = listOf(s.id), idx = list.indexOf(s);
     box.append(h('div', { class: 'insp-actions' },
       h('button', { onclick: duplicateSel }, 'Duplicar'),
-      s.type === 'group' ? h('button', { onclick: ungroupSel, title: 'Ctrl+Shift+G' }, 'Desagrupar') : null,
+      s.type === 'group' || SEPARABLE.has(s.type) ? h('button', { onclick: ungroupSel, title: 'Convierte cada pieza en un objeto independiente (Ctrl+Shift+G)' }, 'Desagrupar') : null,
       h('button', { class: 'icon-btn', title: 'Subir en la lista (queda encima)', 'aria-label': 'Subir', disabled: idx >= list.length - 1 ? '' : null, onclick: () => reorder(1) }, '↑'),
       h('button', { class: 'icon-btn', title: 'Bajar en la lista (queda debajo)', 'aria-label': 'Bajar', disabled: idx <= 0 ? '' : null, onclick: () => reorder(-1) }, '↓'),
       h('button', { class: 'danger', onclick: deleteSel }, 'Eliminar')));
@@ -2708,6 +2709,8 @@
     if (mode === 'restar') msg(`"${members[0].name}" es la pieza; las demás figuras se recortan de ella.`);
   }
   function ungroupSel() {
+    const boxes = [...sel].map(byId).filter(s => s && SEPARABLE.has(s.type));
+    if (boxes.length) { separateMany(boxes); return; }
     const groups = [...sel].map(byId).filter(s => s && s.type === 'group');
     if (!groups.length) return;
     const newSel = new Set();
@@ -3039,7 +3042,7 @@
     const W = (x1 - x0) || 1, H = (y1 - y0) || 1;
     const r6 = v => Math.round(v * 1e6) / 1e6;
     return {
-      kind: 'vector', name, w: 1, h: H / W, realW: W, realH: H, ...extra,
+      kind: 'vector', name, w: 1, h: H / W, realW: W, realH: H, ox: x0, oy: y0, ...extra,
       polys: polys.map(pl => ({ closed: pl.closed, op: pl.op, pts: pl.pts.map(([x, y]) => [r6((x - x0) / W), r6((y - y0) / W)]) })),
       texts: texts.map(t => ({ ...t, x: r6((t.x - x0) / W), y: r6((t.y - y0) / W), size: r6(t.size / W) })),
     };
@@ -3362,6 +3365,76 @@
   }
 
   // Convierte un archivo importado en varios objetos (uno por pieza) en la misma posición
+  /* ----- Desagrupar cajas, canastas, conos y bandejas en piezas independientes ----- */
+  const SEPARABLE = new Set(['box', 'basket', 'taper', 'cone']);
+  const polyBox = pts => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
+  const polyArea = pts => { const b = polyBox(pts); return (b[2] - b[0]) * (b[3] - b[1]); };
+  const inPoly = ([x, y], pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+
+  // Crea un objeto "importado" (editable, movible) con estos trazos y textos, ya en su posición actual
+  function importObject(name, polys, texts) {
+    const asset = vectorAsset(polys.map(pl => ({ closed: pl.closed, op: pl.op, pts: pl.pts })), name, { texts });
+    const id = 'a' + uid();
+    doc.assets[id] = asset;
+    const ops = new Set([...polys.map(pl => pl.op), ...texts.map(t => t.op)].filter(Boolean));
+    return { id: uid(), type: 'import', name, op: ops.size === 1 ? [...ops][0] : 'archivo',
+      p: { asset: id, x: fmt(asset.ox / unitMM), y: fmt(asset.oy / unitMM), w: fmt(asset.realW / unitMM, 3), h: fmt(asset.realH / unitMM, 3), prop: 'si', rot: '0' } };
+  }
+  function imageObject(name, g) {
+    const c = imageCorners(g).reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
+    const id = 'a' + uid();
+    doc.assets[id] = { kind: 'image', name, w: Math.max(1, Math.round(g.w * 100)), h: Math.max(1, Math.round(g.h * 100)), href: g.href, realW: g.w };
+    return { id: uid(), type: 'import', name, op: 'grabado',
+      p: { asset: id, x: fmt((c[0] - g.w / 2) / unitMM), y: fmt((c[1] - g.h / 2) / unitMM), w: fmt(g.w / unitMM, 3), h: fmt(g.h / unitMM, 3), prop: 'si', rot: fmt(g.rot || 0, 3) } };
+  }
+
+  // Reparte lo que dibuja un objeto en piezas: cada contorno con sus agujeros, sus líneas de bisagra y su grabado
+  function separateShape(s) {
+    if (!evalCache.has(s.id)) { msg('Esta caja está dentro de un grupo: primero desagrupa el grupo.'); return null; }
+    const closed = [], open = [], engr = [];
+    for (const it of evalCache.get(s.id).items) {
+      if (it.op === 'grabado') { engr.push(it); continue; }
+      for (const pl of it.polys) (pl.closed ? closed : open).push({ ...pl, op: it.op });
+      for (const t of it.texts) engr.push({ op: it.op, polys: [], texts: [t], images: [] });
+    }
+    const groups = closed.length ? splitPieces(closed) : [];
+    if (groups.length < 2 && !(groups.length && (engr.length || open.length))) { msg('Esta pieza no se puede separar en más partes.'); return null; }
+    const info = groups.map(g => ({ polys: [...g], texts: [], images: [], outer: g.reduce((a, b) => polyArea(b.pts) > polyArea(a.pts) ? b : a) }));
+    const holder = pt => { let best = null, ba = Infinity; for (const inf of info) { const a = polyArea(inf.outer.pts); if (a < ba && inPoly(pt, inf.outer.pts)) { best = inf; ba = a; } } return best; };
+    const lose = { polys: [], texts: [], images: [] };
+    for (const pl of open) (holder(pl.pts[0]) || lose).polys.push(pl);
+    for (const it of engr) {
+      for (const pl of it.polys) (holder(pl.pts[0]) || lose).polys.push({ ...pl, op: it.op });
+      for (const t of it.texts) { const c = textCorners(t).reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]); (holder(c) || lose).texts.push({ ...t, op: it.op }); }
+      for (const g of it.images || []) { const c = imageCorners(g).reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]); (holder(c) || lose).images.push(g); }
+    }
+    const created = [];
+    let n = 0;
+    for (const inf of info) {
+      created.push(importObject(inf.outer.name ? `${s.name} · ${inf.outer.name}` : `${s.name} ${++n}`, inf.polys, inf.texts));
+    }
+    for (const inf of info) for (const g of inf.images || []) created.push(imageObject(`${s.name} · logo`, g));
+    if (lose.polys.length || lose.texts.length) created.push(importObject(`${s.name} · grabado`, lose.polys, lose.texts));
+    for (const g of lose.images) created.push(imageObject(`${s.name} · logo`, g));
+    const list = listOf(s.id), at = list.indexOf(s);
+    list.splice(at, 1, ...created);
+    return created;
+  }
+
+  // Separa cajas, canastas, conos, bandejas y archivos importados en piezas independientes
+  function separateMany(shapes) {
+    evaluateParams(); evaluateAll();
+    const all = [];
+    for (const s of shapes) {
+      const c = s.type === 'import' ? splitImport(s, false) : SEPARABLE.has(s.type) ? separateShape(s) : null;
+      if (c) all.push(...c);
+    }
+    if (!all.length) { msg('No hay piezas para separar.'); return; }
+    sel = new Set(all.map(c => c.id));
+    checkpoint(); fullRender();
+    msg(`Separado en ${all.length} piezas independientes. Ya no cambian con los parámetros; Deshacer las vuelve a juntar.`);
+  }
+
   // Separa uno o varios objetos importados; cada pieza queda como objeto independiente en su mismo lugar.
   function explodeImport(s, eachStroke = false) {
     const created = splitImport(s, eachStroke);
