@@ -154,7 +154,8 @@
   const TYPES = {
     rect: { label: 'Rectángulo', props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['r', 'Radio esquinas'], ROT] },
     circle: { label: 'Círculo', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ROT] },
-    polygon: { label: 'Polígono', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ['n', 'Lados'], ROT] },
+    polygon: { label: 'Polígono', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ['n', 'Lados'],
+      ['forma', 'Forma', { poligono: 'Polígono regular', estrella: 'Estrella' }], ['profEst', 'Profundidad de las puntas %'], ['redond', 'Redondear puntas'], ROT] },
     line: { label: 'Línea', open: true, props: [['x', 'X inicio'], ['y', 'Y inicio'], ['x2', 'X final'], ['y2', 'Y final']] },
     text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['fuente', 'Tipografía', 'font'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'], ROT] },
     panel: {
@@ -204,9 +205,9 @@
     },
     import: {
       label: 'Archivo importado',
-      props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['prop', 'Proporción', { si: 'Mantener proporción', no: 'Ancho y alto libres' }], ROT],
+      props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['prop', 'Proporción', { si: 'Mantener proporción', no: 'Ancho y alto libres' }], ['redond', 'Redondear esquinas'], ROT],
     },
-    group: { label: 'Grupo', props: [['mode', 'Tipo de grupo', 'mode'], ['x', 'Mover X'], ['y', 'Mover Y'], ROT] },
+    group: { label: 'Grupo', props: [['mode', 'Tipo de grupo', 'mode'], ['x', 'Mover X'], ['y', 'Mover Y'], ['redond', 'Redondear esquinas'], ROT] },
   };
   // Propiedades comunes (contorno y repetición)
   const REP_FIELDS = {
@@ -214,8 +215,8 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco']);
-  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma']);
+  const NON_LENGTH = new Set(['n', 'profEst', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
@@ -223,7 +224,7 @@
     w: 'ancho', h: 'alto', d: 'diametro', r: 'radio', n: 'lados', t: 'grosor', dedo: 'dedo', kerf: 'kerf', tam: 'tam_texto',
     rot: 'giro', x: 'pos_x', y: 'pos_y', x2: 'fin_x', y2: 'fin_y', largo: 'largo_corte', puente: 'puente', paso: 'paso_bisagra',
     ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nTab: 'tablillas', sepTab: 'sep_tablillas', radio: 'radio_fondo', asaAlto: 'alto_asa', asaArco: 'curva_asa', asaAncho: 'ancho_asa', marco: 'marco', nAncho: 'dedos_ancho', nH: 'dedos_horizontal', nV: 'dedos_vertical', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
-    prof: 'largo_abajo', anchoArr: 'ancho_arriba', largoArr: 'largo_arriba', dArr: 'diam_arriba',
+    redond: 'redondeo', profEst: 'profundidad_puntas', prof: 'largo_abajo', anchoArr: 'ancho_arriba', largoArr: 'largo_arriba', dArr: 'diam_arriba',
     off: 'contorno', repN: 'cantidad', repM: 'filas', repDx: 'paso_x', repDy: 'paso_y', repCx: 'centro_x', repCy: 'centro_y', repA: 'angulo',
   };
 
@@ -1054,10 +1055,12 @@
       case 'polygon': {
         const cx = len(s, 'x'), cy = len(s, 'y'), r = Math.abs(len(s, 'd')) / 2;
         const n = Math.max(3, Math.min(200, Math.round(num(s, 'n', 6))));
+        const star = s.p.forma === 'estrella';
+        const inner = r * Math.max(0.05, Math.min(0.95, (num(s, 'profEst', 50) || 50) / 100)); // radio de los huecos entre puntas
         const pts = [];
-        for (let i = 0; i < n; i++) {
-          const a = -Math.PI / 2 + i * 2 * Math.PI / n;
-          pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+        for (let i = 0; i < (star ? 2 * n : n); i++) {
+          const a = -Math.PI / 2 + i * 2 * Math.PI / (star ? 2 * n : n), rr = star && i % 2 ? inner : r;
+          pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]);
         }
         it.polys.push({ closed: true, pts });
         break;
@@ -1226,6 +1229,20 @@
     for (const p of list.slice(1)) acc = clip(CT.ctIntersection, acc, p);
     return acc;
   }
+  // Redondea las esquinas salientes (puntas) con radio r: se encoge y se vuelve a agrandar con unión redonda.
+  // Lo que sea más delgado que 2·r desaparece.
+  function roundPolys(polys, r) {
+    const src = normalize(toC(polys));
+    if (!src.length || !(r > 0)) return polys;
+    const inward = new CL.Paths(), outward = new CL.Paths();
+    const c1 = new CL.ClipperOffset(2, 10);
+    c1.AddPaths(src, CL.JoinType.jtRound, CL.EndType.etClosedPolygon);
+    c1.Execute(inward, -r * SC);
+    const c2 = new CL.ClipperOffset(2, 10);
+    c2.AddPaths(inward, CL.JoinType.jtRound, CL.EndType.etClosedPolygon);
+    c2.Execute(outward, r * SC);
+    return fromC(outward);
+  }
   function offsetPolys(polys, d) {
     const co = new CL.ClipperOffset(3, 0.25);
     co.AddPaths(normalize(toC(polys)), CL.JoinType.jtMiter, CL.EndType.etClosedPolygon);
@@ -1284,6 +1301,15 @@
       const it = primitive(s);
       if (!it) return null;
       items = (Array.isArray(it) ? it : [it]).map(fontOutlines);
+    }
+    let rr = s.p.redond ? len(s, 'redond') : 0;
+    if (rr > 0 && CL && canOffset(s) && Number.isFinite(rr)) {
+      if (s.type === 'polygon' && s.p.forma !== 'estrella') {
+        // en un polígono regular, el radio no puede pasar del círculo inscrito
+        const n = Math.max(3, Math.min(200, Math.round(num(s, 'n', 6)))), ap = Math.abs(len(s, 'd')) / 2 * Math.cos(Math.PI / n);
+        rr = Math.min(rr, ap * 0.999);
+      }
+      items = items.map(it => ({ ...it, polys: [...roundPolys(it.polys.filter(p => p.closed), rr), ...it.polys.filter(p => !p.closed)] }));
     }
     const off = s.p.off ? len(s, 'off') : 0;
     if (off && CL && canOffset(s) && Number.isFinite(off)) {
@@ -1962,6 +1988,8 @@
         continue;
       } else if (s.type === 'import' && key === 'h' && s.p.prop !== 'no') {
         continue;
+      } else if (s.type === 'polygon' && key === 'profEst' && s.p.forma !== 'estrella') {
+        continue;
       } else if (s.type === 'panel' && ((key === 'dedo' && s.p.dedoModo === 'cantidad') || ((key === 'nH' || key === 'nV') && s.p.dedoModo !== 'cantidad'))) {
         continue;
       } else if (s.type === 'basket' && ((['asaAlto', 'asaArco', 'asaAncho', 'asaTexto'].includes(key) && s.p.asa === 'no') || (key === 'marco' && s.p.frente !== 'si'))) {
@@ -1989,6 +2017,7 @@
           s.p[key] = v;
           if (s.type === 'box' && key === 'dedoModo' && v === 'cantidad') fingerDefaults(s);
           if (s.type === 'panel' && key === 'dedoModo' && v === 'cantidad') panelFingerDefaults(s);
+          if (s.type === 'polygon' && key === 'forma' && v === 'estrella' && !s.p.profEst) s.p.profEst = '50';
           checkpoint(); fullRender();
         })));
       } else if (s.type === 'box' && key === 'dedo' && s.p.uniones === 'planas') {
@@ -2061,6 +2090,7 @@
       } else {
         const row = exprRow(s, key, label);
         if (s.type === 'box' && key === 'nCaj') row.querySelector('input').addEventListener('change', () => fullRender());
+        if (key === 'redond') row.querySelector('input').placeholder = '0 (sin redondeo)';
         if (s.type === 'box' && key === 'holguraC') row.querySelector('input').placeholder = 'auto (1 mm por lado)';
         if (s.type === 'box' && key === 'grabadoTam') row.querySelector('input').placeholder = 'auto';
         box.append(row);
@@ -2185,7 +2215,7 @@
 
   /* ----- Escalar varias piezas juntas ----- */
   const SCALE_POS_X = ['x', 'x2', 'repCx'], SCALE_POS_Y = ['y', 'y2', 'repCy'];
-  const SCALE_SIZE = ['w', 'h', 'r', 'd', 'tam', 'repDx', 'repDy', 'largo', 'puente', 'paso'];
+  const SCALE_SIZE = ['w', 'h', 'r', 'd', 'redond', 'tam', 'repDx', 'repDy', 'largo', 'puente', 'paso'];
   const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge']);
 
   function scaleSection(shapes) {
@@ -2254,6 +2284,7 @@
 
   // En modo bandeja de pared los nombres de las medidas cambian (la caja "acostada")
   function boxLabel(s, key, label) {
+    if (s.type === 'polygon' && s.p.forma === 'estrella' && key === 'n') return 'Puntas';
     if (s.type !== 'box' || s.p.pared !== 'si') return label;
     return ({ ancho: 'Ancho', profundo: 'Alto de la bandeja', alto: 'Fondo (profundidad)', divX: 'Columnas', divZ: 'Filas', divH: 'Fondo de las divisiones' })[key] || label;
   }
