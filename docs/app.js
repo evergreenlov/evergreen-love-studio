@@ -569,7 +569,7 @@
     let lw = 0;
     if (asset) lw = given('logoTam') ? len(s, 'logoTam') : Math.min(r.w * 0.6, Math.max(4, (r.h - (str ? S * 1.4 : 0)) * 0.9) / aspect);
     if (![S, lw].every(Number.isFinite)) return null;
-    const textW = () => S * 0.58 * str.length;
+    const textW = () => measureTextWidth(str, S);
     const gapF = str && asset ? 0.4 : 0;
     const totalW = Math.max(textW(), lw), totalH = lw * aspect + S * gapF + S;
     const k = Math.min(1, r.w / (totalW || 1), r.h / (totalH || 1)); // se achica si no cabe
@@ -798,9 +798,15 @@
       // Texto a lo largo del arco (una letra por posición, girada según la curva)
       const str = String(s.p.asaTexto || '').trim();
       if (str) {
-        const size = bw * 0.5, adv = size * 0.62, total = adv * (str.length - 1);
-        q.texts = [...str].map((ch, i) => {
-          const x = Lc / 2 - total / 2 + i * adv, dy = (arcY(x + 0.5) - arcY(x - 0.5));
+        let size = bw * 0.5;
+        const chars = [...str], room = (Lc - 4 * t) * 0.95;
+        let total = chars.reduce((a, ch) => a + measureTextWidth(ch, size) + size * 0.05, 0);
+        if (total > room) { size *= room / total; total = room; } // si no cabe, se achica
+        let cur = Lc / 2 - total / 2;
+        q.texts = chars.map(ch => {
+          const cw = measureTextWidth(ch, size) + size * 0.05, x = cur + cw / 2;
+          cur += cw;
+          const dy = arcY(x + 0.5) - arcY(x - 0.5);
           return { x, y: arcY(x) + bw / 2 + size * 0.35 + rise, size, str: ch, rot: Math.atan2(dy, 1) / DEG, anchor: 'middle' };
         }).filter(tx => tx.str.trim());
       }
@@ -923,9 +929,14 @@
       case 'line':
         it.polys.push({ closed: false, pts: [[len(s, 'x'), len(s, 'y')], [len(s, 'x2'), len(s, 'y2')]] });
         break;
-      case 'text':
-        it.texts.push({ x: len(s, 'x'), y: len(s, 'y'), size: Math.abs(len(s, 'tam', 10)), str: String(s.p.texto || ''), rot: num(s, 'rot', 0) || 0 });
+      case 'text': {
+        const x = len(s, 'x'), y = len(s, 'y'), size = Math.abs(len(s, 'tam', 10)), str = String(s.p.texto || ''), rot = num(s, 'rot', 0) || 0;
+        // El giro es alrededor del centro del texto (no de su esquina), como en cualquier programa de diseño
+        let ax = x, ay = y;
+        if (rot && Number.isFinite(rot)) [ax, ay] = apply(mR(rot, x + Math.max(size * 0.3, measureTextWidth(str, size)) / 2, y - size * 0.35), [x, y]);
+        it.texts.push({ x: ax, y: ay, size, str, rot });
         break;
+      }
       case 'panel': {
         const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w')), h = Math.abs(len(s, 'h'));
         const t = Math.max(0, Math.min(len(s, 't', 3), w / 2, h / 2));
@@ -1471,11 +1482,15 @@
         if (!e.shiftKey && sel.size) { sel.clear(); buildInspector(); buildObjects(); drawCanvas(); }
       }
     } else if (tool === 'text') {
+      // Evita que el navegador le quite el foco al campo "Texto" después del clic (así se puede escribir enseguida)
+      e.preventDefault();
       const q = snapPt(p, e);
       const d = defaultsFor('text');
       addShape({ id: uid(), type: 'text', name: '', op: d.op, p: { texto: 'Evergreen', x: fmt(q.x / unitMM), y: fmt(q.y / unitMM), tam: nice(10), rot: '0' } });
-      const f = $('#inspector input[data-key="texto"]');
-      if (f) { f.focus(); f.select(); }
+      const focusText = () => { const f = $('#inspector input[data-key="texto"]'); if (f) { f.focus(); f.select(); } };
+      focusText();
+      setTimeout(focusText, 0);
+      msg('Escribe el texto en Propiedades → Texto (o usa el botón {{nombre}} para nombres por lote).');
     } else {
       const q = snapPt(p, e);
       drag = { mode: 'draw', start: q, cur: q };
@@ -1850,7 +1865,22 @@
         const inp = h('input', { value: s.p[key] ?? '', spellcheck: 'false', 'data-key': key, 'aria-label': label, placeholder: key === 'grabadoTexto' ? 'Ej.: Evergreen Love' : null });
         inp.addEventListener('input', () => { s.p[key] = inp.value; liveRender(); });
         inp.addEventListener('change', checkpoint);
-        box.append(propRow(label, inp));
+        // Botón para poner {{nombre}} (para Nombres por lote) sin escribirlo
+        const nameBtn = ['texto', 'grabadoTexto', 'asaTexto'].includes(key) ? h('button', {
+          class: 'name-chip', type: 'button', title: 'Pone {{nombre}} en este texto: se reemplaza por cada nombre de la lista en "Nombres por lote"',
+          onclick: () => {
+            const v = inp.value, start = inp.selectionStart ?? v.length, end = inp.selectionEnd ?? v.length;
+            // Si el texto es el de ejemplo, se reemplaza todo; si no, se inserta donde está el cursor
+            const before = v.slice(0, start), after = v.slice(end);
+            const next = (!v || v === 'Evergreen' || (start === 0 && end === v.length)) ? BATCH_MARKER
+              : before + (before && !/\s$/.test(before) ? ' ' : '') + BATCH_MARKER + (after && !/^\s/.test(after) ? ' ' : '') + after;
+            inp.value = next; s.p[key] = next;
+            checkpoint(); liveRender();
+            inp.focus();
+            msg('Listo: {{nombre}} se cambiará por cada nombre de tu lista en "Nombres por lote".');
+          },
+        }, '{{nombre}}') : null;
+        box.append(propRow(label, inp, null, nameBtn));
         if (key === 'grabadoTexto' && s.p.cajon === 'si' && Math.round(num(s, 'nCaj', 1)) > 1) {
           box.append(h('p', { class: 'tip' }, 'Un nombre por cajón (de arriba a abajo): sepáralos con ', h('code', {}, '|'), ', por ejemplo ', h('code', {}, 'Hilos | Botones | Agujas'), '.'));
         }

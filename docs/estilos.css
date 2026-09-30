@@ -273,3 +273,6 @@ button.wide { width: 100%; margin-top: 10px; }
 @media (max-width: 600px) { .batch-fields { grid-template-columns: 1fr; } }
 .template-thumb { display: block; width: 110px; height: 65px; object-fit: contain; background: #fff; border-radius: 5px; margin-bottom: 5px; }
 .batch-preview .op-grabado { fill: #292929; stroke: #292929; }
+
+/* Botón para insertar {{nombre}} */
+.name-chip { padding: 2px 6px; font-size: 11px; font-weight: 600; color: var(--accent); border-color: var(--accent); background: var(--accent-soft); white-space: nowrap; }
