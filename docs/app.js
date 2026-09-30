@@ -159,7 +159,9 @@
     text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['fuente', 'Tipografía', 'font'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'], ROT] },
     panel: {
       label: 'Panel con dedos',
-      props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['t', 'Grosor material'], ['dedo', 'Ancho de dedo'],
+      props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['t', 'Grosor material'],
+        ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }], ['dedo', 'Ancho de dedo'],
+        ['nH', 'Dedos arriba y abajo'], ['nV', 'Dedos a los lados'],
         ['kerf', 'Kerf (corte)'], ['top', 'Borde superior', 'edge'], ['right', 'Borde derecho', 'edge'],
         ['bottom', 'Borde inferior', 'edge'], ['left', 'Borde izquierdo', 'edge'], ROT],
     },
@@ -199,14 +201,14 @@
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
   const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente']);
-  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab']);
+  const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
   const PROMOTE_NAMES = {
     w: 'ancho', h: 'alto', d: 'diametro', r: 'radio', n: 'lados', t: 'grosor', dedo: 'dedo', kerf: 'kerf', tam: 'tam_texto',
     rot: 'giro', x: 'pos_x', y: 'pos_y', x2: 'fin_x', y2: 'fin_y', largo: 'largo_corte', puente: 'puente', paso: 'paso_bisagra',
-    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nTab: 'tablillas', sepTab: 'sep_tablillas', radio: 'radio_fondo', asaAlto: 'alto_asa', asaArco: 'curva_asa', asaAncho: 'ancho_asa', marco: 'marco', nAncho: 'dedos_ancho', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
+    ancho: 'ancho', profundo: 'profundo', alto: 'alto', sep: 'sep', borde: 'borde_tapa', holgura: 'holgura', holguraC: 'holgura_cajon', nCaj: 'cajones', nTab: 'tablillas', sepTab: 'sep_tablillas', radio: 'radio_fondo', asaAlto: 'alto_asa', asaArco: 'curva_asa', asaAncho: 'ancho_asa', marco: 'marco', nAncho: 'dedos_ancho', nH: 'dedos_horizontal', nV: 'dedos_vertical', nProf: 'dedos_profundo', nAlto: 'dedos_alto', grabadoTam: 'tam_grabado', logoTam: 'ancho_logo', divX: 'comp_ancho', divZ: 'comp_profundo', divH: 'alto_div',
     off: 'contorno', repN: 'cantidad', repM: 'filas', repDx: 'paso_x', repDy: 'paso_y', repCx: 'centro_x', repCy: 'centro_y', repA: 'angulo',
   };
 
@@ -941,7 +943,10 @@
       case 'panel': {
         const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w')), h = Math.abs(len(s, 'h'));
         const t = Math.max(0, Math.min(len(s, 't', 3), w / 2, h / 2));
-        const pts = panelPoints(w, h, t, len(s, 'dedo', 10), [s.p.top, s.p.right, s.p.bottom, s.p.left], len(s, 'kerf', 0));
+        // "Por cantidad": N dedos en un borde = 2N − 1 segmentos
+        const seg = k => 2 * Math.max(1, Math.min(200, Math.round(num(s, k, 3)) || 1)) - 1;
+        const counts = s.p.dedoModo === 'cantidad' ? [seg('nH'), seg('nV'), seg('nH'), seg('nV')] : null;
+        const pts = panelPoints(w, h, t, len(s, 'dedo', 10), [s.p.top, s.p.right, s.p.bottom, s.p.left], len(s, 'kerf', 0), counts);
         it.polys.push({ closed: true, pts: pts.map(p => [p[0] + x, p[1] + y]) });
         break;
       }
@@ -1820,6 +1825,8 @@
         continue;
       } else if (s.type === 'import' && key === 'h' && s.p.prop !== 'no') {
         continue;
+      } else if (s.type === 'panel' && ((key === 'dedo' && s.p.dedoModo === 'cantidad') || ((key === 'nH' || key === 'nV') && s.p.dedoModo !== 'cantidad'))) {
+        continue;
       } else if (s.type === 'basket' && ((['asaAlto', 'asaArco', 'asaAncho', 'asaTexto'].includes(key) && s.p.asa === 'no') || (key === 'marco' && s.p.frente !== 'si'))) {
         continue;
       } else if (s.type === 'box' && key === 'grabadoEn') {
@@ -1841,6 +1848,7 @@
         box.append(propRow(label, selectEl(kind, s.p[key] || Object.keys(kind)[0], label, v => {
           s.p[key] = v;
           if (s.type === 'box' && key === 'dedoModo' && v === 'cantidad') fingerDefaults(s);
+          if (s.type === 'panel' && key === 'dedoModo' && v === 'cantidad') panelFingerDefaults(s);
           checkpoint(); fullRender();
         })));
       } else if (s.type === 'box' && key === 'dedo' && s.p.uniones === 'planas') {
@@ -1917,6 +1925,7 @@
         if (s.type === 'box' && key === 'grabadoTam') row.querySelector('input').placeholder = 'auto';
         box.append(row);
         if (s.type === 'box' && key === 'nAlto') box.append(h('p', { class: 'tip', id: 'fingerTip' }));
+        if (s.type === 'panel' && key === 'nV') box.append(h('p', { class: 'tip', id: 'fingerTip' }));
       }
     }
 
@@ -1932,6 +1941,7 @@
     for (const [key, label] of REP_FIELDS[s.p.rep] || []) box.append(exprRow(s, key, label));
 
     if (s.type === 'box') { updateCompTip(s); updateFingerTip(s); }
+    if (s.type === 'panel') updateFingerTip(s);
     if (s.type === 'import') {
       const a = doc.assets && doc.assets[s.p.asset];
       if (a) {
@@ -1980,10 +1990,23 @@
     if (!s.p.nProf) s.p.nProf = n(D);
     if (!s.p.nAlto) s.p.nAlto = n(H);
   }
+  // Panel suelto: misma cantidad de dedos que con el ancho de dedo actual
+  function panelFingerDefaults(s) {
+    const fw = len(s, 'dedo', 10);
+    const n = mm => { let k = fw > 0 ? Math.floor(mm / fw) : 1; if (k < 1) k = 1; if (k % 2 === 0) k--; return String((k + 1) / 2); };
+    if (!s.p.nH) s.p.nH = n(Math.abs(len(s, 'w')));
+    if (!s.p.nV) s.p.nV = n(Math.abs(len(s, 'h')));
+  }
   // Muestra cuánto mide cada dedo con la cantidad elegida
   function updateFingerTip(s) {
     const el = $('#fingerTip');
     if (!el) return;
+    if (s.type === 'panel') {
+      const seg = k => 2 * Math.max(1, Math.round(num(s, k, 3)) || 1) - 1;
+      const u = v => fmt(v / unitMM, isInch() ? 3 : 1);
+      el.textContent = `Cada dedo mide ≈ ${u(Math.abs(len(s, 'w')) / seg('nH'))} ${unitLabel()} arriba y abajo, y ${u(Math.abs(len(s, 'h')) / seg('nV'))} a los lados. Para que encaje con otra pieza, usa la misma cantidad en el borde que se une.`;
+      return;
+    }
     const m = boxModel(s, true);
     if (!m) { el.textContent = ''; return; }
     const u = v => fmt(v / unitMM, isInch() ? 3 : 1);
@@ -3526,6 +3549,7 @@
     evaluateParams(); drawCanvas(); refreshHints();
     const one = sel.size === 1 && byId([...sel][0]);
     if (one && one.type === 'box') { updateCompTip(one); updateFingerTip(one); }
+    if (one && one.type === 'panel') updateFingerTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
     if (v3.open) build3D();
   }
