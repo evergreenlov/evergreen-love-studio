@@ -259,3 +259,17 @@ button.wide { width: 100%; margin-top: 10px; }
 .menu-row .menu-item:hover { background: var(--accent-soft); }
 .menu-save { color: var(--accent); font-weight: 600; }
 .menu-list { max-height: 70vh; overflow-y: auto; }
+
+/* Personalización por lotes */
+.batch-dialog { width: min(760px, 92vw); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); padding: 24px; box-shadow: 0 24px 80px #0004; }
+.batch-dialog::backdrop { background: #14271e88; }
+.batch-dialog h2 { margin-top: 0; font-size: 22px; }
+.batch-dialog label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
+.batch-dialog textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px; font: inherit; }
+.batch-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.batch-fields input { width: 100%; box-sizing: border-box; }
+.batch-preview { width: 100%; height: 240px; background: white; border: 1px solid var(--border); border-radius: 8px; }
+.batch-actions { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 0; }
+@media (max-width: 600px) { .batch-fields { grid-template-columns: 1fr; } }
+.template-thumb { display: block; width: 110px; height: 65px; object-fit: contain; background: #fff; border-radius: 5px; margin-bottom: 5px; }
+.batch-preview .op-grabado { fill: #292929; stroke: #292929; }

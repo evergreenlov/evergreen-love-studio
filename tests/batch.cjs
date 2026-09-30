@@ -1,0 +1,12 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync('docs/app.js','utf8');
+const functions=['personalizeShapes','buildBatch'].map(name=>{const start=source.indexOf('  function '+name+'(');const end=source.indexOf('\n  }',start)+4;return source.slice(start,end)}).join('\n');
+let id=0;
+const ctx={BATCH_MARKER:'{{nombre}}',unitMM:1,uid:()=>String(++id),cloneShape:s=>JSON.parse(JSON.stringify(s)),len:(s,k,d=0)=>Number(s.p[k]??d),measureTextWidth:(s,size)=>s.length*size*.6,evalShape:s=>({bbox:{x:2,y:3,w:60,h:25}})};
+vm.createContext(ctx);vm.runInContext(functions,ctx);
+const base=[{type:'text',p:{texto:'Hola {{nombre}} / {{nombre}}',tam:10},children:[{type:'box',p:{grabadoTexto:'{{nombre}}'}}]}];
+let batch=ctx.buildBatch(base,['María','José','Ana','Ana'],2,5,20);
+assert.equal(batch.length,4);assert.equal(batch[0].children[0].p.texto,'Hola María / María');assert.equal(batch[0].children[0].children[0].p.grabadoTexto,'María');assert.equal(base[0].p.texto,'Hola {{nombre}} / {{nombre}}');assert.equal(batch[1].p.x,'63');assert.equal(batch[2].p.y,'27');assert(Number(batch[0].children[0].p.tam)<10);
+assert.throws(()=>ctx.buildBatch(base,[],2,5,0));assert.throws(()=>ctx.buildBatch(base,Array(301).fill('A'),2,5,0));assert.throws(()=>ctx.buildBatch(base,['A'],0,5,0));assert.throws(()=>ctx.buildBatch(base,['A'],2,-1,0));assert.throws(()=>ctx.buildBatch([{p:{texto:'sin marcador'}}],['A'],2,5,0));
+ctx.unitMM=25.4;batch=ctx.buildBatch(base,['A','B'],2,5,0);assert(Math.abs(Number(batch[1].p.x)-63/25.4)<1e-9);
+console.log('PASS: names, accents, duplicates, repeated markers, nested engraving, preserved original, sizing, grid positions, inches, invalid input limits.');

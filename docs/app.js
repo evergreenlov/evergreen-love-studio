@@ -1024,7 +1024,7 @@
 
   // Esquinas aproximadas del texto (para seleccionar y medir)
   function textCorners(t) {
-    const w = Math.max(t.size * 0.3, t.size * 0.58 * t.str.length);
+    const w = Math.max(t.size * 0.3, measureTextWidth(t.str, t.size));
     const x0 = t.anchor === 'middle' ? t.x - w / 2 : t.x;
     const m = mR(t.rot, t.x, t.y);
     return [[x0, t.y - t.size * 0.8], [x0 + w, t.y - t.size * 0.8], [x0 + w, t.y + t.size * 0.2], [x0, t.y + t.size * 0.2]].map(p => apply(m, p));
@@ -1766,6 +1766,7 @@
         ...(shapes.some(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1)
           ? [h('button', { class: 'primary wide', onclick: () => explodeMany(shapes.filter(s => s.type === 'import')) }, 'Separar en piezas independientes')]
           : []),
+        ...alignmentSection(shapes),
         ...scaleSection(shapes),
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
         h('div', { class: 'insp-sub' }, 'Combinar'),
@@ -2136,6 +2137,139 @@
     add(doc.shapes, 0);
   }
 
+  /* ================= Personalización local por lotes ================= */
+  function selectedRoots() {
+    return [...sel].map(byId).filter(s => s && !parentOf(s.id));
+  }
+  function alignmentSection(shapes) {
+    if (shapes.some(s => parentOf(s.id))) return [h('p', { class: 'tip' }, 'Alinea los grupos completos desde el nivel principal.')];
+    return [h('div', { class: 'insp-sub' }, 'Alinear selección'),
+      h('div', { class: 'btn-grid' }, ...[
+        ['left', 'Izquierda'], ['cx', 'Centro horizontal'], ['right', 'Derecha'],
+        ['top', 'Arriba'], ['cy', 'Centro vertical'], ['bottom', 'Abajo'],
+        ['dx', 'Distribuir horizontal'], ['dy', 'Distribuir vertical']
+      ].map(([mode, label]) => h('button', { onclick: () => alignSelection(mode) }, label)))];
+  }
+  function alignSelection(mode) {
+    evaluateParams(); evaluateAll();
+    const entries = selectedRoots().map(s => ({ s, b: bboxOfItems(worldCache.get(s.id) || []) })).filter(e => e.b);
+    if (entries.length < 2) return;
+    const b = unionBox(entries.map(e => e.b));
+    if (mode === 'dx' || mode === 'dy') {
+      if (entries.length < 3) { msg('Selecciona al menos tres objetos para distribuir.'); return; }
+      const axis = mode === 'dx' ? 'x' : 'y', size = axis === 'x' ? 'w' : 'h';
+      entries.sort((a, b) => a.b[axis] - b.b[axis]);
+      const gap = (b[size] - entries.reduce((n, e) => n + e.b[size], 0)) / (entries.length - 1);
+      let at = b[axis];
+      for (const e of entries) { const d = at - e.b[axis]; moveShape(e.s, { ...e.s.p }, axis === 'x' ? d : 0, axis === 'y' ? d : 0); at += e.b[size] + gap; }
+    } else {
+      for (const e of entries) {
+        const dx = mode === 'left' ? b.x - e.b.x : mode === 'right' ? b.x + b.w - e.b.x - e.b.w : mode === 'cx' ? b.x + b.w / 2 - e.b.x - e.b.w / 2 : 0;
+        const dy = mode === 'top' ? b.y - e.b.y : mode === 'bottom' ? b.y + b.h - e.b.y - e.b.h : mode === 'cy' ? b.y + b.h / 2 - e.b.y - e.b.h / 2 : 0;
+        moveShape(e.s, { ...e.s.p }, dx, dy);
+      }
+    }
+    checkpoint(); fullRender();
+  }
+  const BATCH_MARKER = '{{nombre}}';
+  function personalizeShapes(shapes, name, maxWidthMM) {
+    let replacements = 0;
+    function visit(s) {
+      for (const key of ['texto', 'grabadoTexto', 'asaTexto']) {
+        if (typeof s.p[key] === 'string' && s.p[key].includes(BATCH_MARKER)) {
+          s.p[key] = s.p[key].split(BATCH_MARKER).join(name); replacements++;
+          if (key === 'texto' && maxWidthMM > 0) {
+            const size = len(s, 'tam', 10);
+            const width = measureTextWidth(s.p[key], size);
+            if (width > maxWidthMM) s.p.tam = String(size * maxWidthMM / width / unitMM);
+          }
+        }
+      }
+      (s.children || []).forEach(visit);
+    }
+    shapes.forEach(visit);
+    return replacements;
+  }
+  function measureTextWidth(str, size) {
+    const canvas = measureTextWidth.canvas || (measureTextWidth.canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    ctx.font = '100px Arial, Helvetica, sans-serif';
+    return ctx.measureText(str).width * size / 100;
+  }
+  function buildBatch(base, names, columns, gap, maxWidth) {
+    if (!names.length || names.length > 300) throw new Error('Escribe entre 1 y 300 nombres, uno por línea.');
+    if (!Number.isInteger(columns) || columns < 1 || columns > 30 || !Number.isFinite(gap) || gap < 0 || !Number.isFinite(maxWidth) || maxWidth < 0) throw new Error('Revisa las columnas (1–30) y las medidas (0 o más).');
+    const groups = names.map(name => {
+      const children = base.map(cloneShape);
+      if (!personalizeShapes(children, name, maxWidth)) throw new Error('Añade {{nombre}} a un texto editable del arte. Los nombres convertidos a curvas o en fotos no se pueden sustituir.');
+      const validate = s => {
+        if (!evalShape(s)) throw new Error('Una pieza tiene medidas inválidas. Corrígela antes de generar el lote.');
+        (s.children || []).forEach(validate);
+      };
+      children.forEach(validate);
+      const g = { id: uid(), type: 'group', name, op: 'corte', p: { mode: 'grupo', x: '0', y: '0', rot: '0' }, children };
+      const result = evalShape(g);
+      if (!result || !result.bbox || ![result.bbox.x, result.bbox.y, result.bbox.w, result.bbox.h].every(Number.isFinite)) throw new Error('El arte tiene medidas inválidas o está vacío.');
+      return { g, b: result.bbox };
+    });
+    const cellW = Math.max(...groups.map(e => e.b.w)), cellH = Math.max(...groups.map(e => e.b.h));
+    groups.forEach(({ g, b }, i) => { g.p.x = String(((i % columns) * (cellW + gap) - b.x) / unitMM); g.p.y = String((Math.floor(i / columns) * (cellH + gap) - b.y) / unitMM); });
+    return groups.map(e => e.g);
+  }
+  function openBatch() {
+    evaluateParams(); evaluateAll();
+    if (!doc.shapes.length) { msg('Primero crea o abre un arte y escribe {{nombre}} en el texto que deseas personalizar.'); return; }
+    if ([...sel].some(id => parentOf(id))) { msg('Selecciona el grupo completo del arte para crear el lote.'); return; }
+    const base = JSON.parse(JSON.stringify(selectedRoots().length ? selectedRoots() : doc.shapes));
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'batchTitle' });
+    const names = h('textarea', { rows: '8', placeholder: 'María\nJosé\nAna', 'aria-label': 'Nombres, uno por línea' });
+    const cols = h('input', { type: 'number', value: '3', min: '1', max: '30', step: '1' });
+    const gap = h('input', { type: 'number', value: nice(5), min: '0', step: 'any' });
+    const width = h('input', { type: 'number', value: '0', min: '0', step: 'any' });
+    const status = h('p', { role: 'status', 'aria-live': 'polite' });
+    const preview = svgEl('svg', { class: 'batch-preview', role: 'img', 'aria-label': 'Vista previa del lote' });
+    const generate = h('button', { class: 'primary', disabled: '' }, 'Crear lote en el lienzo');
+    let pending = null;
+    let debounce;
+    const refresh = () => {
+      clearTimeout(debounce); pending = null; generate.disabled = true; preview.replaceChildren();
+      try {
+        const list = names.value.split(/\r?\n/).map(n => n.trim()).filter(Boolean);
+        const generated = buildBatch(base, list, Number(cols.value), Number(gap.value) * unitMM, Number(width.value) * unitMM);
+        const items = generated.flatMap(g => evalShape(g).items);
+        const b = bboxOfItems(items);
+        preview.setAttribute('viewBox', `${b.x - 3} ${b.y - 3} ${b.w + 6} ${b.h + 6}`);
+        renderItems(items, preview, '', false);
+        const over = b.w > doc.sheet.w || b.h > doc.sheet.h;
+        status.textContent = `${list.length} diseños · ${fmt(b.w / unitMM, 2)} × ${fmt(b.h / unitMM, 2)} ${unitLabel()}.` + (over ? ' No cabe en una sola tabla: ajusta las columnas o exporta para repartir las piezas.' : ' Cabe en el área de trabajo.');
+        pending = generated; generate.disabled = false;
+      } catch (err) { status.textContent = err.message; }
+    };
+    const close = () => { clearTimeout(debounce); dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    generate.onclick = () => {
+      refresh(); if (!pending) return;
+      checkpoint();
+      doc.batchOriginal = { shapes: JSON.parse(JSON.stringify(doc.shapes)), name: doc.name };
+      doc.shapes = pending; doc.name = doc.name + ' · lote'; sel.clear();
+      checkpoint(); fullRender(); fitView(); close(); msg('Lote creado. Cada nombre es un grupo editable. Puedes exportar SVG o DXF, guardar y deshacer.');
+    };
+    dialog.append(h('h2', { id: 'batchTitle' }, 'Un arte, muchos nombres'),
+      h('p', {}, 'Usa {{nombre}} en uno o varios textos de tu arte. Se copiará la selección completa; sin selección se usará todo el lienzo.'),
+      h('p', { class: 'tip' }, 'El lote reemplaza el lienzo. Puedes deshacer o recuperar el arte anterior desde este panel.'),
+      h('label', {}, 'Nombres — uno por línea (hasta 300)', names),
+      h('div', { class: 'batch-fields' }, h('label', {}, 'Columnas', cols), h('label', {}, `Separación (${unitLabel()})`, gap), h('label', {}, `Ancho máximo del texto (${unitLabel()})`, width)),
+      h('p', { class: 'tip' }, 'Ancho 0 conserva el tamaño. El límite reduce textos normales largos; no modifica el grabado paramétrico de cajas o canastas. Los nombres repetidos crean copias repetidas.'), status, preview,
+      h('div', { class: 'batch-actions' }, h('button', { onclick: close }, 'Cancelar'), generate));
+    if (doc.batchOriginal) dialog.append(h('button', { onclick: () => {
+      checkpoint(); doc.shapes = doc.batchOriginal.shapes; doc.name = doc.batchOriginal.name; delete doc.batchOriginal;
+      sel.clear(); checkpoint(); fullRender(); fitView(); close();
+    } }, 'Recuperar arte anterior al último lote'));
+    for (const input of [names, cols, gap, width]) input.addEventListener('input', () => { pending = null; generate.disabled = true; clearTimeout(debounce); debounce = setTimeout(refresh, 180); });
+    document.body.append(dialog); dialog.showModal(); names.focus(); refresh();
+  }
+  $('#btnBatch').onclick = openBatch;
+
   /* ================= Acciones ================= */
   function deleteSel() {
     if (!sel.size) return;
@@ -2201,6 +2335,10 @@
     const groups = [...sel].map(byId).filter(s => s && s.type === 'group');
     if (!groups.length) return;
     const newSel = new Set();
+    // Conservar los efectos hasta que puedan transferirse sin alterar las piezas.
+    if (groups.some(g => (num(g, 'rot', 0) || 0) !== 0 || (g.p.rep && g.p.rep !== 'no') || (g.p.off && len(g, 'off')) || (g.p.mode && g.p.mode !== 'grupo'))) {
+      msg('Este grupo tiene efectos. Se conserva para no cambiar el diseño; edita sus piezas con doble clic.'); return;
+    }
     let lost = false;
     for (const g of groups) {
       const list = listOf(g.id), at = list.indexOf(g);
@@ -3262,7 +3400,7 @@
           loadDoc(JSON.parse(JSON.stringify(tpl.doc)));
           checkpoint(); fullRender(); fitView();
           msg(`Plantilla abierta: ${tpl.name}`);
-        } }, tpl.name),
+        } }, ...(typeof tpl.thumbnail === 'string' && tpl.thumbnail.startsWith('data:image/svg+xml,') ? [h('img', { src: tpl.thumbnail, class: 'template-thumb', alt: '', loading: 'lazy' })] : []), h('span', {}, tpl.name)),
         h('button', { class: 'icon-btn del', title: 'Borrar esta plantilla', 'aria-label': 'Borrar ' + tpl.name, onclick: ev => {
           ev.stopPropagation();
           if (!confirm(`¿Borrar la plantilla "${tpl.name}"? Tu diseño actual no se toca.`)) return;
@@ -3280,7 +3418,18 @@
     const list = readUserTemplates();
     const same = list.find(x => x.name === name);
     if (same && !confirm(`Ya tienes una plantilla "${name}". ¿Reemplazarla?`)) return;
-    const entry = { id: same ? same.id : uid(), name, date: new Date().toISOString(), doc: JSON.parse(JSON.stringify({ ...doc, name })) };
+    evaluateParams(); evaluateAll();
+    const thumbItems = [...evalCache.values()].flatMap(r => r.items);
+    const thumbBox = bboxOfItems(thumbItems);
+    let thumbnail = '';
+    if (thumbBox) {
+      const thumb = svgEl('svg', { xmlns: NS, viewBox: `${thumbBox.x - 2} ${thumbBox.y - 2} ${thumbBox.w + 4} ${thumbBox.h + 4}`, width: 180, height: 100 });
+      renderItems(thumbItems, thumb, '', false);
+      thumb.querySelectorAll('path').forEach(e => { e.setAttribute('fill', 'none'); e.setAttribute('stroke', '#2f7d4f'); e.setAttribute('stroke-width', '1'); });
+      thumb.querySelectorAll('text').forEach(e => e.setAttribute('fill', '#1d2a21'));
+      thumbnail = 'data:image/svg+xml,' + encodeURIComponent(new XMLSerializer().serializeToString(thumb));
+    }
+    const entry = { id: same ? same.id : uid(), name, thumbnail, date: new Date().toISOString(), doc: JSON.parse(JSON.stringify({ ...doc, name })) };
     const next = same ? list.map(x => x.id === same.id ? entry : x) : [...list, entry];
     if (writeUserTemplates(next)) msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
   };
@@ -3294,8 +3443,19 @@
     sel.clear(); checkpoint(); fullRender(); fitView();
   });
 
+  TEMPLATES['names-batch'] = (units, sheet) => {
+    const d = newDoc(units); d.name = 'Etiquetas personalizadas'; d.sheet = { ...sheet };
+    const u = UNIT_MM[units] || 1, v = n => String(n / u);
+    d.shapes = [
+      { id: uid(), type: 'rect', name: 'Base de etiqueta', op: 'corte', p: { x: '0', y: '0', w: v(75), h: v(25), r: v(3), rot: '0' } },
+      { id: uid(), type: 'circle', name: 'Agujero', op: 'corte', p: { x: v(5), y: v(12.5), d: v(3), rot: '0' } },
+      { id: uid(), type: 'text', name: 'Nombre personalizable', op: 'grabado', p: { x: v(12), y: v(15), tam: v(7), texto: '{{nombre}}', rot: '0' } }
+    ]; return d;
+  };
+
   const TOOL_KEYS = { v: 'select', h: 'hand', r: 'rect', c: 'circle', p: 'polygon', l: 'line', t: 'text', f: 'panel', b: 'hinge', k: 'box' };
   document.addEventListener('keydown', e => {
+    if (document.querySelector('dialog[open]')) return;
     const inField = e.target.matches && e.target.matches('input, textarea, select');
     const mod = e.metaKey || e.ctrlKey;
     const k = e.key.toLowerCase();
