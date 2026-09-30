@@ -156,7 +156,7 @@
     circle: { label: 'Círculo', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ROT] },
     polygon: { label: 'Polígono', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ['n', 'Lados'], ROT] },
     line: { label: 'Línea', open: true, props: [['x', 'X inicio'], ['y', 'Y inicio'], ['x2', 'X final'], ['y2', 'Y final']] },
-    text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'], ROT] },
+    text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['fuente', 'Tipografía', 'font'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'], ROT] },
     panel: {
       label: 'Panel con dedos',
       props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['t', 'Grosor material'], ['dedo', 'Ancho de dedo'],
@@ -175,14 +175,14 @@
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
-        ['grabadoEn', 'Grabar en', ENGRAVE_OPTS], ['grabadoTexto', 'Texto', 'text'], ['grabadoTam', 'Tamaño del texto'], ['logoTam', 'Ancho del logo']],
+        ['grabadoEn', 'Grabar en', ENGRAVE_OPTS], ['grabadoTexto', 'Texto', 'text'], ['grabadoFuente', 'Tipografía', 'font'], ['grabadoTam', 'Tamaño del texto'], ['logoTam', 'Ancho del logo']],
     },
     basket: {
       label: 'Canasta', noOffset: true,
       props: [['ancho', 'Ancho'], ['alto', 'Alto'], ['profundo', 'Largo'], ['t', 'Grosor material'], ['radio', 'Radio del fondo'],
         ['nTab', 'Cantidad de tablillas'], ['sepTab', 'Separación tablillas'],
         ['asa', 'Asa', { si: 'Con asa en arco', no: 'Sin asa' }], ['asaAlto', 'Alto del asa'], ['asaArco', 'Curva del asa'], ['asaAncho', 'Ancho del asa'],
-        ['asaTexto', 'Texto en el asa', 'text'],
+        ['asaTexto', 'Texto en el asa', 'text'], ['asaFuente', 'Tipografía del asa', 'font'],
         ['frente', 'Marco decorativo', { si: 'Con marco al frente', no: 'Sin marco' }], ['marco', 'Ancho del marco'],
         ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ['x', 'X'], ['y', 'Y'], ROT],
     },
@@ -198,7 +198,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente']);
   const NON_LENGTH = new Set(['n', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -569,7 +569,7 @@
     let lw = 0;
     if (asset) lw = given('logoTam') ? len(s, 'logoTam') : Math.min(r.w * 0.6, Math.max(4, (r.h - (str ? S * 1.4 : 0)) * 0.9) / aspect);
     if (![S, lw].every(Number.isFinite)) return null;
-    const textW = () => measureTextWidth(str, S);
+    const textW = () => measureTextWidth(str, S, s.p.grabadoFuente);
     const gapF = str && asset ? 0.4 : 0;
     const totalW = Math.max(textW(), lw), totalH = lw * aspect + S * gapF + S;
     const k = Math.min(1, r.w / (totalW || 1), r.h / (totalH || 1)); // se achica si no cabe
@@ -582,7 +582,7 @@
     } else if (asset) {
       it.images.push({ href: asset.href, x: cx - lw / 2, y: top, w: lw, h: lh, rot: 0 });
     }
-    if (str) it.texts.push({ x: cx, y: top + lh + gap + S * 0.8, size: S, str, rot: 0, anchor: 'middle' });
+    if (str) it.texts.push({ x: cx, y: top + lh + gap + S * 0.8, size: S, str, rot: 0, anchor: 'middle', font: s.p.grabadoFuente });
     // A la posición de la pieza en el plano; en las tapas se gira 180° para que se lea de frente al armar
     let mtx = mT(px, py);
     if (tg.lid) mtx = mMul(mtx, mR(180, cx, r.y + r.h / 2));
@@ -800,14 +800,15 @@
       if (str) {
         let size = bw * 0.5;
         const chars = [...str], room = (Lc - 4 * t) * 0.95;
-        let total = chars.reduce((a, ch) => a + measureTextWidth(ch, size) + size * 0.05, 0);
+        const fnt = s.p.asaFuente;
+        let total = chars.reduce((a, ch) => a + measureTextWidth(ch, size, fnt) + size * 0.05, 0);
         if (total > room) { size *= room / total; total = room; } // si no cabe, se achica
         let cur = Lc / 2 - total / 2;
         q.texts = chars.map(ch => {
-          const cw = measureTextWidth(ch, size) + size * 0.05, x = cur + cw / 2;
+          const cw = measureTextWidth(ch, size, fnt) + size * 0.05, x = cur + cw / 2;
           cur += cw;
           const dy = arcY(x + 0.5) - arcY(x - 0.5);
-          return { x, y: arcY(x) + bw / 2 + size * 0.35 + rise, size, str: ch, rot: Math.atan2(dy, 1) / DEG, anchor: 'middle' };
+          return { x, y: arcY(x) + bw / 2 + size * 0.35 + rise, size, str: ch, rot: Math.atan2(dy, 1) / DEG, anchor: 'middle', font: fnt };
         }).filter(tx => tx.str.trim());
       }
       panels.push(q);
@@ -933,8 +934,8 @@
         const x = len(s, 'x'), y = len(s, 'y'), size = Math.abs(len(s, 'tam', 10)), str = String(s.p.texto || ''), rot = num(s, 'rot', 0) || 0;
         // El giro es alrededor del centro del texto (no de su esquina), como en cualquier programa de diseño
         let ax = x, ay = y;
-        if (rot && Number.isFinite(rot)) [ax, ay] = apply(mR(rot, x + Math.max(size * 0.3, measureTextWidth(str, size)) / 2, y - size * 0.35), [x, y]);
-        it.texts.push({ x: ax, y: ay, size, str, rot });
+        if (rot && Number.isFinite(rot)) [ax, ay] = apply(mR(rot, x + Math.max(size * 0.3, measureTextWidth(str, size, s.p.fuente)) / 2, y - size * 0.35), [x, y]);
+        it.texts.push({ x: ax, y: ay, size, str, rot, font: s.p.fuente });
         break;
       }
       case 'panel': {
@@ -1141,7 +1142,7 @@
     } else {
       const it = primitive(s);
       if (!it) return null;
-      items = Array.isArray(it) ? it : [it];
+      items = (Array.isArray(it) ? it : [it]).map(fontOutlines);
     }
     const off = s.p.off ? len(s, 'off') : 0;
     if (off && CL && canOffset(s) && Number.isFinite(off)) {
@@ -1220,7 +1221,7 @@
       }
       for (const t of it.texts) {
         const el = svgEl('text', {
-          x: r4(t.x), y: r4(t.y), 'font-size': r4(t.size), 'font-family': 'Arial, Helvetica, sans-serif', class: cls,
+          x: r4(t.x), y: r4(t.y), 'font-size': r4(t.size), 'font-family': fontCss(t.font), class: cls,
           'text-anchor': t.anchor === 'middle' ? 'middle' : null,
           transform: t.rot ? `rotate(${r4(t.rot)} ${r4(t.x)} ${r4(t.y)})` : null, 'vector-effect': 'non-scaling-stroke',
         }, parent);
@@ -1861,6 +1862,31 @@
         box.append(propRow(label, selectEl(MODES, s.p.mode || 'grupo', label, v => { s.p.mode = v; checkpoint(); fullRender(); })));
         if (isPlainGroup) box.append(h('p', { class: 'tip' }, 'Cada objeto del grupo conserva su propia operación (corte, grabado o marcado).'));
         else if (s.p.mode === 'restar') box.append(h('p', { class: 'tip' }, 'Al primer objeto del grupo (el de más abajo en la lista) se le restan los demás.'));
+      } else if (kind === 'font') {
+        const sl = h('select', { 'aria-label': label });
+        for (const f of FONTS) sl.append(h('option', { value: f.id, style: f.id === 'arial' ? null : `font-family:${fontCss(f.id)}` }, f.name));
+        const own = Object.entries(doc.assets || {}).filter(([, a]) => a.kind === 'font');
+        if (own.length) {
+          const g = h('optgroup', { label: 'Mis tipografías' });
+          for (const [id, a] of own) g.append(h('option', { value: id }, a.name));
+          sl.append(g);
+        }
+        sl.append(h('option', { value: '__upload' }, '＋ Cargar tipografía propia (.ttf / .otf)…'));
+        sl.value = s.p[key] || 'arial';
+        const sampleText = String((key === 'fuente' ? s.p.texto : key === 'asaFuente' ? s.p.asaTexto : s.p.grabadoTexto) || 'Evergreen Love').replace(/\{\{nombre\}\}/g, 'María');
+        const sample = h('div', { class: 'font-sample', style: `font-family:${fontCss(s.p[key])}` }, sampleText.slice(0, 40));
+        sl.addEventListener('change', () => {
+          if (sl.value === '__upload') {
+            sl.value = s.p[key] || 'arial';
+            pickFont(id => { s.p[key] = id; checkpoint(); fullRender(); });
+            return;
+          }
+          s.p[key] = sl.value;
+          loadFont(sl.value);
+          checkpoint(); fullRender();
+        });
+        loadFont(s.p[key]);
+        box.append(propRow(label, sl), sample);
       } else if (kind === 'text') {
         const inp = h('input', { value: s.p[key] ?? '', spellcheck: 'false', 'data-key': key, 'aria-label': label, placeholder: key === 'grabadoTexto' ? 'Ej.: Evergreen Love' : null });
         inp.addEventListener('input', () => { s.p[key] = inp.value; liveRender(); });
@@ -2210,7 +2236,7 @@
           s.p[key] = s.p[key].split(BATCH_MARKER).join(name); replacements++;
           if (key === 'texto' && maxWidthMM > 0) {
             const size = len(s, 'tam', 10);
-            const width = measureTextWidth(s.p[key], size);
+            const width = measureTextWidth(s.p[key], size, s.p.fuente);
             if (width > maxWidthMM) s.p.tam = String(size * maxWidthMM / width / unitMM);
           }
         }
@@ -2220,11 +2246,144 @@
     shapes.forEach(visit);
     return replacements;
   }
-  function measureTextWidth(str, size) {
+  function measureTextWidth(str, size, fontId) {
+    const f = getFont(fontId);
+    if (f) return f.getAdvanceWidth(str, size);
     const canvas = measureTextWidth.canvas || (measureTextWidth.canvas = document.createElement('canvas'));
     const ctx = canvas.getContext('2d');
-    ctx.font = '100px Arial, Helvetica, sans-serif';
+    ctx.font = '100px ' + fontCss(fontId);
     return ctx.measureText(str).width * size / 100;
+  }
+
+  /* ================= Tipografías ================= */
+  // Fuentes libres incluidas (licencia SIL Open Font License, en lib/fonts). Arial es la del sistema.
+  const FONTS = [
+    { id: 'arial', name: 'Arial (del sistema)' },
+    { id: 'montserrat', name: 'Montserrat', file: 'Montserrat.ttf' },
+    { id: 'bebas', name: 'Bebas Neue', file: 'BebasNeue.ttf' },
+    { id: 'playfair', name: 'Playfair Display', file: 'PlayfairDisplay.ttf' },
+    { id: 'cinzel', name: 'Cinzel', file: 'Cinzel.ttf' },
+    { id: 'amatic', name: 'Amatic SC', file: 'AmaticSC.ttf' },
+    { id: 'lobster', name: 'Lobster', file: 'Lobster.ttf' },
+    { id: 'pacifico', name: 'Pacifico', file: 'Pacifico.ttf' },
+    { id: 'dancing', name: 'Dancing Script', file: 'DancingScript.ttf' },
+    { id: 'kaushan', name: 'Kaushan Script', file: 'KaushanScript.ttf' },
+    { id: 'greatvibes', name: 'Great Vibes', file: 'GreatVibes.ttf' },
+    { id: 'sacramento', name: 'Sacramento', file: 'Sacramento.ttf' },
+    { id: 'allura', name: 'Allura', file: 'Allura.ttf' },
+  ];
+  const FONT_BY_ID = Object.fromEntries(FONTS.map(f => [f.id, f]));
+  const fontCache = new Map(); // id → fuente lista | promesa de carga | 'error'
+  const fontFamilyName = id => 'ELS-' + String(id).replace(/[^\w-]/g, '');
+  function fontCss(id) {
+    if (!id || id === 'arial' || (!FONT_BY_ID[id] && !(doc.assets && doc.assets[id]))) return 'Arial, Helvetica, sans-serif';
+    return `'${fontFamilyName(id)}', Arial, sans-serif`;
+  }
+  // Carga la fuente (una sola vez). Devuelve una promesa; al terminar, redibuja.
+  function loadFont(id) {
+    if (!id || id === 'arial') return Promise.resolve(null);
+    const cached = fontCache.get(id);
+    if (cached && typeof cached.then === 'function') return cached;
+    if (cached === 'error') return Promise.resolve(null);
+    if (cached) return Promise.resolve(cached);
+    const a = doc.assets && doc.assets[id];
+    const src = FONT_BY_ID[id] ? fetch('lib/fonts/' + FONT_BY_ID[id].file).then(r => { if (!r.ok) throw new Error('no se encontró'); return r.arrayBuffer(); })
+      : a && a.kind === 'font' ? Promise.resolve(Uint8Array.from(atob(a.data), c => c.charCodeAt(0)).buffer)
+      : Promise.reject(new Error('fuente desconocida'));
+    const pr = src.then(buf => {
+      if (!window.opentype) throw new Error('falta lib/opentype.min.js');
+      const font = opentype.parse(buf);
+      fontCache.set(id, font);
+      // También se registra en la página para las vistas previas del menú
+      try { const ff = new FontFace(fontFamilyName(id), buf.slice(0)); ff.load().then(x => document.fonts.add(x)).catch(() => {}); } catch (e) { /* sin FontFace */ }
+      scheduleRender();
+      return font;
+    }).catch(err => {
+      fontCache.set(id, 'error');
+      msg('No se pudo cargar la tipografía (' + err.message + '). Se usa Arial.');
+      return null;
+    });
+    fontCache.set(id, pr);
+    return pr;
+  }
+  function getFont(id) {
+    if (!id || id === 'arial') return null;
+    const c = fontCache.get(id);
+    if (c && typeof c.then !== 'function' && c !== 'error') return c;
+    if (!c) loadFont(id);
+    return null;
+  }
+  let renderTimer = 0;
+  function scheduleRender() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => { liveRender(); if (v3.open) build3D(); }, 30);
+  }
+  // Antes de exportar, espera a que estén cargadas todas las tipografías usadas
+  function usedFonts() {
+    const ids = new Set();
+    for (const sh of allShapes()) for (const k of ['fuente', 'grabadoFuente', 'asaFuente']) if (sh.p[k] && sh.p[k] !== 'arial') ids.add(sh.p[k]);
+    return [...ids];
+  }
+  function withFonts(fn) {
+    const ids = usedFonts();
+    if (!ids.length) return fn();
+    msg('Preparando tipografías…');
+    Promise.all(ids.map(loadFont)).then(() => fn());
+  }
+
+  // Convierte los textos con tipografía en contornos: se ven igual en cualquier programa y las letras
+  // cursivas que se enciman quedan unidas (el láser no pasa dos veces).
+  const outlineCache = new Map();
+  function fontOutlines(it) {
+    if (!it || !it.texts || !it.texts.some(t => t.font && t.font !== 'arial')) return it;
+    const polys = it.polys.slice(), texts = [];
+    for (const t of it.texts) {
+      const f = getFont(t.font);
+      if (!f || !t.str) { texts.push(t); continue; }
+      const key = [t.font, t.str, t.size, t.x, t.y, t.rot, t.anchor].join('|');
+      let out = outlineCache.get(key);
+      if (!out) {
+        const x0 = t.anchor === 'middle' ? t.x - f.getAdvanceWidth(t.str, t.size) / 2 : t.x;
+        let pl = flattenPathD(f.getPath(t.str, x0, t.y, t.size).toPathData(3), Math.max(0.01, t.size / 500));
+        if (t.rot) { const m = mR(t.rot, t.x, t.y); pl = pl.map(p => ({ closed: p.closed, pts: p.pts.map(q => apply(m, q)) })); }
+        const closed = pl.filter(p => p.closed && p.pts.length >= 3);
+        out = CL && closed.length ? fromC(normalize(toC(closed))) : closed;
+        if (outlineCache.size > 800) outlineCache.clear();
+        outlineCache.set(key, out);
+      }
+      polys.push(...out);
+    }
+    return { ...it, polys, texts };
+  }
+
+  // Sube una fuente propia (.ttf / .otf); queda guardada dentro del diseño
+  function pickFont(onDone) {
+    const input = h('input', { type: 'file', accept: '.ttf,.otf,font/ttf,font/otf' });
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const buf = reader.result;
+          if (!window.opentype) throw new Error('falta lib/opentype.min.js');
+          const font = opentype.parse(buf);
+          const bytes = new Uint8Array(buf);
+          let bin = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          const id = 'f' + uid();
+          const family = (font.names && font.names.fontFamily && (font.names.fontFamily.en || Object.values(font.names.fontFamily)[0])) || file.name.replace(/\.[^.]+$/, '');
+          doc.assets = doc.assets || {};
+          doc.assets[id] = { kind: 'font', name: family, file: file.name, data: btoa(bin) };
+          fontCache.set(id, font);
+          try { const ff = new FontFace(fontFamilyName(id), buf.slice(0)); ff.load().then(x => document.fonts.add(x)).catch(() => {}); } catch (e) { /* sin FontFace */ }
+          onDone(id);
+          msg(`Tipografía cargada: ${family}. Queda guardada dentro de este diseño.`);
+        } catch (err) { msg('No se pudo leer esa fuente: ' + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+    input.click();
   }
   function buildBatch(base, names, columns, gap, maxWidth) {
     if (!names.length || names.length > 300) throw new Error('Escribe entre 1 y 300 nombres, uno por línea.');
@@ -3258,7 +3417,8 @@
   const imgCache = new Map();
   function engraveDecal(s, m, q, P) {
     const T = window.THREE;
-    const it = boxEngraving(s, m, new Map([[q, [0, 0]]]));
+    const it0 = boxEngraving(s, m, new Map([[q, [0, 0]]]));
+    const it = it0 && fontOutlines(it0);
     if (!it) return null;
     const lid = q.name === 'Tapa deslizante';
     const w0 = lid ? m.t + 0.06 : -0.06; // cara exterior (la tapa deslizante mira hacia +w)
@@ -3390,8 +3550,8 @@
   $('#btnOpen').onclick = () => $('#fileInput').click();
   $('#btnImport').onclick = () => $('#fileInput').click();
   $('#btnSave').onclick = saveFile;
-  $('#btnExport').onclick = exportSVG;
-  $('#btnExportDxf').onclick = exportDXF;
+  $('#btnExport').onclick = () => withFonts(exportSVG);
+  $('#btnExportDxf').onclick = () => withFonts(exportDXF);
   $('#btnUndo').onclick = undo;
   $('#btnRedo').onclick = redo;
   $('#btnAddParam').onclick = () => addParam();

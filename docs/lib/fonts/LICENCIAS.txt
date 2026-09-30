@@ -1,0 +1,10 @@
+Tipografías incluidas en Evergreen Love Studio
+
+Todas provienen de Google Fonts (https://github.com/google/fonts) y se distribuyen
+bajo la SIL Open Font License 1.1 (ver OFL.txt), que permite usarlas, incluirlas
+en programas y usarlas en productos comerciales (como piezas cortadas o grabadas):
+
+Montserrat, Bebas Neue, Playfair Display, Cinzel, Amatic SC, Lobster, Pacifico,
+Dancing Script, Kaushan Script, Great Vibes, Sacramento, Allura.
+
+Los derechos de cada fuente pertenecen a sus autores (ver los metadatos de cada archivo .ttf).
