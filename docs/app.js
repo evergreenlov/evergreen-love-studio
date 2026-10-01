@@ -2610,7 +2610,14 @@
   /* ----- Escalar varias piezas juntas ----- */
   const SCALE_POS_X = ['x', 'x2', 'repCx'], SCALE_POS_Y = ['y', 'y2', 'repCy'];
   const SCALE_SIZE = ['w', 'h', 'r', 'd', 'redond', 'tam', 'repDx', 'repDy', 'largo', 'puente', 'paso'];
-  const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge']);
+  // Las cajas escalan solo sus medidas (ancho, alto…); el grosor de la madera, el dedo y el kerf no cambian
+  const SCALE_BOX_SIZE = {
+    box: ['ancho', 'profundo', 'alto', 'divH', 'grabadoTam', 'logoTam'],
+    taper: ['ancho', 'prof', 'anchoArr', 'largoArr', 'alto', 'bandaAnillo'],
+    cone: ['d', 'dArr', 'alto', 'largo'],
+    basket: ['ancho', 'alto', 'profundo', 'radio', 'asaAlto', 'asaArco', 'asaAncho', 'marco'],
+  };
+  const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge', ...Object.keys(SCALE_BOX_SIZE)]);
 
   function scaleSection(shapes) {
     const ok = shapes.filter(s => SCALABLE.has(s.type));
@@ -2623,8 +2630,8 @@
       h('div', { class: 'btn-grid' },
         h('button', { title: 'Cambia el tamaño de todas las piezas a la vez, manteniendo sus posiciones', onclick: () => scaleShapes(ok, parseFloat(pct.value)) }, 'Escalar juntas'),
         h('button', { title: 'Conecta las piezas al parámetro "escala": cambias ese número y todo se ajusta a la vez', onclick: () => linkScale(ok) }, hasParam ? 'Vincular a "escala"' : 'Crear parámetro "escala"')),
-      h('p', { class: 'tip' }, 'Ojo: al escalar también cambian las ranuras. Si el diseño es para madera de 3 mm y lo agrandas al 150 %, las ranuras quedan para 4.5 mm.'
-        + (shapes.length > ok.length ? ' Las cajas y los grupos no se escalan aquí: cámbialos con sus propias medidas.' : '')),
+      h('p', { class: 'tip' }, 'Ojo: en figuras sueltas y piezas importadas también cambian las ranuras (madera de 3 mm al 150 % = 4.5 mm). Las cajas de plantilla solo cambian sus medidas y conservan el grosor de tu madera.'
+        + (shapes.length > ok.length ? ' Los grupos no se escalan aquí: cámbialos con sus propias medidas.' : '')),
     ];
   }
 
@@ -2644,7 +2651,7 @@
     for (const s of shapes) {
       for (const key of SCALE_POS_X) if (key in s.p) s.p[key] = pos(s.p[key], X0);
       for (const key of SCALE_POS_Y) if (key in s.p) s.p[key] = pos(s.p[key], Y0);
-      for (const key of SCALE_SIZE) if (key in s.p) s.p[key] = size(s.p[key]);
+      for (const key of SCALE_BOX_SIZE[s.type] || SCALE_SIZE) if (key in s.p && String(s.p[key]).trim() !== '') s.p[key] = size(s.p[key]);
     }
   }
   function selectionCorner(shapes) {
