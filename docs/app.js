@@ -2318,8 +2318,9 @@
     );
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },
-        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Para cambiar los dedos, las medidas o los anillos hay que volver a la caja.`),
-        h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`)));
+        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Para cambiar los dedos, las medidas o los anillos hay que volver a la caja; mientras tanto puedes verlas armadas en 3D.`),
+        h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`),
+        s.asm ? h('button', { class: 'wide', title: 'Arma las piezas sueltas en 3D; si las agrandas o achicas, el 3D las sigue', onclick: () => open3D(s.from.gid) }, 'Ver las piezas armadas en 3D') : null));
     }
     const isPlainGroup = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
     if (!isPlainGroup) box.append(propRow('Operación', selectEl(s.type === 'import' ? IMPORT_OPS : OPS, s.op, 'Operación', v => { s.op = v; checkpoint(); fullRender(); })));
@@ -3830,15 +3831,24 @@
     // Se guarda la caja original para poder volver a ella (con todos sus parámetros)
     const gid = 'o' + uid();
     doc.origins = doc.origins || {};
-    doc.origins[gid] = JSON.parse(JSON.stringify(s));
+    // Cómo se arma cada pieza en 3D (posición y orientación), para poder verlas armadas aunque ya estén sueltas
+    const mdl = modelOf(s, false);
+    if (mdl) {
+      info.forEach((inf, i) => {
+        const q = inf.outer.name && [...mdl.panels, ...(mdl.dividers || [])].find(x => x.name === inf.outer.name), ax = q && axesOf(mdl, q);
+        if (ax) created[i].asm = { name: inf.outer.name, ax: JSON.parse(JSON.stringify(ax)) };
+      });
+    }
+    doc.origins[gid] = { shape: JSON.parse(JSON.stringify(s)), asm: mdl ? { name: s.name, t: mdl.t, W: mdl.W, H: mdl.H, D: mdl.D, wall: !!mdl.wall } : null };
     created.forEach(c => { c.from = { gid, name: s.name }; });
+    if (v3.open && v3.id === s.id && mdl) { v3.id = null; v3.gid = gid; } // la vista 3D abierta sigue con las piezas sueltas
     const list = listOf(s.id), at = list.indexOf(s);
     list.splice(at, 1, ...created);
     return created;
   }
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
   function restoreOrigin(gid) {
-    const snap = doc.origins && doc.origins[gid];
+    const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
     const pieces = allShapes().filter(x => x.from && x.from.gid === gid);
     if (!snap || !pieces.length) { msg('No se encontró la caja original de estas piezas.'); return; }
     if (!confirm(`Volver a "${snap.name}" con parámetros reemplaza sus ${pieces.length} piezas sueltas. Se pierden los cambios que les hayas hecho a las piezas (posición, tamaño, borrados…). Puedes volver con Deshacer. ¿Continuar?`)) return;
@@ -3849,6 +3859,13 @@
     sel = new Set([orig.id]);
     checkpoint(); fullRender();
     msg(`Listo: "${orig.name}" vuelve a tener sus parámetros (dedos, anillos, medidas…).`);
+  }
+
+  // Ejes 3D de una pieza del modelo (algunas piezas usan "place" en vez de ejes propios)
+  function axesOf(m, q) {
+    if (q.axes) return { eu: q.axes.eu, ev: q.axes.ev, ew: q.axes.ew, o: q.axes.o, out: q.axes.out || [0, 0, 0] };
+    const P = PLACE[q.place];
+    return P ? { eu: P.eu, ev: P.ev, ew: P.ew, o: placeOrigin(m, q), out: P.out } : null;
   }
 
   // Separa cajas, canastas, conos, bandejas y archivos importados en piezas independientes
@@ -4070,7 +4087,7 @@
     return { front: [0, topY, 0], back: [W, topY, D], left: [0, topY, z0], right: [W, topY, z0], bottom: [0, 0, 0], top: [0, H, 0] }[q.place];
   }
 
-  const v3 = { open: false, id: null, renderer: null, scene: null, camera: null, controls: null, group: null, raf: 0, model: null };
+  const v3 = { open: false, id: null, gid: null, renderer: null, scene: null, camera: null, controls: null, group: null, raf: 0, model: null };
 
   function init3D() {
     if (v3.renderer) return true;
@@ -4105,7 +4122,65 @@
     v3.camera.updateProjectionMatrix();
   }
 
+  // Vista 3D de piezas que vienen de una caja desagrupada: cada una se arma en su lugar original,
+  // con su contorno y tamaño actuales (si agrandas o achicas las piezas, el 3D las sigue)
+  function build3DPieces() {
+    const T = window.THREE, gid = v3.gid;
+    const og = doc.origins && doc.origins[gid], info = og && og.asm;
+    const pieces = allShapes().filter(x => x.type === 'import' && x.asm && x.from && x.from.gid === gid);
+    const items = [];
+    let kSum = 0, kN = 0;
+    for (const x of pieces) {
+      const a = doc.assets && doc.assets[x.p.asset];
+      if (!a || a.kind !== 'vector') continue;
+      const w = Math.abs(len(x, 'w')), aspect = a.h / a.w, hh = x.p.prop === 'no' ? Math.abs(len(x, 'h')) : w * aspect, sy = hh / aspect;
+      if (![w, hh].every(Number.isFinite) || !w || !hh) continue;
+      kSum += w / a.realW + hh / a.realH; kN += 2;
+      const cuts = a.polys.filter(pl => pl.closed && pl.pts.length >= 3 && (pl.op || 'corte') === 'corte').map(pl => pl.pts.map(([u, v]) => [u * w, v * sy]));
+      if (!cuts.length) continue;
+      const outer = cuts.reduce((p, q) => polyArea(q) > polyArea(p) ? q : p);
+      items.push({ x, outer, holes: cuts.filter(c => c !== outer && inPoly(c[0], outer)) });
+    }
+    if (!info || !items.length) { $('#view3dMsg').hidden = false; $('#view3dMsg').textContent = 'Ya no quedan piezas de esa caja. Usa «Volver a la caja con parámetros» o Deshacer.'; return; }
+    $('#view3dMsg').hidden = true;
+    for (const c of [...v3.group.children]) {
+      c.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+      v3.group.remove(c);
+    }
+    const k = kN ? kSum / kN : 1, pv = [info.W / 2, info.H / 2, info.D / 2];
+    for (const { x, outer, holes } of items) {
+      const ax = x.asm.ax, o = [0, 1, 2].map(i => pv[i] + k * (ax.o[i] - pv[i])); // las posiciones crecen o se encogen con las piezas
+      const shape = new T.Shape(outer.map(([u, v]) => new T.Vector2(u, v)));
+      for (const hl of holes) shape.holes.push(new T.Path(hl.map(([u, v]) => new T.Vector2(u, v))));
+      const geo = new T.ExtrudeGeometry(shape, { depth: info.t, bevelEnabled: false, curveSegments: 1 });
+      const mat4 = new T.Matrix4().set(
+        ax.eu[0], ax.ev[0], ax.ew[0], o[0],
+        ax.eu[1], ax.ev[1], ax.ew[1], o[1],
+        ax.eu[2], ax.ev[2], ax.ew[2], o[2],
+        0, 0, 0, 1);
+      const holder = new T.Group();
+      holder.userData.out = ax.out;
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: 0xdcb887, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
+      for (const obj of [mesh, edges]) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
+      v3.group.add(holder);
+    }
+    $('#view3dTitle').textContent = `${info.name} · piezas desagrupadas, armadas en 3D (${items.length})`;
+    v3.model = { W: info.W * k, H: info.H * k, D: info.D * k, t: info.t, wall: info.wall };
+    const R3 = Math.hypot(v3.model.W, v3.model.H, v3.model.D);
+    if (v3.lastR && Math.abs(R3 / v3.lastR - 1) > 0.005) {
+      const kk = R3 / v3.lastR, tg = v3.controls.target, cp = v3.camera.position;
+      cp.set(tg.x + (cp.x - tg.x) * kk, tg.y + (cp.y - tg.y) * kk, tg.z + (cp.z - tg.z) * kk);
+      v3.controls.update();
+    }
+    v3.lastR = R3;
+    v3.group.position.set(-pv[0], -pv[1], -pv[2]);
+    v3.pivot.rotation.x = info.wall ? -Math.PI / 2 : 0;
+    applyExplode();
+  }
+
   function build3D() {
+    if (v3.gid) { build3DPieces(); return; }
     const T = window.THREE, s = byId(v3.id);
     const m = modelOf(s, true);
     $('#view3dMsg').hidden = !!m;
@@ -4263,15 +4338,21 @@
     v3.raf = requestAnimationFrame(loop3D);
   }
   function open3D(id) {
-    if (!id) {
+    let gid = null;
+    if (id && id.startsWith('o')) { gid = id; id = null; } // se pidió una caja desagrupada
+    if (!id && !gid) {
       const is3D = s => s && ['box', 'basket', 'taper', 'cone'].includes(s.type);
       const pick = [...sel].map(byId).find(is3D);
       const any = allShapes().find(is3D);
       id = (pick || any || {}).id;
+      if (!id) { // ¿hay piezas desagrupadas que se puedan armar?
+        const pc = [...sel].map(byId).find(x => x && x.asm) || allShapes().find(x => x.type === 'import' && x.asm);
+        if (pc) gid = pc.from.gid;
+      }
     }
-    if (!id) { msg('La vista 3D muestra objetos Caja. Crea una con Plantillas → Caja o con la herramienta Caja (K).'); return; }
+    if (!id && !gid) { msg('La vista 3D muestra cajas, canastas, conos y bandejas. Crea una con Plantillas o con la herramienta Caja (K).'); return; }
     if (!init3D()) return;
-    v3.id = id; v3.open = true; v3.lastR = null;
+    v3.id = id; v3.gid = gid; v3.open = true; v3.lastR = null;
     $('#view3d').hidden = false;
     resize3D();
     evaluateParams();
@@ -4305,7 +4386,7 @@
     $('#unitSelect').value = doc.units;
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
-    if (v3.open) { if (byId(v3.id)) build3D(); else close3D(); }
+    if (v3.open) { if (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id)) build3D(); else close3D(); }
   }
   function updateButtons() {
     $('#btnUndo').disabled = !undoStack.length && JSON.stringify(doc) === savedState;
