@@ -176,6 +176,7 @@
         ['uniones', 'Uniones', JOINT_OPTS], ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }],
         ['nAncho', 'Dedos a lo ancho'], ['nProf', 'Dedos a lo profundo'], ['nAlto', 'Dedos a lo alto'], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
         ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
@@ -193,7 +194,7 @@
         ['nEsq', 'Dedos por esquina'], ['nBaseT', 'Pestañas de la base por lado'],
         ['nAnillos', 'Anillos de refuerzo'], ['bandaAnillo', 'Ancho del anillo'],
         ['tapa', 'Tapa', { no: 'Sin tapa', si: 'Con tapa' }],
-        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (4 paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
         ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'],
         ['x', 'X'], ['y', 'Y'], ROT],
     },
@@ -225,7 +226,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -550,6 +551,22 @@
     const layout = [['front', 'back'], ['left', 'right'], ['bottom', 'top']].map(row => row.map(byPlace));
     for (let i = 0; i < divs.length; i += 4) layout.push(divs.slice(i, i + 4));
     if (wall && s.p.colgar !== 'no') hangingHoles(s, panels.find(q => q.place === 'bottom'), { W, D, t, k });
+    // Cubierta de otra madera: paneles lisos pegados por fuera (sin dedos); cada uno es una pieza más del plano de corte
+    if (s.p.cubierta === 'si') {
+      const c = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
+      if (!(c > 0) || !Number.isFinite(c)) return null;
+      const caras = s.p.cubiertaCaras || 'todas', covers = [];
+      const addC = (name, w, h, place, eu, ev, ew, o, out) => covers.push({ name, w, h, place, holes: [], pts: rect(w, h), th: c, color: 0xa9743f, axes: { eu, ev, ew, o, out } });
+      addC('Cubierta Frente', W, H, 'front', [1, 0, 0], [0, -1, 0], [0, 0, 1], [0, H, -c], [0, 0, -1]);
+      if (caras !== 'frente') {
+        addC('Cubierta Atrás', W, H, 'back', [-1, 0, 0], [0, -1, 0], [0, 0, -1], [W, H, D + c], [0, 0, 1]);
+        addC('Cubierta Lado izquierdo', D + 2 * c, H, 'left', [0, 0, 1], [0, -1, 0], [1, 0, 0], [-c, H, -c], [-1, 0, 0]);
+        addC('Cubierta Lado derecho', D + 2 * c, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + c, H, D + c], [1, 0, 0]);
+        if (caras === 'todas' && lid) addC('Cubierta Tapa', W + 2 * c, D + 2 * c, 'top', [1, 0, 0], [0, 0, 1], [0, -1, 0], [-c, H + c, -c], [0, 1, 0]);
+      }
+      panels.push(...covers);
+      for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
+    }
     return { W, D, H, t, fingers, lid, slide, sep, panels, dividers: divs, layout, wall };
   }
 
@@ -710,9 +727,11 @@
         P.th = c; P.color = 0xa9743f; panels.push(P);
       };
       cover('Cubierta Frente', trap(Wt, Wb, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], 0);
+      if (s.p.cubiertaCaras !== 'frente') {
       cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], 0);
       cover('Cubierta Lado izquierdo', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], cD);
       cover('Cubierta Lado derecho', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], cD);
+      }
     }
     // Anillos de refuerzo
     const band = s.p.bandaAnillo && String(s.p.bandaAnillo).trim() ? len(s, 'bandaAnillo') : 14;
@@ -2979,7 +2998,7 @@
     if (key === 'nEsq') return joint === 'planas' || !byCount;
     if (key === 'nBaseT') return !baseOn || !byCount;
     if (key === 'bandaAnillo') return !(Math.round(num(s, 'nAnillos', 0)) > 0);
-    if (key === 'grosorCub') return s.p.cubierta !== 'si';
+    if (key === 'grosorCub' || key === 'cubiertaCaras') return s.p.cubierta !== 'si';
     return false;
   }
   // En modo bandeja de pared los nombres de las medidas cambian (la caja "acostada")
@@ -2991,6 +3010,8 @@
   // Campos de la caja que no aplican según las opciones elegidas
   function boxFieldHidden(s, key) {
     if (key === 'colgar') return s.p.pared !== 'si';
+    if (key === 'cubierta') return s.p.cajon === 'si' && s.p.pared !== 'si';       // el cajón aún no lleva cubierta
+    if (key === 'grosorCub' || key === 'cubiertaCaras') return s.p.cubierta !== 'si' || (s.p.cajon === 'si' && s.p.pared !== 'si');
     if (s.p.pared === 'si' && ['tapa', 'cajon', 'nCaj', 'holguraC', 'borde', 'holgura', 'agarre'].includes(key)) return true;
     const drawer = s.p.cajon === 'si';
     if (key === 'holguraC' || key === 'nCaj') return !drawer;
@@ -4187,8 +4208,8 @@
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
   // Cambia los dedos (u otras uniones) de una caja desagrupada: se regeneran sus piezas en el mismo lugar
   const ORIGIN_FINGER_KEYS = {
-    box: ['t', 'kerf', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
-    taper: ['t', 'kerf', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
+    box: ['t', 'kerf', 'cubierta', 'grosorCub', 'cubiertaCaras', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
+    taper: ['t', 'kerf', 'cubierta', 'grosorCub', 'cubiertaCaras', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
   };
   function regenOrigin(gid, key, value) {
     const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
