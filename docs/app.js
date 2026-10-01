@@ -2284,6 +2284,7 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
+        ...(() => { const f = shapes.find(x => x.from && doc.origins && doc.origins[x.from.gid]); return f ? [h('button', { class: 'wide', onclick: () => restoreOrigin(f.from.gid) }, `Volver a «${f.from.name}» con parámetros`)] : []; })(),
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
           : []),
@@ -2315,6 +2316,11 @@
       h('div', { class: 'insp-title' }, h('span', { class: 'type' }, TYPES[s.type].label + (parent ? ` · dentro de "${parent.name}"` : ''))),
       propRow('Nombre', name),
     );
+    if (s.from && doc.origins && doc.origins[s.from.gid]) {
+      box.append(h('div', { class: 'origin-note' },
+        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Para cambiar los dedos, las medidas o los anillos hay que volver a la caja.`),
+        h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`)));
+    }
     const isPlainGroup = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
     if (!isPlainGroup) box.append(propRow('Operación', selectEl(s.type === 'import' ? IMPORT_OPS : OPS, s.op, 'Operación', v => { s.op = v; checkpoint(); fullRender(); })));
 
@@ -2367,6 +2373,9 @@
           }
           checkpoint(); fullRender();
         })));
+        if (key === 'dedoModo' && ['taper', 'box', 'panel'].includes(s.type) && s.p.dedoModo !== 'cantidad') {
+          box.append(h('p', { class: 'tip' }, 'Para escoger cuántos dedos quieres, cambia a «Por cantidad»: aparecen los campos para escribir la cantidad.'));
+        }
       } else if (s.type === 'box' && key === 'dedo' && s.p.uniones === 'planas') {
         continue;
       } else if (s.type === 'box' && SLIDE_KEYS.has(key)) {
@@ -3107,7 +3116,10 @@
   }
   function ungroupSel() {
     const boxes = [...sel].map(byId).filter(s => s && SEPARABLE.has(s.type));
-    if (boxes.length) { separateMany(boxes); return; }
+    if (boxes.length) {
+      if (!confirm(`Desagrupar convierte ${boxes.length > 1 ? 'estas cajas' : `«${boxes[0].name}»`} en piezas sueltas: ya no podrás cambiar los dedos, los anillos ni las medidas con parámetros.\n\nSi cambias de opinión, el botón «Volver a la caja con parámetros» (o Deshacer) la repone.\n\n¿Desagrupar?`)) return;
+      separateMany(boxes); return;
+    }
     const groups = [...sel].map(byId).filter(s => s && s.type === 'group');
     if (!groups.length) return;
     const newSel = new Set();
@@ -3815,9 +3827,28 @@
     for (const inf of info) for (const g of inf.images || []) created.push(imageObject(`${s.name} · logo`, g));
     if (lose.polys.length || lose.texts.length) created.push(importObject(`${s.name} · grabado`, lose.polys, lose.texts));
     for (const g of lose.images) created.push(imageObject(`${s.name} · logo`, g));
+    // Se guarda la caja original para poder volver a ella (con todos sus parámetros)
+    const gid = 'o' + uid();
+    doc.origins = doc.origins || {};
+    doc.origins[gid] = JSON.parse(JSON.stringify(s));
+    created.forEach(c => { c.from = { gid, name: s.name }; });
     const list = listOf(s.id), at = list.indexOf(s);
     list.splice(at, 1, ...created);
     return created;
+  }
+  // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
+  function restoreOrigin(gid) {
+    const snap = doc.origins && doc.origins[gid];
+    const pieces = allShapes().filter(x => x.from && x.from.gid === gid);
+    if (!snap || !pieces.length) { msg('No se encontró la caja original de estas piezas.'); return; }
+    if (!confirm(`Volver a "${snap.name}" con parámetros reemplaza sus ${pieces.length} piezas sueltas. Se pierden los cambios que les hayas hecho a las piezas (posición, tamaño, borrados…). Puedes volver con Deshacer. ¿Continuar?`)) return;
+    const list = listOf(pieces[0].id), at = Math.min(...pieces.map(x => list.indexOf(x)).filter(i => i >= 0));
+    for (const x of pieces) { const l = listOf(x.id), i = l.indexOf(x); if (i >= 0) l.splice(i, 1); }
+    const orig = JSON.parse(JSON.stringify(snap));
+    list.splice(Math.max(0, Math.min(at, list.length)), 0, orig);
+    sel = new Set([orig.id]);
+    checkpoint(); fullRender();
+    msg(`Listo: "${orig.name}" vuelve a tener sus parámetros (dedos, anillos, medidas…).`);
   }
 
   // Separa cajas, canastas, conos, bandejas y archivos importados en piezas independientes

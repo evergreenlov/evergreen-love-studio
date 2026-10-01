@@ -314,3 +314,8 @@ button.wide { width: 100%; margin-top: 10px; }
 .meas-item { display: flex; flex-direction: column; min-width: 0; }
 .meas-item strong { color: var(--meas); }
 .meas-det { color: var(--muted); font-size: 11px; }
+
+/* Aviso en piezas desagrupadas */
+.origin-note { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px; margin: 4px 0 10px; }
+.origin-note p { margin: 0 0 8px; font-size: 12px; }
+.origin-note .wide { margin-top: 0; }
