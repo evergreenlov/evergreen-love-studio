@@ -4062,6 +4062,10 @@
 
   function build3D() {
     const T = window.THREE, s = byId(v3.id);
+    const m = modelOf(s, true);
+    $('#view3dMsg').hidden = !!m;
+    // Con medidas momentáneamente inválidas (p. ej. al borrar un número) se deja el último modelo a la vista y se avisa
+    if (!m) { $('#view3dMsg').textContent = 'Estas medidas no son válidas todavía: revisa que cada lado sea mayor que el grosor de la madera.'; return; }
     for (const c of [...v3.group.children]) {
       c.traverse(o => {
         if (o.geometry) o.geometry.dispose();
@@ -4069,10 +4073,15 @@
       });
       v3.group.remove(c);
     }
-    const m = modelOf(s, true);
     v3.model = m;
-    $('#view3dMsg').hidden = !!m;
-    if (!m) { $('#view3dMsg').textContent = 'Las medidas de la caja no son válidas: revisa que sea más grande que dos veces el grosor.'; return; }
+    // Si cambió el tamaño del modelo, la cámara se acerca o se aleja en la misma proporción (mismo ángulo, mismo encuadre)
+    const R3 = Math.hypot(m.W, m.H, m.D);
+    if (v3.lastR && R3 > 0 && Math.abs(R3 / v3.lastR - 1) > 0.005) {
+      const k3 = R3 / v3.lastR, tg = v3.controls.target, cp = v3.camera.position;
+      cp.set(tg.x + (cp.x - tg.x) * k3, tg.y + (cp.y - tg.y) * k3, tg.z + (cp.z - tg.z) * k3);
+      v3.controls.update();
+    }
+    v3.lastR = R3;
     const comps = m.dividers.length ? ` · ${Math.max(1, Math.round(num(s, 'divX', 1)))} × ${Math.max(1, Math.round(num(s, 'divZ', 1)))} compartimentos` : '';
     $('#view3dTitle').textContent = `${s.name} · ${fmt(m.W / unitMM, 3)} × ${fmt(m.D / unitMM, 3)} × ${fmt(m.H / unitMM, 3)} ${unitLabel()} (exterior)${comps}${m.drawer ? ' · con cajón' : ''}`;
     if (m.cone) {
@@ -4200,6 +4209,7 @@
     v3.camera.position.set(R * 0.95, R * 0.8, -R * 1.45);
     v3.controls.target.set(0, 0, 0);
     v3.controls.update();
+    v3.lastR = R;
   }
   function loop3D() {
     if (!v3.open) return;
@@ -4216,7 +4226,7 @@
     }
     if (!id) { msg('La vista 3D muestra objetos Caja. Crea una con Plantillas → Caja o con la herramienta Caja (K).'); return; }
     if (!init3D()) return;
-    v3.id = id; v3.open = true;
+    v3.id = id; v3.open = true; v3.lastR = null;
     $('#view3d').hidden = false;
     resize3D();
     evaluateParams();
