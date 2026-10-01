@@ -1637,7 +1637,7 @@
       nodeShow.add(id);
       const n = nodeList(id), s = byId(id), editable = n.some(q => q.edit);
       msg(`${n.length} puntos en «${(s || {}).name || 'la figura'}». ` + (editable
-        ? 'Haz clic en un punto para elegirlo (Shift suma, o arrastra un recuadro) y arrástralo; clic sobre el borde añade un punto; Supr borra los elegidos; flechas los mueven; Esc oculta.'
+        ? 'Haz clic en un punto para elegirlo (Shift suma, o arrastra un recuadro) y arrástralo; clic sobre el borde añade un punto; Supr borra los elegidos; flechas los mueven poco a poco (Shift: más); Esc oculta.'
         : CONVERTIBLE.has(s && s.type) ? 'Si arrastras un punto, la figura se convierte en un dibujo editable.' : 'Pasa el cursor sobre uno para ver sus coordenadas.'));
     }
     buildInspector(); buildObjects(); drawCanvas();
@@ -1732,11 +1732,13 @@
   function applyNodeDrag(d, p, e) {
     const s0 = byId(d.items[0] && d.items[0].id), fr = importFrame(s0);
     if (!fr) return;
-    const t = snapPt({ x: d.anchor.x + (p.x - d.start.x), y: d.anchor.y + (p.y - d.start.y) }, e);
+    // Imán suave: el punto se pega a la cuadrícula solo cuando está muy cerca (a ~5 px); si no, se mueve libre y sin saltos
+    const soft = v => { const q = snapV(v, e); return Math.abs(q - v) * view.s < 5 ? q : v; };
+    const t = { x: soft(d.anchor.x + (p.x - d.start.x)), y: soft(d.anchor.y + (p.y - d.start.y)) };
     moveNodeItems(d.items, (t.x - d.anchor.x) / fr.w, (t.y - d.anchor.y) / fr.sy);
     d.moved = true;
     $('#stCoords').textContent = `Punto  x ${fmt(t.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(t.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
-    evaluateParams(); drawCanvas();
+    if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; evaluateParams(); drawCanvas(); }); // un redibujado por cuadro
   }
   // Añade un punto sobre un borde y lo deja elegido, listo para arrastrarlo
   function insertNode(seg) {
@@ -2323,7 +2325,7 @@
     const d = drag;
     drag = null;
     stage.classList.remove('panning');
-    if (d.mode === 'node') { if (d.moved) { checkpoint(); buildInspector(); } }
+    if (d.mode === 'node') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else if (d.mode === 'nmarq') {
       const b = rectFrom(d.start, d.cur);
       if (b.w * view.s < 4 && b.h * view.s < 4) { if (d.had) { nodeSel.clear(); } else { sel.clear(); nodeHover = null; buildInspector(); buildObjects(); } }
@@ -4881,8 +4883,11 @@
     if (nodeSel.size && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); deleteNodes(); return; }
     if (nodeSel.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       e.preventDefault();
-      const st = (e.shiftKey ? 10 : 1) * gridMM(), dv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      const fine = isInch() ? 0.005 * 25.4 : 0.1, st = e.shiftKey ? gridMM() : fine, dv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       nudgeNodes(dv[0] * st, dv[1] * st); return;
+    }
+    if (!nodeSel.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && [...sel].some(id => nodeShow.has(id))) {
+      e.preventDefault(); msg('Haz clic en un punto para elegirlo y muévelo con las flechas (con los puntos visibles, las flechas ya no mueven toda la figura).'); return;
     }
     if (e.key === 'Escape' && (nodeSel.size || nodeShow.size)) {
       if (nodeSel.size) nodeSel.clear(); else { nodeShow.clear(); nodeHover = null; svg.style.cursor = ''; msg('Puntos ocultos.'); }
