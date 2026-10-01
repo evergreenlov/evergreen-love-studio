@@ -4855,6 +4855,15 @@
     sel.clear(); checkpoint(); fullRender(); fitView();
   });
 
+  // Caja cónica en pulgadas: base 5.5", boca 6.5" (alto y grosor se cambian en Parámetros)
+  TEMPLATES['taper-55-65'] = (units, sheet) => {
+    const d = taperTemplate('in', sheet);
+    d.name = 'Caja cónica 5.5″ → 6.5″';
+    const set = { ancho: '5.5', largo: '5.5', ancho_arriba: '6.5', largo_arriba: '6.5', alto: '4', grosor: '0.118', dedo: '0.4', kerf: '0.004', sep: '0.2' };
+    for (const p of d.params) if (set[p.name]) p.expr = set[p.name];
+    return d;
+  };
+
   TEMPLATES['names-batch'] = (units, sheet) => {
     const d = newDoc(units); d.name = 'Etiquetas personalizadas'; d.sheet = { ...sheet };
     const u = UNIT_MM[units] || 1, v = n => String(n / u);
