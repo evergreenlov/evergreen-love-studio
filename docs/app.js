@@ -2244,6 +2244,33 @@
     }
   }
 
+  // Material: madera + grosor (+ kerf). Escribe los parámetros «grosor» y «kerf», que usan todas las plantillas
+  const WOODS = ['Basswood (tilo)', 'Walnut (nogal)', 'Mahogany (caoba)', 'Contrachapado (plywood)', 'Acrílico', 'Otro'];
+  const THICKNESSES = [[1.5, '1.5 mm (.059")'], [2, '2 mm (.079")'], [3, '3 mm (.118")'], [3.175, '1/8" (.125")'], [4, '4 mm (.157")'], [5, '5 mm (.197")'], [6, '6 mm (.236")'], [6.2, '6.2 mm (.244")'], [6.35, '1/4" (.250")']];
+  function setParamMM(name, mm) {
+    const v = fmt(mm / unitMM, isInch() ? 4 : 3);
+    const p = doc.params.find(q => q.name === name);
+    if (p) p.expr = v; else doc.params.push({ name, expr: v });
+    checkpoint(); fullRender();
+  }
+  function materialSection() {
+    const gMM = vars.grosor !== undefined ? vars.grosor * unitMM : null;
+    const near = THICKNESSES.find(([mm]) => gMM !== null && Math.abs(mm - gMM) < 0.005);
+    const opts = { '': gMM === null ? 'Elige el grosor…' : 'Otro grosor' };
+    THICKNESSES.forEach(([mm, l]) => { opts[mm] = l; });
+    const gIn = h('input', { value: gMM === null ? '' : fmt(gMM / unitMM, isInch() ? 4 : 3), 'aria-label': 'Grosor real' });
+    gIn.addEventListener('change', () => { const v = parseFloat(gIn.value); if (v > 0) setParamMM('grosor', v * unitMM); else fullRender(); });
+    const kIn = h('input', { value: vars.kerf !== undefined ? fmt(vars.kerf, 4) : '', placeholder: isInch() ? '0.004' : '0.1', 'aria-label': 'Kerf' });
+    kIn.addEventListener('change', () => { const v = parseFloat(kIn.value); if (v >= 0) setParamMM('kerf', v * unitMM); else fullRender(); });
+    return h('div', { class: 'material-box' },
+      h('div', { class: 'insp-sub' }, 'Material'),
+      propRow('Madera', selectEl(Object.fromEntries(WOODS.map(w => [w, w])), doc.wood || WOODS[0], 'Madera', v => { doc.wood = v; checkpoint(); })),
+      propRow('Grosor', selectEl(opts, near ? String(near[0]) : '', 'Grosor de la madera', v => { if (v !== '') setParamMM('grosor', parseFloat(v)); })),
+      propRow(`Grosor real (${unitLabel()})`, gIn),
+      propRow(`Kerf (${unitLabel()})`, kIn),
+      h('p', { class: 'tip' }, 'Mide tu madera con un calibre y escribe el grosor real. Todas las cajas, dedos y ranuras se recalculan solas con ese grosor. La especie (basswood, walnut, mahogany) no cambia las medidas, solo el grosor; el kerf sí puede variar un poco por madera.'));
+  }
+
   function buildInspector() {
     buildInspectorFields();
     refreshHints();
@@ -2273,6 +2300,7 @@
         propRow(`Área ancho (${u})`, numInput(fmt(doc.sheet.w / unitMM, 3), v => { doc.sheet.w = v * unitMM; })),
         propRow(`Área alto (${u})`, numInput(fmt(doc.sheet.h / unitMM, 3), v => { doc.sheet.h = v * unitMM; })),
         propRow(`Paso imán (${u})`, numInput(doc.grid, v => { doc.grid = v; })),
+        materialSection(),
         h('p', { class: 'tip' }, 'En cualquier medida puedes escribir fórmulas, por ejemplo ', h('code', {}, 'ancho - 2*grosor'),
           ', y mezclar unidades: ', h('code', {}, '3mm'), ', ', h('code', {}, '1/8in'), ' o ', h('code', {}, '2"'),
           '. Flechas ↑↓ cambian números' + (isInch() ? ' (1/8", Shift 1", Alt 1/16").' : ' (1 mm, Shift 10, Alt 0.1).')),
