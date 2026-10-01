@@ -1566,36 +1566,49 @@
     $('#zoomLabel').textContent = Math.round(view.s / 3 * 100) + '%';
   }
 
-  /* ----- Puntos (vértices) de cada figura: doble clic sobre una figura los muestra u oculta ----- */
+  /* ----- Puntos (vértices) de cada figura: doble clic los muestra; en dibujos importados y piezas sueltas se arrastran ----- */
   const nodeShow = new Set();
-  function nodePoints(id) {
-    const items = worldCache.get(id) || [], out = [];
-    for (const it of items) {
-      for (const pl of it.polys || []) {
-        const pts = pl.pts, n = pts.length;
-        if (n < 2) continue;
-        const keep = [];
-        for (let i = 0; i < n; i++) {
-          if (!pl.closed && (i === 0 || i === n - 1)) { keep.push(pts[i]); continue; }
-          const a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
-          const a1 = Math.atan2(b[1] - a[1], b[0] - a[0]), a2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
-          let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
-          if (d > 0.21) keep.push(b); // más de ~12°: es un vértice, no una curva suave
-        }
-        if (!keep.length) { // curva suave (círculo, óvalo…): se marcan los cuatro extremos
-          for (const f of [p => p[0], p => -p[0], p => p[1], p => -p[1]]) keep.push(pts.reduce((m, p) => f(p) > f(m) ? p : m, pts[0]));
-        }
-        out.push(...keep);
-      }
+  const CONVERTIBLE = new Set(['rect', 'circle', 'polygon', 'line', 'panel', 'hinge']);
+  // Vértices de una lista de polilíneas (las curvas suaves solo marcan sus cuatro extremos)
+  function vertexIdx(pl) {
+    const pts = pl.pts, n = pts.length, keep = [];
+    if (n < 2) return keep;
+    for (let i = 0; i < n; i++) {
+      if (!pl.closed && (i === 0 || i === n - 1)) { keep.push(i); continue; }
+      const a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
+      const a1 = Math.atan2(b[1] - a[1], b[0] - a[0]), a2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
+      let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d > 0.21) keep.push(i); // más de ~12°: es un vértice, no una curva suave
     }
+    if (!keep.length) for (const f of [p => p[0], p => -p[0], p => p[1], p => -p[1]]) keep.push(pts.reduce((m, p, i) => f(p) > f(pts[m]) ? i : m, 0));
+    return keep;
+  }
+  // Cómo se coloca un dibujo importado en el lienzo (null si está girado o repetido: ahí no se editan puntos)
+  function importFrame(s) {
+    if (!s || s.type !== 'import') return null;
+    const a = doc.assets && doc.assets[s.p.asset];
+    if (!a || a.kind !== 'vector') return null;
+    const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w')), aspect = a.h / a.w;
+    const h = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * aspect;
+    if (![x, y, w, h].every(Number.isFinite) || !w || !h) return null;
+    const rotated = (num(s, 'rot', 0) || 0) !== 0 || (s.p.rep && s.p.rep !== 'no');
+    return { a, x, y, w, sy: h / aspect, rotated };
+  }
+  function nodeList(id) {
+    const s = byId(id), fr = importFrame(s), out = [];
+    if (fr && !fr.rotated) {
+      fr.a.polys.forEach((pl, pi) => vertexIdx(pl).forEach(vi => out.push({ x: fr.x + pl.pts[vi][0] * fr.w, y: fr.y + pl.pts[vi][1] * fr.sy, pi, vi, edit: true })));
+      return out;
+    }
+    for (const it of worldCache.get(id) || []) for (const pl of it.polys || []) vertexIdx(pl).forEach(i => out.push({ x: pl.pts[i][0], y: pl.pts[i][1] }));
     return out;
   }
   function drawNodes() {
     const px = 1 / view.s, hs = 7 * px;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
-      const pts = nodePoints(id), step = Math.max(1, Math.ceil(pts.length / 2500));
-      for (let i = 0; i < pts.length; i += step) svgEl('rect', { x: r4(pts[i][0] - hs / 2), y: r4(pts[i][1] - hs / 2), width: r4(hs), height: r4(hs), class: 'node-pt', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      const pts = nodeList(id), step = Math.max(1, Math.ceil(pts.length / 2500));
+      for (let i = 0; i < pts.length; i += step) svgEl('rect', { x: r4(pts[i].x - hs / 2), y: r4(pts[i].y - hs / 2), width: r4(hs), height: r4(hs), class: 'node-pt' + (pts[i].edit ? ' edit' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
   }
   function toggleNodes(id) {
@@ -1603,8 +1616,8 @@
     if (nodeShow.has(id)) { nodeShow.delete(id); msg('Puntos ocultos.'); }
     else {
       nodeShow.add(id);
-      const n = nodePoints(id).length;
-      msg(`${n} puntos en «${(byId(id) || {}).name || 'la figura'}». Pasa el cursor sobre uno para ver sus coordenadas; doble clic otra vez para ocultarlos.`);
+      const n = nodeList(id), s = byId(id), editable = n.some(q => q.edit);
+      msg(`${n.length} puntos en «${(s || {}).name || 'la figura'}». ` + (editable ? 'Arrastra un punto para cambiar la forma.' : CONVERTIBLE.has(s && s.type) ? 'Si arrastras un punto, la figura se convierte en un dibujo editable.' : 'Pasa el cursor sobre uno para ver sus coordenadas.') + ' Doble clic otra vez para ocultarlos.');
     }
     buildInspector(); buildObjects(); drawCanvas();
   }
@@ -1612,9 +1625,55 @@
     let best = null, bd = 10 / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
-      for (const q of nodePoints(id)) { const d = Math.hypot(q[0] - p.x, q[1] - p.y); if (d < bd) { bd = d; best = q; } }
+      for (const q of nodeList(id)) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id }; } }
     }
     return best;
+  }
+  // Convierte una figura paramétrica sencilla en un dibujo con puntos editables (en el mismo lugar)
+  function convertToEditable(s) {
+    const ev = evalCache.get(s.id);
+    if (!ev) return null;
+    const polys = [], texts = [];
+    for (const it of ev.items) { for (const pl of it.polys) polys.push({ closed: pl.closed, pts: pl.pts, op: it.op }); for (const t of it.texts) texts.push({ ...t, op: it.op }); }
+    if (!polys.length) return null;
+    const o = importObject(s.name || 'Figura', polys, texts), list = listOf(s.id), i = list.indexOf(s);
+    if (i < 0) return null;
+    o.op = s.op;
+    list.splice(i, 1, o);
+    nodeShow.delete(s.id); nodeShow.add(o.id); sel = new Set([o.id]);
+    return o;
+  }
+  // Prepara el arrastre de un punto (clona el dibujo si otras figuras lo comparten)
+  function startNodeDrag(hit) {
+    let s = byId(hit.id);
+    if (!hit.edit) {
+      if (!s) return null;
+      if (!CONVERTIBLE.has(s.type)) { msg(SEPARABLE.has(s.type) ? 'Para mover los puntos de una caja, primero sepárala en piezas (Desagrupar).' : 'Los puntos de esta figura no se pueden mover.'); return null; }
+      if (!confirm('Para mover puntos, esta figura se convierte en un dibujo editable y deja de cambiar con los parámetros. Deshacer la vuelve atrás. ¿Continuar?')) return null;
+      const o = convertToEditable(s);
+      if (!o) return null;
+      fullRender();
+      const q = nodeList(o.id).reduce((m, c) => !m || Math.hypot(c.x - hit.x, c.y - hit.y) < Math.hypot(m.x - hit.x, m.y - hit.y) ? c : m, null);
+      return q ? startNodeDrag({ ...q, id: o.id }) : null;
+    }
+    if (allShapes().some(x => x !== s && x.type === 'import' && x.p.asset === s.p.asset)) {
+      const nid = 'a' + uid();
+      doc.assets[nid] = JSON.parse(JSON.stringify(doc.assets[s.p.asset]));
+      s.p.asset = nid;
+    }
+    const fr = importFrame(s), pl = fr.a.polys[hit.pi], p0 = pl.pts[hit.vi].slice();
+    const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
+    return { mode: 'node', id: s.id, pi: hit.pi, same, p0, orig: { x: hit.x, y: hit.y }, start: null, moved: false };
+  }
+  function applyNodeDrag(d, p, e) {
+    const s = byId(d.id), fr = importFrame(s);
+    if (!fr) return;
+    const t = snapPt({ x: d.orig.x + (p.x - d.start.x), y: d.orig.y + (p.y - d.start.y) }, e);
+    const u = (t.x - fr.x) / fr.w, v = (t.y - fr.y) / fr.sy, pl = fr.a.polys[d.pi];
+    for (const i of d.same) pl.pts[i] = [u, v];
+    d.moved = true;
+    $('#stCoords').textContent = `Punto  x ${fmt(t.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(t.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
+    evaluateParams(); drawCanvas();
   }
 
   function drawOverlay() {
@@ -1859,6 +1918,7 @@
     const ts = handleTargets();
     const b = selectionBox();
     if (!ts.length || !b) return;
+    if (ts.some(t => nodeShow.has(t.id))) return; // con los puntos visibles se editan puntos, no se escala
     const px = 1 / view.s, hs = 9 * px, pad = 3 * px;
     const canScale = ts.every(s => SCALABLE.has(s.type));
     const canRotate = ts.every(s => s.type !== 'line');
@@ -2010,6 +2070,14 @@
     }
     if (e.button !== 0) return;
     const handle = tool === 'select' && e.target.closest && e.target.closest('[data-handle]');
+    if (tool === 'select' && !handle && nodeShow.size) {
+      const hit = nodeNear(p);
+      if (hit) {
+        const d = startNodeDrag(hit);
+        if (d) { d.start = p; drag = d; }
+        return;
+      }
+    }
     if (handle) {
       drag = startHandleDrag(handle.dataset.handle, p);
       return;
@@ -2085,13 +2153,15 @@
     if (tool === 'measure' && !drag) measureMove(e, p);
     if (!drag && nodeShow.size) {
       const q = nodeNear(p);
-      if (q) $('#stCoords').textContent = `Punto  x ${fmt(q[0] / unitMM, isInch() ? 3 : 2)} · y ${fmt(q[1] / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
+      if (q) $('#stCoords').textContent = `Punto  x ${fmt(q.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(q.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
     }
     if (!drag) return;
     if (drag.mode === 'pan') {
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
       view.y = drag.vy - (e.clientY - drag.sy) / view.s;
       drawCanvas();
+    } else if (drag.mode === 'node') {
+      applyNodeDrag(drag, p, e);
     } else if (drag.mode === 'scale' || drag.mode === 'rotate') {
       applyHandleDrag(drag, p, e);
     } else if (drag.mode === 'move') {
@@ -2120,7 +2190,8 @@
     const d = drag;
     drag = null;
     stage.classList.remove('panning');
-    if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
+    if (d.mode === 'node') { if (d.moved) { checkpoint(); buildInspector(); } }
+    else if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
     else if ((d.mode === 'scale' || d.mode === 'rotate') && d.changed) { checkpoint(); buildInspector(); drawCanvas(); }
     else if (d.mode === 'marquee') { buildInspector(); buildObjects(); drawCanvas(); }
     else if (d.mode === 'draw') addShape(shapeFromDrag(d.start, d.cur, true));

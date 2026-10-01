@@ -323,3 +323,4 @@ button.wide { width: 100%; margin-top: 10px; }
 .origin-note .wide { margin-top: 0; }
 
 .node-pt { fill: #fff; stroke: var(--accent); stroke-width: 1.6px; pointer-events: none; }
+.node-pt.edit { fill: var(--accent); stroke: #fff; cursor: grab; }
