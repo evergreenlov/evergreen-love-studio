@@ -250,7 +250,7 @@
 
   const uid = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   // sheet siempre en mm; grid en unidades del documento
-  const newDoc = (units = 'mm') => ({ app: 'creaciones-evergreen', version: 2, name: 'Mi diseño', units, params: [], shapes: [], assets: {}, sheet: { w: BEDS[0].w, h: BEDS[0].h }, grid: units === 'in' ? 0.125 : 1 });
+  const newDoc = (units = 'mm') => ({ app: 'creaciones-evergreen', version: 2, name: 'Mi diseño', units, params: [], shapes: [], assets: {}, measures: [], sheet: { w: BEDS[0].w, h: BEDS[0].h }, grid: units === 'in' ? 0.125 : 1 });
 
   /* ----- Árbol de objetos (los grupos tienen hijos) ----- */
   function* walk(list = doc.shapes, parent = null) {
@@ -1447,6 +1447,7 @@
   }
 
   function evaluateAll() {
+    evalVersion++;
     evalCache = new Map(); worldCache = new Map();
     for (const s of doc.shapes) {
       let r = null;
@@ -1574,9 +1575,213 @@
       const it = primitive(shapeFromDrag(drag.start, drag.cur, false));
       if (it && it.polys.length) svgEl('path', { d: pathD(it.polys), class: 'preview', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
+    drawMeasures();
   }
 
   const rectFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) });
+
+  /* ================= Medir (como la regla de xTool) ================= */
+  // Dos modos: entre dos puntos (se pega a esquinas, centros, puntos medios y bordes) y "ranura o contorno"
+  // (un clic mide el ancho y alto reales de la figura, aunque esté girada). Las medidas se quedan en el diseño.
+  let evalVersion = 0;
+  let measureMode = 'two';
+  const meas = { a: null, cur: null, snap: null, hover: null };
+  const snapCache = { version: -1, polys: [], centers: [] };
+
+  function circleOf(pts) {
+    if (pts.length < 12) return null;
+    const c = pts.reduce((a, q) => [a[0] + q[0] / pts.length, a[1] + q[1] / pts.length], [0, 0]);
+    const rs = pts.map(q => Math.hypot(q[0] - c[0], q[1] - c[1])), mean = rs.reduce((a, b) => a + b, 0) / rs.length;
+    return mean > 0 && (Math.max(...rs) - Math.min(...rs)) / mean < 0.012 ? { c, r: mean } : null;
+  }
+  function snapData() {
+    if (snapCache.version === evalVersion) return snapCache;
+    const polys = [], centers = [];
+    for (const r of evalCache.values()) for (const it of r.items) for (const pl of it.polys) {
+      polys.push(pl);
+      if (pl.closed) { const ci = circleOf(pl.pts); if (ci) centers.push(ci.c); }
+    }
+    Object.assign(snapCache, { version: evalVersion, polys, centers });
+    return snapCache;
+  }
+  function snapAt(p, tol) {
+    const { polys, centers } = snapData();
+    let bd = tol, bp = null;
+    for (const pl of polys) for (const q of pl.pts) { const d = Math.hypot(q[0] - p.x, q[1] - p.y); if (d < bd) { bd = d; bp = q; } }
+    if (bp) return { pt: bp, kind: 'esquina' };
+    for (const c of centers) { const d = Math.hypot(c[0] - p.x, c[1] - p.y); if (d < bd) { bd = d; bp = c; } }
+    if (bp) return { pt: bp, kind: 'centro' };
+    let md = tol * 0.9, mp = null, ed = tol, ep = null;
+    for (const pl of polys) {
+      const pts = pl.pts, n = pts.length, last = pl.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) {
+        const a = pts[i], b = pts[(i + 1) % n];
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, dm = Math.hypot(mx - p.x, my - p.y);
+        if (dm < md) { md = dm; mp = [mx, my]; }
+        const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        if (!l2) continue;
+        const t = Math.max(0, Math.min(1, ((p.x - a[0]) * dx + (p.y - a[1]) * dy) / l2)), qx = a[0] + dx * t, qy = a[1] + dy * t, de = Math.hypot(qx - p.x, qy - p.y);
+        if (de < ed) { ed = de; ep = [qx, qy]; }
+      }
+    }
+    if (mp) return { pt: mp, kind: 'medio' };
+    if (ep) return { pt: ep, kind: 'borde' };
+    return null;
+  }
+  function measurePoint(e, p) {
+    if (e.shiftKey && meas.a) { // Shift: recto (horizontal o vertical)
+      return { pt: Math.abs(p.x - meas.a[0]) >= Math.abs(p.y - meas.a[1]) ? [p.x, meas.a[1]] : [meas.a[0], p.y], kind: 'recto' };
+    }
+    if (e.altKey) return { pt: [p.x, p.y], kind: '' };
+    return snapAt(p, 10 / view.s) || { pt: [p.x, p.y], kind: '' };
+  }
+  // Contorno cerrado más pequeño que contiene el punto (una ranura, un agujero o la pieza completa)
+  function contourAt(p) {
+    let best = null, ba = Infinity;
+    for (const pl of snapData().polys) {
+      if (!pl.closed || pl.pts.length < 3) continue;
+      const b = polyBox(pl.pts);
+      if (p.x < b[0] || p.x > b[2] || p.y < b[1] || p.y > b[3]) continue;
+      const a = (b[2] - b[0]) * (b[3] - b[1]);
+      if (a < ba && inPoly([p.x, p.y], pl.pts)) { best = pl; ba = a; }
+    }
+    return best;
+  }
+  // Rectángulo mínimo que contiene la figura (mide bien aunque esté girada)
+  function minRect(pts) {
+    const P = pts.map(q => [q[0], q[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], up = [];
+    for (const q of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (let i = P.length - 1; i >= 0; i--) { const q = P[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+    const hull = lo.slice(0, -1).concat(up.slice(0, -1));
+    let best = null;
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i], b = hull[(i + 1) % hull.length], ang = Math.atan2(b[1] - a[1], b[0] - a[0]), c = Math.cos(ang), sn = Math.sin(ang);
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const q of hull) { const u = q[0] * c + q[1] * sn, v = -q[0] * sn + q[1] * c; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+      const area = (u1 - u0) * (v1 - v0);
+      if (!best || area < best.area) best = { area, ang, u0, u1, v0, v1 };
+    }
+    if (!best) return null;
+    const c = Math.cos(best.ang), sn = Math.sin(best.ang), back = (u, v) => [u * c - v * sn, u * sn + v * c];
+    return { w: best.u1 - best.u0, h: best.v1 - best.v0, corners: [back(best.u0, best.v0), back(best.u1, best.v0), back(best.u1, best.v1), back(best.u0, best.v1)] };
+  }
+  function contourInfo(pl) {
+    const ci = pl.closed ? circleOf(pl.pts) : null;
+    if (ci) return { circle: true, c: ci.c, d: 2 * ci.r };
+    const r = minRect(pl.pts);
+    return r ? { circle: false, w: Math.min(r.w, r.h), h: Math.max(r.w, r.h), corners: r.corners } : null;
+  }
+
+  const vTxt = v => `${fmt(v / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;                    // en la unidad del diseño
+  const vAlt = v => isInch() ? `${fmt(v, 2)} mm` : `${fmt(v / 25.4, 3)} in`;                  // en la otra unidad
+  // Texto de cada medida (para el lienzo y la lista)
+  function measureText(m) {
+    if (m.kind === 'dos') {
+      const dx = m.b[0] - m.a[0], dy = m.b[1] - m.a[1], L = Math.hypot(dx, dy);
+      return { main: vTxt(L), alt: vAlt(L), detail: `Δx ${vTxt(Math.abs(dx))} · Δy ${vTxt(Math.abs(dy))} · ${fmt(Math.atan2(-dy, dx) / DEG, 1)}°` };
+    }
+    const pl = contourAt({ x: m.p[0], y: m.p[1] }), info = pl && contourInfo(pl);
+    if (!info) return { main: 'sin contorno', alt: '', detail: 'Ya no hay una figura en ese punto.' };
+    return info.circle
+      ? { main: `Ø ${vTxt(info.d)}`, alt: `Ø ${vAlt(info.d)}`, detail: 'Diámetro del círculo' }
+      : { main: `${fmt(info.w / unitMM, isInch() ? 3 : 2)} × ${vTxt(info.h)}`, alt: `${isInch() ? fmt(info.w, 2) : fmt(info.w / 25.4, 3)} × ${vAlt(info.h)}`, detail: 'Ancho × largo del contorno (se actualiza si cambias las medidas)' };
+  }
+
+  function drawLabel(parent, x, y, main, alt, rot = 0) {
+    const px = 1 / view.s, fs = 12 * px;
+    const t = svgEl('text', { x: 0, y: 0, 'font-size': fs, 'text-anchor': 'middle', class: 'meas-label', transform: `translate(${r4(x)} ${r4(y)}) rotate(${r4(rot)})`, 'vector-effect': 'non-scaling-stroke' }, parent);
+    svgEl('tspan', { x: 0 }, t).textContent = main;
+    if (alt) { const b = svgEl('tspan', { x: 0, dy: fs * 1.2, class: 'meas-sub', 'font-size': fs * 0.85 }, t); b.textContent = alt; }
+  }
+  function drawMeasure(m, parent, preview) {
+    const px = 1 / view.s, cls = 'meas-line' + (preview ? ' dash' : '');
+    if (m.kind === 'dos') {
+      const [ax, ay] = m.a, [bx, by] = m.b, dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
+      svgEl('path', { d: `M${r4(ax)} ${r4(ay)}L${r4(bx)} ${r4(by)}`, class: cls, 'vector-effect': 'non-scaling-stroke' }, parent);
+      for (const [x, y] of [m.a, m.b]) svgEl('circle', { cx: r4(x), cy: r4(y), r: 3 * px, class: 'meas-dot' }, parent);
+      if (L < 1e-6) return;
+      const ux = dx / L, uy = dy / L; let nx = -uy, ny = ux;
+      if (ny > 0) { nx = -nx; ny = -ny; }                   // la etiqueta queda por encima de la línea
+      const tk = 6 * px;
+      for (const [x, y] of [m.a, m.b]) svgEl('path', { d: `M${r4(x - uy * tk)} ${r4(y + ux * tk)}L${r4(x + uy * tk)} ${r4(y - ux * tk)}`, class: 'meas-line', 'vector-effect': 'non-scaling-stroke' }, parent);
+      let ang = Math.atan2(dy, dx) / DEG; if (ang > 90 || ang < -90) ang += 180;
+      const mt = measureText(m);
+      drawLabel(parent, (ax + bx) / 2 + nx * 14 * px, (ay + by) / 2 + ny * 14 * px, mt.main, mt.alt, ang);
+      return;
+    }
+    const pl = contourAt({ x: m.p[0], y: m.p[1] });
+    const info = pl && contourInfo(pl);
+    if (!info) return;
+    const mt = measureText(m);
+    if (info.circle) {
+      svgEl('circle', { cx: r4(info.c[0]), cy: r4(info.c[1]), r: r4(info.d / 2), class: cls, 'vector-effect': 'non-scaling-stroke' }, parent);
+      svgEl('path', { d: `M${r4(info.c[0] - info.d / 2)} ${r4(info.c[1])}L${r4(info.c[0] + info.d / 2)} ${r4(info.c[1])}`, class: 'meas-line', 'vector-effect': 'non-scaling-stroke' }, parent);
+      drawLabel(parent, info.c[0], info.c[1] - info.d / 2 - 16 * px, mt.main, mt.alt);
+    } else {
+      svgEl('path', { d: pathD([{ closed: true, pts: info.corners }]), class: cls, 'vector-effect': 'non-scaling-stroke' }, parent);
+      const top = Math.min(...info.corners.map(q => q[1])), cx = info.corners.reduce((a, q) => a + q[0] / 4, 0);
+      drawLabel(parent, cx, top - 16 * px, mt.main, mt.alt);
+    }
+  }
+  function drawMeasures() {
+    const g = svgEl('g', { class: 'measures' }, layerOverlay);
+    for (const m of doc.measures || []) drawMeasure(m, g, false);
+    if (tool !== 'measure') return;
+    if (measureMode === 'two' && meas.cur) {
+      if (meas.a) drawMeasure({ kind: 'dos', a: meas.a, b: meas.cur }, g, true);
+      const px = 1 / view.s;
+      svgEl('circle', { cx: r4(meas.cur[0]), cy: r4(meas.cur[1]), r: 6 * px, class: 'meas-snap' }, g);
+      if (meas.snap && meas.snap.kind) {
+        const t = svgEl('text', { x: r4(meas.cur[0] + 10 * px), y: r4(meas.cur[1] - 10 * px), 'font-size': 11 * px, class: 'meas-label meas-sub', 'vector-effect': 'non-scaling-stroke' }, g);
+        t.textContent = meas.snap.kind;
+      }
+    } else if (measureMode === 'shape' && meas.hover) {
+      const info = contourInfo(meas.hover);
+      if (info) drawMeasure({ kind: 'forma', p: meas.cur }, g, true);
+    }
+  }
+  function measureMove(e, p) {
+    if (measureMode === 'shape') { meas.cur = [p.x, p.y]; meas.hover = contourAt(p); }
+    else { const sp = measurePoint(e, p); meas.cur = sp.pt; meas.snap = sp; }
+    drawOverlay();
+  }
+  function measureClick(e, p) {
+    if (measureMode === 'shape') {
+      if (!contourAt(p)) { msg('Haz clic dentro de una ranura, un agujero o una pieza.'); return; }
+      addMeasure({ kind: 'forma', p: [p.x, p.y] });
+    } else {
+      const sp = measurePoint(e, p);
+      if (!meas.a) { meas.a = sp.pt; msg('Ahora haz clic en el segundo punto (Shift = recto, Alt = sin imán, Esc = cancelar).'); drawOverlay(); }
+      else { const a = meas.a; meas.a = null; addMeasure({ kind: 'dos', a, b: sp.pt }); }
+    }
+  }
+  function addMeasure(m) {
+    doc.measures = doc.measures || [];
+    doc.measures.push({ id: uid(), ...m });
+    checkpoint(); fullRender();
+    const mt = measureText(m);
+    msg(`Medida: ${mt.main} (${mt.alt || mt.detail})`);
+  }
+  function setMeasureMode(mode) {
+    measureMode = mode; meas.a = null; meas.hover = null;
+    $('#btnMeasTwo').classList.toggle('active', mode === 'two');
+    $('#btnMeasShape').classList.toggle('active', mode === 'shape');
+    drawOverlay();
+  }
+  function buildMeasures() {
+    const ul = $('#measureList');
+    if (!ul) return;
+    ul.replaceChildren();
+    const list = doc.measures || [];
+    if (!list.length) { ul.append(h('li', { class: 'empty' }, 'Aún no hay medidas. Usa la herramienta Medir (M) y haz clic en una ranura o entre dos puntos.')); return; }
+    list.forEach((m, i) => {
+      const mt = measureText(m);
+      ul.append(h('li', { title: mt.detail }, h('span', { class: 'meas-item' }, h('strong', {}, `${i + 1} · ${mt.main}`), h('span', { class: 'meas-det' }, `${mt.alt}${mt.alt ? ' · ' : ''}${mt.detail}`)),
+        h('button', { class: 'icon-btn del', 'aria-label': 'Borrar medida ' + (i + 1), title: 'Borrar esta medida', onclick: () => { doc.measures.splice(i, 1); checkpoint(); fullRender(); } }, '×')));
+    });
+  }
 
   /* ----- Controles sobre el lienzo: esquinas para escalar, círculo para girar ----- */
   // Solo objetos principales (no los de adentro de un grupo)
@@ -1763,6 +1968,9 @@
         drag = { mode: 'marquee', start: p, cur: p, base: e.shiftKey ? new Set(sel) : new Set() };
         if (!e.shiftKey && sel.size) { sel.clear(); buildInspector(); buildObjects(); drawCanvas(); }
       }
+    } else if (tool === 'measure') {
+      e.preventDefault();
+      measureClick(e, p);
     } else if (tool === 'text') {
       // Evita que el navegador le quite el foco al campo "Texto" después del clic (así se puede escribir enseguida)
       e.preventDefault();
@@ -1808,6 +2016,7 @@
     const p = toWorld(e);
     lastPointer = p;
     $('#stCoords').textContent = `x ${fmt(p.x / unitMM, isInch() ? 3 : 1)} · y ${fmt(p.y / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`;
+    if (tool === 'measure' && !drag) measureMove(e, p);
     if (!drag) return;
     if (drag.mode === 'pan') {
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
@@ -1902,6 +2111,10 @@
     for (const b of document.querySelectorAll('#tools button')) b.classList.toggle('active', b.dataset.tool === t);
     stage.classList.toggle('tool-draw', !['select', 'hand'].includes(t));
     stage.classList.toggle('tool-hand', t === 'hand');
+    $('#measureBar').hidden = t !== 'measure';
+    meas.a = null; meas.hover = null; meas.cur = null;
+    if (t === 'measure') msg('Medir: haz clic en dos puntos (se pegan a esquinas, centros y bordes) o cambia a "Ranura o contorno".');
+    if (doc) drawOverlay();
   }
   $('#tools').addEventListener('click', e => {
     const b = e.target.closest('button[data-tool]');
@@ -3028,6 +3241,8 @@
       return c;
     };
     doc = { ...base, ...d, sheet: { ...base.sheet, ...(d.sheet || {}) }, assets: { ...(d.assets || {}) } };
+    doc.measures = (Array.isArray(d.measures) ? d.measures : []).filter(m => m && (m.kind === 'dos' ? Array.isArray(m.a) && Array.isArray(m.b) : m.kind === 'forma' && Array.isArray(m.p)))
+      .map(m => ({ ...m, id: m.id || uid() }));
     doc.shapes = doc.shapes.filter(s => s && TYPES[s.type]).map(clean);
     sel.clear();
   }
@@ -4034,7 +4249,7 @@
     $('#docName').value = doc.name;
     $('#unitSelect').value = doc.units;
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
-    drawCanvas(); buildParams(); buildInspector(); buildObjects(); refreshHints(); updateButtons();
+    drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
     if (v3.open) { if (byId(v3.id)) build3D(); else close3D(); }
   }
   function updateButtons() {
@@ -4055,6 +4270,11 @@
   $('#btnUndo').onclick = undo;
   $('#btnRedo').onclick = redo;
   $('#btnAddParam').onclick = () => addParam();
+  $('#btnMeasTwo').onclick = () => setMeasureMode('two');
+  $('#btnMeasShape').onclick = () => setMeasureMode('shape');
+  const clearMeasures = () => { if (!(doc.measures || []).length) return; doc.measures = []; checkpoint(); fullRender(); msg('Medidas borradas.'); };
+  $('#btnMeasClear').onclick = clearMeasures;
+  $('#btnMeasClear2').onclick = clearMeasures;
   $('#btnZoomIn').onclick = () => zoomCenter(1.25);
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
@@ -4143,7 +4363,7 @@
     ]; return d;
   };
 
-  const TOOL_KEYS = { v: 'select', h: 'hand', r: 'rect', c: 'circle', p: 'polygon', l: 'line', t: 'text', f: 'panel', b: 'hinge', k: 'box' };
+  const TOOL_KEYS = { m: 'measure', v: 'select', h: 'hand', r: 'rect', c: 'circle', p: 'polygon', l: 'line', t: 'text', f: 'panel', b: 'hinge', k: 'box' };
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
     const inField = e.target.matches && e.target.matches('input, textarea, select');
@@ -4161,6 +4381,7 @@
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
     if (e.key === ' ') { e.preventDefault(); spaceDown = true; stage.classList.add('panning'); return; }
     if (e.key === 'Escape' && v3.open) { close3D(); return; }
+    if (e.key === 'Escape' && tool === 'measure' && meas.a) { meas.a = null; drawOverlay(); return; }
     if (e.key === 'Escape') {
       // Si estaba editando dentro de un grupo, vuelve a seleccionar el grupo
       const one = sel.size === 1 && byId([...sel][0]);
