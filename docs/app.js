@@ -3056,8 +3056,22 @@
   $('#btnBatch').onclick = openBatch;
 
   /* ================= Acciones ================= */
+  // Al borrar figuras se borran también las medidas tomadas sobre ellas
+  function boxOfShape(id) { const ev = evalCache.get(id); return ev ? bboxOfItems(ev.items) : null; }
+  function dropMeasuresOf(ids) {
+    if (!(doc.measures || []).length) return 0;
+    const gone = [...ids].map(boxOfShape).filter(Boolean);
+    if (!gone.length) return 0;
+    const keep = allShapes().filter(x => !ids.has(x.id)).map(x => boxOfShape(x.id)).filter(Boolean);
+    const tol = 0.5, inside = (b, q) => q[0] >= b.x - tol && q[0] <= b.x + b.w + tol && q[1] >= b.y - tol && q[1] <= b.y + b.h + tol;
+    const orphan = q => gone.some(b => inside(b, q)) && !keep.some(b => inside(b, q));
+    const before = doc.measures.length;
+    doc.measures = doc.measures.filter(m => !(m.kind === 'dos' ? orphan(m.a) || orphan(m.b) : orphan(m.p)));
+    return before - doc.measures.length;
+  }
   function deleteSel() {
     if (!sel.size) return;
+    dropMeasuresOf(new Set(sel));
     for (const id of sel) {
       const list = listOf(id), s = byId(id);
       if (s && list.includes(s)) list.splice(list.indexOf(s), 1);
