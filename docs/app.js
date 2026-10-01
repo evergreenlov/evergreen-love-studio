@@ -1702,7 +1702,7 @@
 
   function drawLabel(parent, x, y, main, alt, rot = 0) {
     const px = 1 / view.s, fs = 12 * px;
-    const t = svgEl('text', { x: 0, y: 0, 'font-size': fs, 'text-anchor': 'middle', class: 'meas-label', transform: `translate(${r4(x)} ${r4(y)}) rotate(${r4(rot)})`, 'vector-effect': 'non-scaling-stroke' }, parent);
+    const t = svgEl('text', { x: 0, y: 0, 'font-size': fs, 'text-anchor': 'middle', class: 'meas-label', style: `stroke-width:${r4(3 * px)}px`, transform: `translate(${r4(x)} ${r4(y)}) rotate(${r4(rot)})` }, parent);
     svgEl('tspan', { x: 0 }, t).textContent = main;
     if (alt) { const b = svgEl('tspan', { x: 0, dy: fs * 1.2, class: 'meas-sub', 'font-size': fs * 0.85 }, t); b.textContent = alt; }
   }
@@ -1719,7 +1719,7 @@
       for (const [x, y] of [m.a, m.b]) svgEl('path', { d: `M${r4(x - uy * tk)} ${r4(y + ux * tk)}L${r4(x + uy * tk)} ${r4(y - ux * tk)}`, class: 'meas-line', 'vector-effect': 'non-scaling-stroke' }, parent);
       let ang = Math.atan2(dy, dx) / DEG; if (ang > 90 || ang < -90) ang += 180;
       const mt = measureText(m);
-      drawLabel(parent, (ax + bx) / 2 + nx * 14 * px, (ay + by) / 2 + ny * 14 * px, mt.main, mt.alt, ang);
+      drawLabel(parent, (ax + bx) / 2 + nx * 24 * px, (ay + by) / 2 + ny * 24 * px, mt.main, mt.alt, ang);
       return;
     }
     const pl = contourAt({ x: m.p[0], y: m.p[1] });
@@ -1743,9 +1743,10 @@
     if (measureMode === 'two' && meas.cur) {
       if (meas.a) drawMeasure({ kind: 'dos', a: meas.a, b: meas.cur }, g, true);
       const px = 1 / view.s;
-      svgEl('circle', { cx: r4(meas.cur[0]), cy: r4(meas.cur[1]), r: 6 * px, class: 'meas-snap' }, g);
+      svgEl('circle', { cx: r4(meas.cur[0]), cy: r4(meas.cur[1]), r: 7 * px, class: 'meas-snap' }, g);
+      svgEl('path', { d: `M${r4(meas.cur[0] - 11 * px)} ${r4(meas.cur[1])}L${r4(meas.cur[0] + 11 * px)} ${r4(meas.cur[1])}M${r4(meas.cur[0])} ${r4(meas.cur[1] - 11 * px)}L${r4(meas.cur[0])} ${r4(meas.cur[1] + 11 * px)}`, class: 'meas-line' }, g);
       if (meas.snap && meas.snap.kind) {
-        const t = svgEl('text', { x: r4(meas.cur[0] + 10 * px), y: r4(meas.cur[1] - 10 * px), 'font-size': 11 * px, class: 'meas-label meas-sub', 'vector-effect': 'non-scaling-stroke' }, g);
+        const t = svgEl('text', { x: r4(meas.cur[0] + 10 * px), y: r4(meas.cur[1] - 10 * px), 'font-size': 11 * px, class: 'meas-label meas-sub', style: `stroke-width:${r4(3 * px)}px` }, g);
         t.textContent = meas.snap.kind;
       }
     } else if (measureMode === 'shape' && meas.hover) {

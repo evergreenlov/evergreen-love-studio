@@ -296,12 +296,14 @@ button.wide { width: 100%; margin-top: 10px; }
 :root { --meas: #c2410c; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --meas: #fdba74; } }
 :root[data-theme="dark"] { --meas: #fdba74; }
+/* los trazos de medida siempre miden lo mismo en pantalla, sin importar el zoom */
+.meas-line, .meas-snap, .meas-dot { vector-effect: non-scaling-stroke; }
 .meas-line { stroke: var(--meas); fill: none; stroke-width: 1.4px; pointer-events: none; }
 .meas-line.dash { stroke-dasharray: 5 3; }
 .meas-dot { fill: var(--meas); stroke: none; pointer-events: none; }
-.meas-snap { fill: none; stroke: var(--meas); stroke-width: 1.6px; pointer-events: none; }
+.meas-snap { fill: none; stroke-width: 1.6px; stroke: var(--meas); stroke-width: 1.6px; pointer-events: none; }
 .meas-label { fill: var(--meas); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 600;
-  paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; user-select: none; }
+  paint-order: stroke; stroke: var(--canvas); stroke-opacity: .85; stroke-linejoin: round; pointer-events: none; user-select: none; }
 .meas-sub { font-weight: 400; opacity: .9; }
 .measure-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 4; display: flex; gap: 6px; padding: 4px 6px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
