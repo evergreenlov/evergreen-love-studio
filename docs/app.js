@@ -1566,6 +1566,57 @@
     $('#zoomLabel').textContent = Math.round(view.s / 3 * 100) + '%';
   }
 
+  /* ----- Puntos (vértices) de cada figura: doble clic sobre una figura los muestra u oculta ----- */
+  const nodeShow = new Set();
+  function nodePoints(id) {
+    const items = worldCache.get(id) || [], out = [];
+    for (const it of items) {
+      for (const pl of it.polys || []) {
+        const pts = pl.pts, n = pts.length;
+        if (n < 2) continue;
+        const keep = [];
+        for (let i = 0; i < n; i++) {
+          if (!pl.closed && (i === 0 || i === n - 1)) { keep.push(pts[i]); continue; }
+          const a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
+          const a1 = Math.atan2(b[1] - a[1], b[0] - a[0]), a2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
+          let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
+          if (d > 0.21) keep.push(b); // más de ~12°: es un vértice, no una curva suave
+        }
+        if (!keep.length) { // curva suave (círculo, óvalo…): se marcan los cuatro extremos
+          for (const f of [p => p[0], p => -p[0], p => p[1], p => -p[1]]) keep.push(pts.reduce((m, p) => f(p) > f(m) ? p : m, pts[0]));
+        }
+        out.push(...keep);
+      }
+    }
+    return out;
+  }
+  function drawNodes() {
+    const px = 1 / view.s, hs = 7 * px;
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      const pts = nodePoints(id), step = Math.max(1, Math.ceil(pts.length / 2500));
+      for (let i = 0; i < pts.length; i += step) svgEl('rect', { x: r4(pts[i][0] - hs / 2), y: r4(pts[i][1] - hs / 2), width: r4(hs), height: r4(hs), class: 'node-pt', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    }
+  }
+  function toggleNodes(id) {
+    sel = new Set([id]);
+    if (nodeShow.has(id)) { nodeShow.delete(id); msg('Puntos ocultos.'); }
+    else {
+      nodeShow.add(id);
+      const n = nodePoints(id).length;
+      msg(`${n} puntos en «${(byId(id) || {}).name || 'la figura'}». Pasa el cursor sobre uno para ver sus coordenadas; doble clic otra vez para ocultarlos.`);
+    }
+    buildInspector(); buildObjects(); drawCanvas();
+  }
+  function nodeNear(p) {
+    let best = null, bd = 10 / view.s;
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      for (const q of nodePoints(id)) { const d = Math.hypot(q[0] - p.x, q[1] - p.y); if (d < bd) { bd = d; best = q; } }
+    }
+    return best;
+  }
+
   function drawOverlay() {
     layerOverlay.replaceChildren();
     const pad = 3 / view.s;
@@ -1577,6 +1628,7 @@
       if (!evalCache.has(id)) renderItems(items, svgEl('g', { class: 'child-sel' }, layerOverlay), ' child', false);
       svgEl('rect', { x: b.x - pad, y: b.y - pad, width: b.w + 2 * pad, height: b.h + 2 * pad, class: 'sel-box', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
+    drawNodes();
     drawHandles();
     if (drag && drag.mode === 'marquee') {
       const b = rectFrom(drag.start, drag.cur);
@@ -1965,10 +2017,12 @@
     if (tool === 'select') {
       const hit = e.target.closest && e.target.closest('[data-id]');
       const id = hit && hit.dataset.id;
-      if (isDoubleClick(e, id) && enterGroup(id, p)) {
+      const dbl = isDoubleClick(e, id);
+      if (dbl && enterGroup(id, p)) {
         drag = { mode: 'move', start: p, moved: false, orig: [...sel].map(byId).filter(Boolean).map(s => ({ s, p: { ...s.p } })) };
         return;
       }
+      if (dbl && id) { toggleNodes(sel.size === 1 && topOf([...sel][0]) && topOf([...sel][0]).id === id ? [...sel][0] : id); return; }
       if (id) {
         // Si hay un hijo de este grupo seleccionado (desde la lista o con doble clic), se mueve el hijo.
         const insideSel = [...sel].some(sid => sid !== id && topOf(sid) && topOf(sid).id === id);
@@ -2029,6 +2083,10 @@
     lastPointer = p;
     $('#stCoords').textContent = `x ${fmt(p.x / unitMM, isInch() ? 3 : 1)} · y ${fmt(p.y / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`;
     if (tool === 'measure' && !drag) measureMove(e, p);
+    if (!drag && nodeShow.size) {
+      const q = nodeNear(p);
+      if (q) $('#stCoords').textContent = `Punto  x ${fmt(q[0] / unitMM, isInch() ? 3 : 2)} · y ${fmt(q[1] / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
+    }
     if (!drag) return;
     if (drag.mode === 'pan') {
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
