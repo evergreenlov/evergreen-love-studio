@@ -324,3 +324,8 @@ button.wide { width: 100%; margin-top: 10px; }
 
 .node-pt { fill: #fff; stroke: var(--accent); stroke-width: 1.6px; pointer-events: none; }
 .node-pt.edit { fill: var(--accent); stroke: #fff; cursor: grab; }
+
+.node-pt.on { fill: var(--meas); stroke: #fff; stroke-width: 1.8px; }
+.node-pt.hov { stroke-width: 2.4px; }
+.node-add { fill: var(--accent-soft, #e6f3ea); stroke: var(--accent); stroke-width: 1.4px; pointer-events: none; }
+.node-add-plus { stroke: var(--accent); stroke-width: 1.6px; fill: none; pointer-events: none; }

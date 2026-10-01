@@ -1567,23 +1567,28 @@
   }
 
   /* ----- Puntos (vértices) de cada figura: doble clic los muestra; en dibujos importados y piezas sueltas se arrastran ----- */
-  const nodeShow = new Set();
+  const nodeShow = new Set();       // figuras con los puntos visibles
+  const nodeSel = new Set();        // puntos seleccionados: "id|poligono|vertice"
+  let nodeHover = null;             // punto o segmento bajo el cursor
   const CONVERTIBLE = new Set(['rect', 'circle', 'polygon', 'line', 'panel', 'hinge']);
-  // Vértices de una lista de polilíneas (las curvas suaves solo marcan sus cuatro extremos)
+  const nkey = (id, pi, vi) => `${id}|${pi}|${vi}`;
+  // Vértices de una polilínea: esquinas (giro de más de ~12°), extremos abiertos y los puntos añadidos a mano (marcados con un 3er valor).
+  // Las curvas suaves solo marcan sus cuatro extremos.
   function vertexIdx(pl) {
-    const pts = pl.pts, n = pts.length, keep = [];
-    if (n < 2) return keep;
+    const pts = pl.pts, n = pts.length, keep = new Set();
+    if (n < 2) return [];
     for (let i = 0; i < n; i++) {
-      if (!pl.closed && (i === 0 || i === n - 1)) { keep.push(i); continue; }
+      if (pts[i][2]) { keep.add(i); continue; }
+      if (!pl.closed && (i === 0 || i === n - 1)) { keep.add(i); continue; }
       const a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
       const a1 = Math.atan2(b[1] - a[1], b[0] - a[0]), a2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
       let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
-      if (d > 0.21) keep.push(i); // más de ~12°: es un vértice, no una curva suave
+      if (d > 0.21) keep.add(i);
     }
-    if (!keep.length) for (const f of [p => p[0], p => -p[0], p => p[1], p => -p[1]]) keep.push(pts.reduce((m, p, i) => f(p) > f(pts[m]) ? i : m, 0));
-    return keep;
+    if (!keep.size) for (const f of [p => p[0], p => -p[0], p => p[1], p => -p[1]]) keep.add(pts.reduce((m, p, i) => f(p) > f(pts[m]) ? i : m, 0));
+    return [...keep].sort((a, b) => a - b);
   }
-  // Cómo se coloca un dibujo importado en el lienzo (null si está girado o repetido: ahí no se editan puntos)
+  // Cómo se coloca un dibujo importado en el lienzo (rotated = girado o repetido: ahí no se editan puntos)
   function importFrame(s) {
     if (!s || s.type !== 'import') return null;
     const a = doc.assets && doc.assets[s.p.asset];
@@ -1594,30 +1599,46 @@
     const rotated = (num(s, 'rot', 0) || 0) !== 0 || (s.p.rep && s.p.rep !== 'no');
     return { a, x, y, w, sy: h / aspect, rotated };
   }
+  const frameWorld = (fr, q) => [fr.x + q[0] * fr.w, fr.y + q[1] * fr.sy];
   function nodeList(id) {
     const s = byId(id), fr = importFrame(s), out = [];
     if (fr && !fr.rotated) {
-      fr.a.polys.forEach((pl, pi) => vertexIdx(pl).forEach(vi => out.push({ x: fr.x + pl.pts[vi][0] * fr.w, y: fr.y + pl.pts[vi][1] * fr.sy, pi, vi, edit: true })));
+      fr.a.polys.forEach((pl, pi) => vertexIdx(pl).forEach(vi => { const [x, y] = frameWorld(fr, pl.pts[vi]); out.push({ x, y, pi, vi, edit: true, key: nkey(id, pi, vi) }); }));
       return out;
     }
     for (const it of worldCache.get(id) || []) for (const pl of it.polys || []) vertexIdx(pl).forEach(i => out.push({ x: pl.pts[i][0], y: pl.pts[i][1] }));
     return out;
   }
+  const anyEditable = () => [...sel].some(id => nodeShow.has(id) && importFrame(byId(id)) && !importFrame(byId(id)).rotated);
   function drawNodes() {
     const px = 1 / view.s, hs = 7 * px;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       const pts = nodeList(id), step = Math.max(1, Math.ceil(pts.length / 2500));
-      for (let i = 0; i < pts.length; i += step) svgEl('rect', { x: r4(pts[i].x - hs / 2), y: r4(pts[i].y - hs / 2), width: r4(hs), height: r4(hs), class: 'node-pt' + (pts[i].edit ? ' edit' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      for (let i = 0; i < pts.length; i += step) {
+        const q = pts[i], on = q.key && nodeSel.has(q.key), hov = nodeHover && nodeHover.kind === 'node' && nodeHover.key === q.key, h2 = (on || hov) ? hs * 1.35 : hs;
+        svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt' + (q.edit ? ' edit' : '') + (on ? ' on' : '') + (hov ? ' hov' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      }
+    }
+    if (nodeHover && nodeHover.kind === 'seg') { // "+" para añadir un punto sobre el borde
+      const [x, y] = nodeHover.pt, r = 6 * px;
+      svgEl('circle', { cx: r4(x), cy: r4(y), r: r4(r), class: 'node-add', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      svgEl('path', { d: `M${r4(x - r * 0.5)} ${r4(y)}H${r4(x + r * 0.5)}M${r4(x)} ${r4(y - r * 0.5)}V${r4(y + r * 0.5)}`, class: 'node-add-plus', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    }
+    if (drag && drag.mode === 'nmarq') {
+      const b = rectFrom(drag.start, drag.cur);
+      svgEl('rect', { x: b.x, y: b.y, width: b.w, height: b.h, class: 'marquee', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
   }
   function toggleNodes(id) {
     sel = new Set([id]);
-    if (nodeShow.has(id)) { nodeShow.delete(id); msg('Puntos ocultos.'); }
+    if (nodeShow.has(id)) { nodeShow.delete(id); nodeSel.clear(); nodeHover = null; msg('Puntos ocultos.'); }
     else {
       nodeShow.add(id);
       const n = nodeList(id), s = byId(id), editable = n.some(q => q.edit);
-      msg(`${n.length} puntos en «${(s || {}).name || 'la figura'}». ` + (editable ? 'Arrastra un punto para cambiar la forma.' : CONVERTIBLE.has(s && s.type) ? 'Si arrastras un punto, la figura se convierte en un dibujo editable.' : 'Pasa el cursor sobre uno para ver sus coordenadas.') + ' Doble clic otra vez para ocultarlos.');
+      msg(`${n.length} puntos en «${(s || {}).name || 'la figura'}». ` + (editable
+        ? 'Haz clic en un punto para elegirlo (Shift suma, o arrastra un recuadro) y arrástralo; clic sobre el borde añade un punto; Supr borra los elegidos; flechas los mueven; Esc oculta.'
+        : CONVERTIBLE.has(s && s.type) ? 'Si arrastras un punto, la figura se convierte en un dibujo editable.' : 'Pasa el cursor sobre uno para ver sus coordenadas.'));
     }
     buildInspector(); buildObjects(); drawCanvas();
   }
@@ -1625,7 +1646,27 @@
     let best = null, bd = 10 / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
-      for (const q of nodeList(id)) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id }; } }
+      for (const q of nodeList(id)) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id, kind: 'node' }; } }
+    }
+    return best;
+  }
+  // Punto más cercano sobre un borde de un dibujo editable (para añadir un punto)
+  function segNear(p) {
+    let best = null, bd = 8 / view.s;
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      const fr = importFrame(byId(id));
+      if (!fr || fr.rotated) continue;
+      fr.a.polys.forEach((pl, pi) => {
+        const n = pl.pts.length, last = pl.closed ? n : n - 1;
+        for (let i = 0; i < last; i++) {
+          const A = frameWorld(fr, pl.pts[i]), B = frameWorld(fr, pl.pts[(i + 1) % n]);
+          const dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+          if (!L2) continue;
+          const t = Math.max(0, Math.min(1, ((p.x - A[0]) * dx + (p.y - A[1]) * dy) / L2)), X = A[0] + t * dx, Y = A[1] + t * dy, d = Math.hypot(p.x - X, p.y - Y);
+          if (d < bd && t > 0.02 && t < 0.98) { bd = d; best = { kind: 'seg', id, pi, si: i, pt: [X, Y] }; }
+        }
+      });
     }
     return best;
   }
@@ -1643,8 +1684,17 @@
     nodeShow.delete(s.id); nodeShow.add(o.id); sel = new Set([o.id]);
     return o;
   }
-  // Prepara el arrastre de un punto (clona el dibujo si otras figuras lo comparten)
-  function startNodeDrag(hit) {
+  // Si otras figuras comparten el dibujo, esta recibe su propia copia antes de cambiarlo
+  function ownAsset(s) {
+    if (allShapes().some(x => x !== s && x.type === 'import' && x.p.asset === s.p.asset)) {
+      const nid = 'a' + uid();
+      doc.assets[nid] = JSON.parse(JSON.stringify(doc.assets[s.p.asset]));
+      s.p.asset = nid;
+    }
+  }
+  const nodeParts = k => { const [id, pi, vi] = k.split('|'); return { id, pi: +pi, vi: +vi }; };
+  // Prepara el arrastre de los puntos elegidos (si el punto tocado no estaba elegido, queda como único elegido)
+  function startNodeDrag(hit, shift) {
     let s = byId(hit.id);
     if (!hit.edit) {
       if (!s) return null;
@@ -1654,26 +1704,100 @@
       if (!o) return null;
       fullRender();
       const q = nodeList(o.id).reduce((m, c) => !m || Math.hypot(c.x - hit.x, c.y - hit.y) < Math.hypot(m.x - hit.x, m.y - hit.y) ? c : m, null);
-      return q ? startNodeDrag({ ...q, id: o.id }) : null;
+      return q ? startNodeDrag({ ...q, id: o.id, kind: 'node' }, false) : null;
     }
-    if (allShapes().some(x => x !== s && x.type === 'import' && x.p.asset === s.p.asset)) {
-      const nid = 'a' + uid();
-      doc.assets[nid] = JSON.parse(JSON.stringify(doc.assets[s.p.asset]));
-      s.p.asset = nid;
+    if (shift) { nodeSel.has(hit.key) ? nodeSel.delete(hit.key) : nodeSel.add(hit.key); drawOverlay(); return null; }
+    if (!nodeSel.has(hit.key)) { nodeSel.clear(); nodeSel.add(hit.key); }
+    const items = [];
+    for (const k of nodeSel) {
+      const { id, pi, vi } = nodeParts(k), sh = byId(id);
+      if (!sh) continue;
+      ownAsset(sh);
+      const fr = importFrame(sh), pl = fr && fr.a.polys[pi];
+      if (!pl || !pl.pts[vi]) continue;
+      const p0 = pl.pts[vi];
+      const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
+      items.push({ id, pi, same, u: p0[0], v: p0[1] });
     }
-    const fr = importFrame(s), pl = fr.a.polys[hit.pi], p0 = pl.pts[hit.vi].slice();
-    const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
-    return { mode: 'node', id: s.id, pi: hit.pi, same, p0, orig: { x: hit.x, y: hit.y }, start: null, moved: false };
+    return { mode: 'node', items, anchor: { x: hit.x, y: hit.y }, start: null, moved: false };
+  }
+  function moveNodeItems(items, du, dv) {
+    for (const it of items) {
+      const fr = importFrame(byId(it.id));
+      if (!fr) continue;
+      const pl = fr.a.polys[it.pi];
+      for (const i of it.same) pl.pts[i] = [it.u + du, it.v + dv, ...(pl.pts[i][2] ? [1] : [])];
+    }
   }
   function applyNodeDrag(d, p, e) {
-    const s = byId(d.id), fr = importFrame(s);
+    const s0 = byId(d.items[0] && d.items[0].id), fr = importFrame(s0);
     if (!fr) return;
-    const t = snapPt({ x: d.orig.x + (p.x - d.start.x), y: d.orig.y + (p.y - d.start.y) }, e);
-    const u = (t.x - fr.x) / fr.w, v = (t.y - fr.y) / fr.sy, pl = fr.a.polys[d.pi];
-    for (const i of d.same) pl.pts[i] = [u, v];
+    const t = snapPt({ x: d.anchor.x + (p.x - d.start.x), y: d.anchor.y + (p.y - d.start.y) }, e);
+    moveNodeItems(d.items, (t.x - d.anchor.x) / fr.w, (t.y - d.anchor.y) / fr.sy);
     d.moved = true;
     $('#stCoords').textContent = `Punto  x ${fmt(t.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(t.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
     evaluateParams(); drawCanvas();
+  }
+  // Añade un punto sobre un borde y lo deja elegido, listo para arrastrarlo
+  function insertNode(seg) {
+    const s = byId(seg.id);
+    ownAsset(s);
+    const fr = importFrame(s), pl = fr.a.polys[seg.pi];
+    pl.pts.splice(seg.si + 1, 0, [(seg.pt[0] - fr.x) / fr.w, (seg.pt[1] - fr.y) / fr.sy, 1]);
+    nodeSel.clear(); nodeSel.add(nkey(seg.id, seg.pi, seg.si + 1));
+    evaluateParams(); drawCanvas();
+    return { id: seg.id, edit: true, x: seg.pt[0], y: seg.pt[1], key: nkey(seg.id, seg.pi, seg.si + 1) };
+  }
+  function deleteNodes() {
+    if (!nodeSel.size) return false;
+    const by = new Map();
+    for (const k of nodeSel) { const { id, pi, vi } = nodeParts(k), kk = id + '|' + pi; if (!by.has(kk)) by.set(kk, { id, pi, vs: [] }); by.get(kk).vs.push(vi); }
+    let removed = 0, kept = 0;
+    for (const { id, pi, vs } of by.values()) {
+      const s = byId(id); if (!s) continue;
+      ownAsset(s);
+      const pl = importFrame(s).a.polys[pi], min = pl.closed ? 3 : 2;
+      for (const vi of vs.sort((a, b) => b - a)) { if (pl.pts.length > min) { pl.pts.splice(vi, 1); removed++; } else kept++; }
+    }
+    nodeSel.clear(); nodeHover = null;
+    if (removed) { checkpoint(); fullRender(); }
+    msg(removed ? `${removed} punto(s) borrado(s).` + (kept ? ' Algunos no se borraron: la figura necesita al menos 3 puntos (2 si es una línea).' : '') : 'No se pueden borrar: la figura necesita al menos 3 puntos (2 si es una línea).');
+    return true;
+  }
+  function nudgeNodes(dx, dy) {
+    const items = [], seen = new Set();
+    for (const k of nodeSel) {
+      const { id, pi, vi } = nodeParts(k), sh = byId(id), fr = sh && importFrame(sh);
+      if (!fr) continue;
+      ownAsset(sh);
+      const pl = importFrame(sh).a.polys[pi], p0 = pl && pl.pts[vi];
+      if (!p0) continue;
+      const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
+      const sig = id + '|' + pi + '|' + same.join(',');
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      items.push({ id, pi, same, u: p0[0], v: p0[1] });
+    }
+    if (!items.length) return;
+    const fr = importFrame(byId(items[0].id));
+    moveNodeItems(items, dx / fr.w, dy / fr.sy);
+    checkpoint(); fullRender();
+  }
+  // Selecciona los puntos que caen dentro de un recuadro
+  function selectNodesIn(b, add) {
+    if (!add) nodeSel.clear();
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      for (const q of nodeList(id)) if (q.edit && q.x >= b.x && q.x <= b.x + b.w && q.y >= b.y && q.y <= b.y + b.h) nodeSel.add(q.key);
+    }
+  }
+  function updateNodeHover(p) {
+    if (!nodeShow.size) { if (nodeHover) { nodeHover = null; drawOverlay(); } return; }
+    const n = nodeNear(p), h = n || segNear(p);
+    const same = (!h && !nodeHover) || (h && nodeHover && h.kind === nodeHover.kind && (h.kind === 'node' ? h.key === nodeHover.key : h.id === nodeHover.id && h.pi === nodeHover.pi && h.si === nodeHover.si && Math.hypot(h.pt[0] - nodeHover.pt[0], h.pt[1] - nodeHover.pt[1]) * view.s < 1));
+    nodeHover = h;
+    svg.style.cursor = h ? (h.kind === 'seg' ? 'copy' : 'pointer') : '';
+    if (!same) drawOverlay();
   }
 
   function drawOverlay() {
@@ -2071,10 +2195,16 @@
     if (e.button !== 0) return;
     const handle = tool === 'select' && e.target.closest && e.target.closest('[data-handle]');
     if (tool === 'select' && !handle && nodeShow.size) {
-      const hit = nodeNear(p);
+      const hit = nodeNear(p) || segNear(p);
       if (hit) {
-        const d = startNodeDrag(hit);
+        let d = null;
+        if (hit.kind === 'seg') d = startNodeDrag(insertNode(hit), false);
+        else d = startNodeDrag(hit, e.shiftKey);
         if (d) { d.start = p; drag = d; }
+        return;
+      }
+      if (anyEditable() && !(e.target.closest && e.target.closest('[data-id]'))) {
+        drag = { mode: 'nmarq', start: p, cur: p, add: e.shiftKey, had: nodeSel.size > 0 };
         return;
       }
     }
@@ -2152,7 +2282,8 @@
     $('#stCoords').textContent = `x ${fmt(p.x / unitMM, isInch() ? 3 : 1)} · y ${fmt(p.y / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`;
     if (tool === 'measure' && !drag) measureMove(e, p);
     if (!drag && nodeShow.size) {
-      const q = nodeNear(p);
+      updateNodeHover(p);
+      const q = nodeHover && nodeHover.kind === 'node' && nodeHover;
       if (q) $('#stCoords').textContent = `Punto  x ${fmt(q.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(q.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
     }
     if (!drag) return;
@@ -2162,6 +2293,8 @@
       drawCanvas();
     } else if (drag.mode === 'node') {
       applyNodeDrag(drag, p, e);
+    } else if (drag.mode === 'nmarq') {
+      drag.cur = p; drawOverlay();
     } else if (drag.mode === 'scale' || drag.mode === 'rotate') {
       applyHandleDrag(drag, p, e);
     } else if (drag.mode === 'move') {
@@ -2191,6 +2324,12 @@
     drag = null;
     stage.classList.remove('panning');
     if (d.mode === 'node') { if (d.moved) { checkpoint(); buildInspector(); } }
+    else if (d.mode === 'nmarq') {
+      const b = rectFrom(d.start, d.cur);
+      if (b.w * view.s < 4 && b.h * view.s < 4) { if (d.had) { nodeSel.clear(); } else { sel.clear(); nodeHover = null; buildInspector(); buildObjects(); } }
+      else selectNodesIn(b, d.add);
+      drawCanvas();
+    }
     else if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
     else if ((d.mode === 'scale' || d.mode === 'rotate') && d.changed) { checkpoint(); buildInspector(); drawCanvas(); }
     else if (d.mode === 'marquee') { buildInspector(); buildObjects(); drawCanvas(); }
@@ -4739,6 +4878,16 @@
     if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel('grupo'); return; }
     if (mod && k === 'a') { e.preventDefault(); sel = new Set(doc.shapes.map(s => s.id)); buildInspector(); buildObjects(); drawCanvas(); return; }
     if (mod) return;
+    if (nodeSel.size && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); deleteNodes(); return; }
+    if (nodeSel.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+      const st = (e.shiftKey ? 10 : 1) * gridMM(), dv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      nudgeNodes(dv[0] * st, dv[1] * st); return;
+    }
+    if (e.key === 'Escape' && (nodeSel.size || nodeShow.size)) {
+      if (nodeSel.size) nodeSel.clear(); else { nodeShow.clear(); nodeHover = null; svg.style.cursor = ''; msg('Puntos ocultos.'); }
+      drawCanvas(); return;
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
     if (e.key === ' ') { e.preventDefault(); spaceDown = true; stage.classList.add('panning'); return; }
     if (e.key === 'Escape' && v3.open) { close3D(); return; }
