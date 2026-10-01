@@ -3865,8 +3865,8 @@
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
   // Cambia los dedos (u otras uniones) de una caja desagrupada: se regeneran sus piezas en el mismo lugar
   const ORIGIN_FINGER_KEYS = {
-    box: ['uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
-    taper: ['uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
+    box: ['t', 'kerf', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
+    taper: ['t', 'kerf', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
   };
   function regenOrigin(gid, key, value) {
     const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
@@ -3904,8 +3904,8 @@
         rows.push(propRow(label, inp));
       }
     }
-    return h('div', { class: 'origin-fingers' }, h('div', { class: 'insp-sub' }, 'Dedos (finger joint) de la caja original'),
-      h('p', { class: 'tip' }, 'Al cambiarlos se vuelven a crear las piezas sueltas en su mismo lugar; se pierden los cambios que les hayas hecho una por una.'), ...rows);
+    return h('div', { class: 'origin-fingers' }, h('div', { class: 'insp-sub' }, 'Madera y dedos (finger joint) de la caja original'),
+      h('p', { class: 'tip' }, '«Grosor material» es el grosor real de tu madera: la profundidad de los dedos y ranuras sale de ahí. Al cambiar algo se vuelven a crear las piezas sueltas en su mismo lugar; se pierden los cambios que les hayas hecho una por una.'), ...rows);
   }
 
   function restoreOrigin(gid) {
