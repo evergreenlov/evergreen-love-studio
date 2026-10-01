@@ -192,7 +192,9 @@
         ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }], ['dedo', 'Ancho de dedo'],
         ['nEsq', 'Dedos por esquina'], ['nBaseT', 'Pestañas de la base por lado'],
         ['nAnillos', 'Anillos de refuerzo'], ['bandaAnillo', 'Ancho del anillo'],
-        ['tapa', 'Tapa', { no: 'Sin tapa', si: 'Con tapa' }], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'],
+        ['tapa', 'Tapa', { no: 'Sin tapa', si: 'Con tapa' }],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (4 paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'],
+        ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'],
         ['x', 'X'], ['y', 'Y'], ROT],
     },
     cone: {
@@ -223,7 +225,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -697,6 +699,20 @@
       panels.push(place('Base', { pts: bigger(union(parts)).pts }, xAxis, flat, up, [ox, 0, oz], [0, -1, 0]));
     } else {
       panels.push(place('Base', { pts: [[0, 0], [Wb, 0], [Wb, Db], [0, Db]] }, xAxis, flat, up, [ox, 0, oz], [0, -1, 0]));
+    }
+    // Cubierta decorativa: paneles lisos de otra madera que se pegan por fuera de cada pared (sin dedos)
+    if (s.p.cubierta === 'si') {
+      const c = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
+      if (!(c > 0) || !Number.isFinite(c)) return null;
+      const cD = c / Math.cos(alD), trap = (wTop, wBot, hh) => { const off = (wTop - wBot) / 2; return { pts: [[0, 0], [wTop, 0], [wTop - off, hh], [off, hh]] }; };
+      const cover = (name, shape, eu, ev, ew, O, out, du) => {
+        const P = place(name, shape, eu, ev, ew, [O[0] + eu[0] * du - ew[0] * c, O[1] + eu[1] * du - ew[1] * c, O[2] + eu[2] * du - ew[2] * c], out);
+        P.th = c; P.color = 0xa9743f; panels.push(P);
+      };
+      cover('Cubierta Frente', trap(Wt, Wb, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], 0);
+      cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], 0);
+      cover('Cubierta Lado izquierdo', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], cD);
+      cover('Cubierta Lado derecho', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], cD);
     }
     // Anillos de refuerzo
     const band = s.p.bandaAnillo && String(s.p.bandaAnillo).trim() ? len(s, 'bandaAnillo') : 14;
@@ -2963,6 +2979,7 @@
     if (key === 'nEsq') return joint === 'planas' || !byCount;
     if (key === 'nBaseT') return !baseOn || !byCount;
     if (key === 'bandaAnillo') return !(Math.round(num(s, 'nAnillos', 0)) > 0);
+    if (key === 'grosorCub') return s.p.cubierta !== 'si';
     return false;
   }
   // En modo bandeja de pared los nombres de las medidas cambian (la caja "acostada")
@@ -4582,7 +4599,7 @@
       const P = q.axes || PLACE[q.place], o = q.axes ? q.axes.o : placeOrigin(m, q);
       const shape = new T.Shape(q.pts.map(([u, v]) => new T.Vector2(u, v)));
       for (const hl of q.holes || []) shape.holes.push(new T.Path(hl.map(([u, v]) => new T.Vector2(u, v))));
-      const geo = new T.ExtrudeGeometry(shape, { depth: m.t, bevelEnabled: false, curveSegments: 1 });
+      const geo = new T.ExtrudeGeometry(shape, { depth: q.th || m.t, bevelEnabled: false, curveSegments: 1 });
       const mat4 = new T.Matrix4().set(
         P.eu[0], P.ev[0], P.ew[0], o[0],
         P.eu[1], P.ev[1], P.ew[1], o[1],
@@ -4592,7 +4609,7 @@
       // Con cajón, el mueble queda fijo y el control desliza el cajón hacia afuera
       holder.userData.out = m.drawer ? [0, 0, 0] : q.axes ? q.axes.out : P.out;
       holder.userData.slide = !!q.drawer;
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: WOOD[q.place] || 0xe2bf8d, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color || WOOD[q.place] || 0xe2bf8d, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
       if (engQs.has(q)) {
