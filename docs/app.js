@@ -2319,7 +2319,8 @@
     );
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },
-        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Para cambiar los dedos, las medidas o los anillos hay que volver a la caja; mientras tanto puedes verlas armadas en 3D.`),
+        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Aquí abajo puedes cambiar los dedos; para otras medidas hay que volver a la caja. También puedes verlas armadas en 3D.`),
+        originFingerEditor(s.from.gid),
         h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`),
         s.asm ? h('button', { class: 'wide', title: 'Arma las piezas sueltas en 3D; si las agrandas o achicas, el 3D las sigue', onclick: () => open3D(s.from.gid) }, 'Ver las piezas armadas en 3D') : null));
     }
@@ -3862,6 +3863,51 @@
     return created;
   }
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
+  // Cambia los dedos (u otras uniones) de una caja desagrupada: se regeneran sus piezas en el mismo lugar
+  const ORIGIN_FINGER_KEYS = {
+    box: ['uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
+    taper: ['uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
+  };
+  function regenOrigin(gid, key, value) {
+    const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
+    const pieces = allShapes().filter(x => x.from && x.from.gid === gid);
+    if (!snap || !pieces.length) return;
+    snap.p[key] = value;
+    if (snap.type === 'box' && key === 'dedoModo' && value === 'cantidad') fingerDefaults(snap);
+    if (snap.type === 'taper' && key === 'dedoModo' && value === 'cantidad') {
+      snap.p.dedoModo = 'ancho';
+      const m = taperModel(snap, true);
+      snap.p.dedoModo = 'cantidad';
+      if (m) { snap.p.nEsq = String((m.taper.nSeg + 1) / 2); snap.p.nBaseT = String(Math.max(1, Math.round((Math.min(m.taper.nbW, m.taper.nbD) - 1) / 2))); }
+    }
+    const list = listOf(pieces[0].id), at = Math.min(...pieces.map(x => list.indexOf(x)).filter(i => i >= 0));
+    for (const x of pieces) { const l = listOf(x.id), i = l.indexOf(x); if (i >= 0) l.splice(i, 1); }
+    const orig = JSON.parse(JSON.stringify(snap));
+    list.splice(Math.max(0, Math.min(at, list.length)), 0, orig);
+    delete doc.origins[gid];
+    separateMany([orig]);
+    const first = allShapes().find(x => x.from && sel.has(x.id));
+    if (first) { sel = new Set([first.id]); fullRender(); }
+    msg('Dedos cambiados: las piezas sueltas se regeneraron con la nueva unión (Deshacer vuelve atrás).');
+  }
+  function originFingerEditor(gid) {
+    const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og), keys = snap && ORIGIN_FINGER_KEYS[snap.type];
+    if (!keys) return null;
+    const hidden = k => snap.type === 'box' ? boxFieldHidden(snap, k) : taperFieldHidden(snap, k);
+    const rows = [];
+    for (const [key, label, kind] of TYPES[snap.type].props) {
+      if (!keys.includes(key) || hidden(key)) continue;
+      if (kind && typeof kind === 'object') rows.push(propRow(label, selectEl(kind, snap.p[key] || Object.keys(kind)[0], label, v => regenOrigin(gid, key, v))));
+      else {
+        const inp = h('input', { value: snap.p[key] == null ? '' : String(snap.p[key]), 'aria-label': label });
+        inp.addEventListener('change', () => regenOrigin(gid, key, inp.value));
+        rows.push(propRow(label, inp));
+      }
+    }
+    return h('div', { class: 'origin-fingers' }, h('div', { class: 'insp-sub' }, 'Dedos (finger joint) de la caja original'),
+      h('p', { class: 'tip' }, 'Al cambiarlos se vuelven a crear las piezas sueltas en su mismo lugar; se pierden los cambios que les hayas hecho una por una.'), ...rows);
+  }
+
   function restoreOrigin(gid) {
     const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
     const pieces = allShapes().filter(x => x.from && x.from.gid === gid);
