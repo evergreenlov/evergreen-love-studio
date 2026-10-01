@@ -175,8 +175,8 @@
       props: [['pared', 'Uso', { no: 'Caja normal', si: 'Bandeja de pared (TypeTray)' }], ['colgar', 'Agujeros para colgar', { si: 'Con agujeros', no: 'Sin agujeros' }],
         ['uniones', 'Uniones', JOINT_OPTS], ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }],
         ['nAncho', 'Dedos a lo ancho'], ['nProf', 'Dedos a lo profundo'], ['nAlto', 'Dedos a lo alto'], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
-        ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
         ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
+        ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
@@ -2662,6 +2662,7 @@
 
     for (const [key, label0, kind] of TYPES[s.type].props) {
       const label = boxLabel(s, key, label0);
+      if (key === 'cubierta' && (s.type === 'box' ? !boxFieldHidden(s, key) : s.type === 'taper')) box.append(h('div', { class: 'insp-sub' }, 'Cubierta de otra madera (chapa por fuera)'));
       if (kind === 'edge') {
         box.append(propRow(label, selectEl(EDGE_OPTS, s.p[key] || 'plano', label, v => { s.p[key] = v; checkpoint(); liveRender(); })));
       } else if (s.type === 'box' && boxFieldHidden(s, key)) {
