@@ -185,7 +185,10 @@
       label: 'Caja cónica', noOffset: true,
       props: [['ancho', 'Ancho abajo'], ['prof', 'Largo abajo'], ['anchoArr', 'Ancho arriba'], ['largoArr', 'Largo arriba'], ['alto', 'Alto'],
         ['t', 'Grosor material'],
-        ['uniones', 'Uniones', { planas: 'Para pegar (sin dedos)', esquinas: 'Dedos solo en las esquinas', dedos: 'Dedos en esquinas y base' }],
+        ['uniones', 'Uniones', { planas: 'Para pegar (sin dedos)', esquinas: 'Dedos solo en las esquinas', dedos: 'Dedos en esquinas y base', custom: 'Elegir por esquina' }],
+        ['cFI', 'Esquina Frente / Lado izq.', { si: 'Con dedos', no: 'Pegada' }], ['cFD', 'Esquina Frente / Lado der.', { si: 'Con dedos', no: 'Pegada' }],
+        ['cAI', 'Esquina Atrás / Lado izq.', { si: 'Con dedos', no: 'Pegada' }], ['cAD', 'Esquina Atrás / Lado der.', { si: 'Con dedos', no: 'Pegada' }],
+        ['baseDedos', 'Base', { si: 'Con pestañas', no: 'Pegada' }],
         ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }], ['dedo', 'Ancho de dedo'],
         ['nEsq', 'Dedos por esquina'], ['nBaseT', 'Pestañas de la base por lado'],
         ['nAnillos', 'Anillos de refuerzo'], ['bandaAnillo', 'Ancho del anillo'],
@@ -220,7 +223,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -575,7 +578,11 @@
     const Wb = len(s, 'ancho', 100), Db = len(s, 'prof', 80), Wt = len(s, 'anchoArr', 140), Dt = len(s, 'largoArr', 120), H = len(s, 'alto', 80);
     const lid = s.p.tapa === 'si';
     const joint = CL ? (s.p.uniones || 'planas') : 'planas';
-    const cornerF = joint !== 'planas', baseF = joint === 'dedos';
+    // Dedos por esquina: Frente/Atrás con Lado izquierdo/derecho (como se llaman las piezas), y la base aparte
+    const on = k => s.p[k] !== 'no';
+    const cFI = joint === 'custom' ? on('cFI') : joint !== 'planas', cFD = joint === 'custom' ? on('cFD') : joint !== 'planas';
+    const cAI = joint === 'custom' ? on('cAI') : joint !== 'planas', cAD = joint === 'custom' ? on('cAD') : joint !== 'planas';
+    const cornerF = cFI || cFD || cAI || cAD, baseF = joint === 'custom' ? on('baseDedos') : joint === 'dedos';
     if (![t, sep, kerf, Wb, Db, Wt, Dt, H].every(Number.isFinite) || t <= 0 || Wb <= 4 * t || Db <= 4 * t || Wt <= 4 * t || Dt <= 4 * t || H <= 2 * t) return null;
     const dW = (Wt - Wb) / 2, dD = (Dt - Db) / 2;
     const Lf = Math.hypot(H, dD), Ls = Math.hypot(H, dW); // largo inclinado de frente/atrás y de los lados
@@ -583,9 +590,7 @@
     const alW = Math.atan(dW / H), alD = Math.atan(dD / H); // inclinación (+ = se abre hacia arriba)
     const tW = Math.tan(alW), tD = Math.tan(alD);
     const hW = t / Math.cos(alW), hD = t / Math.cos(alD);   // grosor horizontal de las paredes laterales / de frente y atrás
-    const thS = cornerF ? 0 : hD;                           // pegadas: los lados se acortan; con dedos llegan completos
-    const wTopS = Dt - 2 * thS, wBotS = Db - 2 * thS;
-    if (wTopS <= t || wBotS <= t) return null;
+    if (Dt - 2 * hD <= t || Db - 2 * hD <= t) return null;   // los lados se acortan en las esquinas pegadas
     const ox = Math.max(0, dW), oz = Math.max(0, dD);
     const yb = baseF ? 0 : t, yT = yb + H;                 // altura donde empiezan y terminan las paredes
     const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v) || 0));
@@ -617,12 +622,15 @@
 
     // Pared trapezoidal con dedos en las dos esquinas, pestañas/muescas de la base y ranuras para los anillos.
     // pat: 'A' (frente/atrás: dedos en los segmentos pares) o 'B' (lados: muescas en los pares).
-    const wall = (wTop, wBot, hh, pat, al, nBot, tabW) => {
+    // fingL / fingR: la esquina de ese lado lleva dedos. Las paredes laterales (pat 'B') se acortan donde la esquina va pegada.
+    const wall = (wTop, wBot, hh, pat, al, nBot, tabW, fingL, fingR) => {
       const off = (wTop - wBot) / 2;
-      const TL = [0, 0], TR = [wTop, 0], BR = [wTop - off, hh], BL = [off, hh];
+      const shL = pat === 'B' && !fingL ? hD : 0, shR = pat === 'B' && !fingR ? hD : 0;
+      const TL = [shL, 0], TR = [wTop - shR, 0], BR = [wTop - off - shR, hh], BL = [off + shL, hh];
       const cuts = [];
-      if (cornerF) {
+      if (fingL || fingR) {
         for (const [P0, P1, left] of [[TL, BL, true], [TR, BR, false]]) {
+          if (left ? !fingL : !fingR) continue;
           const dx = P1[0] - P0[0], dy = P1[1] - P0[1], Lh = Math.hypot(dx, dy), e = [dx / Lh, dy / Lh];
           const inn = left ? [e[1], -e[0]] : [-e[1], e[0]]; // hacia adentro de la pared
           const seg = Lh / nSeg;
@@ -659,13 +667,16 @@
       return { name, w: b[2] - b[0], h: b[3] - b[1], pts: outline.map(sh), holes: holes.map(hl => hl.map(sh)),
         axes: { eu, ev, ew, o: [O[0] + mx * eu[0] + my * ev[0], O[1] + mx * eu[1] + my * ev[1], O[2] + mx * eu[2] + my * ev[2]], out } };
     };
-    const F = wall(Wt, Wb, Lf, 'A', alD, nbW, rg => rg.tabWf);
-    const S = wall(wTopS, wBotS, Ls, 'B', alW, nbD, rg => rg.tabWs);
+    // Cada pared usa sus dos esquinas (en el plano de cada pieza, "izquierda" es donde empieza su eje)
+    const Ff = wall(Wt, Wb, Lf, 'A', alD, nbW, rg => rg.tabWf, cFI, cFD);   // frente: izq = Lado izquierdo, der = Lado derecho
+    const Fb = wall(Wt, Wb, Lf, 'A', alD, nbW, rg => rg.tabWf, cAD, cAI);   // atrás (está invertida): izq = Lado derecho
+    const Sl = wall(Dt, Db, Ls, 'B', alW, nbD, rg => rg.tabWs, cFI, cAI);   // lado izquierdo: izq = Frente, der = Atrás
+    const Sr = wall(Dt, Db, Ls, 'B', alW, nbD, rg => rg.tabWs, cAD, cFD);   // lado derecho: izq = Atrás, der = Frente
     const panels = [
-      place('Frente', F, [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1]),
-      place('Atrás', F, [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1]),
-      place('Lado izquierdo', S, [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD + thS], [-1, 0, 0]),
-      place('Lado derecho', S, [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD - thS], [1, 0, 0]),
+      place('Frente', Ff, [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1]),
+      place('Atrás', Fb, [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1]),
+      place('Lado izquierdo', Sl, [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0]),
+      place('Lado derecho', Sr, [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0]),
     ];
 
     // Base: lisa, o con pestañas que entran en las muescas de las cuatro paredes
@@ -705,7 +716,7 @@
     });
     if (lid) panels.push(place('Tapa', { pts: [[0, 0], [Wt, 0], [Wt, Dt], [0, Dt]] }, xAxis, flat, up, [ox - dW, yT, oz - dD], [0, 1, 0]));
     return { W: Math.max(Wb, Wt), D: Math.max(Db, Dt), H: yT + (lid ? t : 0), t, fingers: cornerF, sep, panels, dividers: [], layout: [panels],
-      taper: { angW: alW / DEG, angD: alD / DEG, joint, nSeg, nbW, nbD, nRings: rings.length, E } };
+      taper: { angW: alW / DEG, angD: alD / DEG, joint, nSeg, nbW, nbD, nRings: rings.length, E, corners: [cFI, cFD, cAI, cAD].filter(Boolean).length, baseF } };
   }
 
   /* ----- Cono con bisagra viva: una pared que se enrolla (abanico) y una base redonda ----- */
@@ -2540,8 +2551,9 @@
     const tp = m.taper;
     el.textContent = s.type === 'taper'
       ? `Inclinación de las paredes: ${fmt(Math.abs(tp.angW), 1)}° a los lados y ${fmt(Math.abs(tp.angD), 1)}° al frente y atrás. `
-        + (tp.joint === 'planas' ? 'Se arma pegando: las paredes se apoyan sobre la base y el pegamento rellena las rendijas. Para reforzarla, elige dedos o agrega anillos.'
-          : `Cada esquina inclinada lleva ${(tp.nSeg + 1) / 2} dedos` + (tp.joint === 'dedos' ? ' y la base se une a las paredes con pestañas' : '') + '.')
+        + (!tp.corners && !tp.baseF ? 'Se arma pegando: las paredes se apoyan sobre la base y el pegamento rellena las rendijas. Para reforzarla, elige dedos o agrega anillos.'
+          : `${tp.corners === 4 ? 'Las 4 esquinas inclinadas llevan' : tp.corners ? `${tp.corners} esquina(s) llevan` : 'Ninguna esquina lleva'} ${(tp.nSeg + 1) / 2} dedos`
+            + (tp.baseF ? ' y la base se une a las paredes con pestañas' : tp.corners ? ' (la base va pegada)' : '') + '.')
         + (tp.nRings ? ` ${tp.nRings} anillo(s) de refuerzo cruzan las paredes por ranuras.` : '')
       : `La pared se corta como un abanico de ${fmt(m.cone.theta / DEG, 0)}° y radio ${u(m.cone.Aout)} ${unitLabel()}. Enróllala siguiendo las líneas de la bisagra, cierra con las pestañas y pega la base por dentro.`;
   }
@@ -2627,10 +2639,12 @@
   // Caja cónica: solo se muestran los campos de dedos y anillos que aplican según las opciones
   function taperFieldHidden(s, key) {
     const joint = s.p.uniones || 'planas', byCount = s.p.dedoModo === 'cantidad';
+    if (['cFI', 'cFD', 'cAI', 'cAD', 'baseDedos'].includes(key)) return joint !== 'custom';
+    const baseOn = joint === 'dedos' || (joint === 'custom' && s.p.baseDedos !== 'no');
     if (key === 'dedoModo') return joint === 'planas';
     if (key === 'dedo') return joint === 'planas' || byCount;
     if (key === 'nEsq') return joint === 'planas' || !byCount;
-    if (key === 'nBaseT') return joint !== 'dedos' || !byCount;
+    if (key === 'nBaseT') return !baseOn || !byCount;
     if (key === 'bandaAnillo') return !(Math.round(num(s, 'nAnillos', 0)) > 0);
     return false;
   }
