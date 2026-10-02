@@ -824,6 +824,49 @@
 
   /* ----- Grabado de nombre o logo en la caja ----- */
   // Piezas donde se graba. Con varios cajones, cada frente decorativo (el de arriba primero).
+  // Dónde queda cada pieza de la caja en el plano de corte (las más altas primero, en filas dentro de la cama)
+  function boxPlacement(s, m) {
+    const x0 = len(s, 'x'), y0 = len(s, 'y');
+    const pieces = m.layout.flat().filter(Boolean).sort((a, b) => b.h - a.h);
+    const maxW = Math.max(doc.sheet.w - Math.max(0, x0), ...pieces.map(q => q.w));
+    let x = x0, y = y0, shelf = 0;
+    const placed = new Map();
+    for (const q of pieces) {
+      if (x > x0 && x - x0 + q.w > maxW) { x = x0; y += shelf + m.sep; shelf = 0; }
+      placed.set(q, [x, y]);
+      x += q.w + m.sep;
+      shelf = Math.max(shelf, q.h);
+    }
+    return placed;
+  }
+  // Diseños dibujados sobre una pieza en el plano de corte (grabado, marcado, recortes): se ven también en la vista 3D
+  function boxOverlays(s, m) {
+    const out = new Map();
+    if (!m || !m.layout) return out;
+    const placed = boxPlacement(s, m), spots = [...placed].map(([q, [px, py]]) => ({ q, px, py, outline: q.pts.map(([u, v]) => [u + px, v + py]) }));
+    const get = (q, px, py) => { let o = out.get(q); if (!o) { o = { engr: { polys: [], texts: [], images: [] }, holes: [] }; out.set(q, o); } return o; };
+    for (const id of evalCache.keys()) {
+      const sh = byId(id);
+      if (!sh || id === s.id || SEPARABLE.has(sh.type) || (sh.type === 'import' && sh.asm)) continue;
+      for (const it of worldCache.get(id) || []) {
+        const b = bboxOfItems([it]);
+        if (!b) continue;
+        const c = [b.x + b.w / 2, b.y + b.h / 2], sp = spots.find(z => inPoly(c, z.outline));
+        if (!sp) continue;
+        const { px, py } = sp, o = get(sp.q);
+        const mv = ([x, y]) => [x - px, y - py];
+        if (it.op === 'grabado' || it.op === 'marcado') {
+          for (const pl of it.polys) o.engr.polys.push({ closed: pl.closed, pts: pl.pts.map(mv) });
+          for (const t of it.texts) o.engr.texts.push({ ...t, x: t.x - px, y: t.y - py });
+          for (const g of it.images || []) o.engr.images.push({ ...g, x: g.x - px, y: g.y - py });
+        } else if (it.op === 'corte') {
+          for (const pl of it.polys) if (pl.closed && pl.pts.every(p => inPoly(p, sp.outline))) o.holes.push(pl.pts.map(mv));
+        }
+      }
+    }
+    return out;
+  }
+
   function engraveTargets(s, m) {
     let where = s.p.grabadoEn || 'auto';
     if (where === 'auto') where = m.drawer ? 'cajon' : (m.slide || m.lid) ? 'tapa' : 'frente';
@@ -1256,23 +1299,13 @@
       case 'basket': {
         const m = modelOf(s, false);
         if (!m) return null;
-        const x0 = len(s, 'x'), y0 = len(s, 'y');
-        // Plano de corte: [frente, atrás] / [lados] / [base, tapa]
-        // Acomoda las piezas en filas dentro del ancho de la cama de la máquina (las más altas primero)
-        const pieces = m.layout.flat().filter(Boolean).sort((a, b) => b.h - a.h);
-        const maxW = Math.max(doc.sheet.w - Math.max(0, x0), ...pieces.map(q => q.w));
-        let x = x0, y = y0, shelf = 0;
-        const placed = new Map();
-        for (const q of pieces) {
-          if (x > x0 && x - x0 + q.w > maxW) { x = x0; y += shelf + m.sep; shelf = 0; }
-          const px = x, py = y;
-          placed.set(q, [px, py]);
+        // Plano de corte: [frente, atrás] / [lados] / [base, tapa]; las piezas van en filas dentro del ancho de la cama
+        const placed = boxPlacement(s, m);
+        for (const [q, [px, py]] of placed) {
           const mv = ([u, v]) => [u + px, v + py];
           it.polys.push({ closed: true, pts: q.pts.map(mv), name: q.name });
           for (const hl of q.holes || []) it.polys.push({ closed: true, pts: hl.map(mv) });
           for (const ln of q.lines || []) it.polys.push({ closed: false, pts: ln.map(mv) }); // cortes de la bisagra viva
-          x += q.w + m.sep;
-          shelf = Math.max(shelf, q.h);
         }
         const eng = boxEngraving(s, m, placed) || { op: 'grabado', polys: [], texts: [], images: [] };
         // Textos propios de las piezas (p. ej. el texto del asa de la canasta)
@@ -4636,11 +4669,11 @@
       applyExplode();
       return;
     }
-    const engQs = new Set(engraveTargets(s, m).map(tg => tg.q));
+    const engQs = new Set(engraveTargets(s, m).map(tg => tg.q)), ovs = boxOverlays(s, m);
     for (const q of [...m.panels, ...m.dividers]) {
       const P = q.axes || PLACE[q.place], o = q.axes ? q.axes.o : placeOrigin(m, q);
       const shape = new T.Shape(q.pts.map(([u, v]) => new T.Vector2(u, v)));
-      for (const hl of q.holes || []) shape.holes.push(new T.Path(hl.map(([u, v]) => new T.Vector2(u, v))));
+      for (const hl of [...(q.holes || []), ...((ovs.get(q) || { holes: [] }).holes)]) shape.holes.push(new T.Path(hl.map(([u, v]) => new T.Vector2(u, v))));
       const geo = new T.ExtrudeGeometry(shape, { depth: q.th || m.t, bevelEnabled: false, curveSegments: 1 });
       const mat4 = new T.Matrix4().set(
         P.eu[0], P.ev[0], P.ew[0], o[0],
@@ -4654,8 +4687,8 @@
       const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color || WOOD[q.place] || 0xe2bf8d, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
-      if (engQs.has(q)) {
-        const decal = engraveDecal(s, m, q, P);
+      if (engQs.has(q) || ovs.has(q)) {
+        const decal = engraveDecal(s, m, q, P, ovs.get(q));
         if (decal) parts.push(decal);
       }
       for (const obj of parts) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
@@ -4681,9 +4714,11 @@
   }
   // Grabado en 3D: se dibuja en una textura (color madera quemada) pegada a la cara exterior de la pieza.
   const imgCache = new Map();
-  function engraveDecal(s, m, q, P) {
+  function engraveDecal(s, m, q, P, ov) {
     const T = window.THREE;
-    const it0 = boxEngraving(s, m, new Map([[q, [0, 0]]]));
+    const base = boxEngraving(s, m, new Map([[q, [0, 0]]]));
+    const extra = ov && ov.engr, has = extra && (extra.polys.length || extra.texts.length || extra.images.length);
+    const it0 = base || has ? { op: 'grabado', polys: [...(base ? base.polys : []), ...(has ? extra.polys : [])], texts: [...(base ? base.texts : []), ...(has ? extra.texts : [])], images: [...(base ? base.images : []), ...(has ? extra.images : [])] } : null;
     const it = it0 && fontOutlines(it0);
     if (!it) return null;
     const lid = q.name === 'Tapa deslizante';
