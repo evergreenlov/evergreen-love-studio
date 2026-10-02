@@ -214,6 +214,14 @@
         ['frente', 'Marco decorativo', { si: 'Con marco al frente', no: 'Sin marco' }], ['marco', 'Ancho del marco'],
         ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ['x', 'X'], ['y', 'Y'], ROT],
     },
+    planter: {
+      label: 'Maceta / arreglo floral (living hinge)', noOffset: true,
+      props: [['forma', 'Forma', { redonda: 'Redonda (cilindro)', media: 'Media redonda (pared recta atrás)' }], ['d', 'Diámetro'], ['alto', 'Alto'], ['t', 'Grosor material'],
+        ['cierre', 'Cierre', { rompecabezas: 'Rompecabezas (cabeza redonda)', dedos: 'Dedos (finger joint)' }],
+        ['dedo', 'Ancho de pestaña'], ['nTab', 'Pestañas de la base'], ['refuerzo', 'Refuerzo de base', { si: 'Con refuerzo (disco extra)', no: 'Sin refuerzo' }], ['nAros', 'Aros de refuerzo (0 a 3)'],
+        ['largo', 'Largo de corte de la bisagra'], ['puente', 'Puente'], ['paso', 'Separación líneas'],
+        ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ['x', 'X'], ['y', 'Y'], ROT],
+    },
     import: {
       label: 'Archivo importado',
       props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['prop', 'Proporción', { si: 'Mantener proporción', no: 'Ancho y alto libres' }], ['redond', 'Redondear esquinas'], ROT],
@@ -226,8 +234,8 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras']);
-  const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'refuerzo']);
+  const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
@@ -587,6 +595,7 @@
     : s.type === 'basket' ? basketModel(s, forView)
     : s.type === 'taper' ? taperModel(s, forView)
     : s.type === 'cone' ? coneModel(s, forView)
+    : s.type === 'planter' ? planterModel(s, forView)
     : boxModel(s, forView);
   // Engrosa o adelgaza un contorno cerrado (mm); devuelve los puntos
   const growPoly = (pts, d) => d ? ((offsetPolys([{ closed: true, pts }], d)[0] || { pts }).pts) : pts;
@@ -820,6 +829,115 @@
     }
     return { W: 2 * Rmax, D: 2 * Rmax, H: H + t, t, fingers: false, sep, panels, dividers: [], layout: [panels],
       cone: { Rb, Rt, H, t, th, theta, sl, Aout, Ain, Rbase, base: panels.length > 1 } };
+  }
+
+  /* ----- Maceta / arreglo floral: pared flexible (living hinge) redonda o media redonda ----- */
+  // Una sola tira se curva alrededor de la base; se cierra con rompecabezas o dedos y la base entra por muescas, así que no se desarma.
+  function planterModel(s, forView = false) {
+    const t = len(s, 't', 3), sep = len(s, 'sep', 5), kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
+    const Dm = len(s, 'd', 100), H = len(s, 'alto', 100), fw = len(s, 'dedo', 10);
+    const given = key => s.p[key] && String(s.p[key]).trim();
+    const Lc = given('largo') ? len(s, 'largo') : 20, br = given('puente') ? len(s, 'puente') : 3, pa = given('paso') ? len(s, 'paso') : 2;
+    const half = s.p.forma === 'media', puzzle = (s.p.cierre || 'rompecabezas') === 'rompecabezas';
+    const nTab = Math.max(3, Math.min(60, Math.round(num(s, 'nTab', 8)) || 8)), nA = Math.max(0, Math.min(3, Math.round(num(s, 'nAros', 1)) || 0));
+    if (![t, sep, kerf, Dm, H, fw, Lc, br, pa].every(Number.isFinite) || t <= 0 || Dm < 12 * t || Dm < 40 || H < 6 * t + 12 || Lc < 2 || br < 0.5 || pa < 0.8 || fw < 3) return null;
+    const R = Dm / 2, Rm = R - t / 2, Ri = R - t;                    // radio exterior, de la fibra neutra y del interior
+    const arcLen = (half ? 1 : 2) * Math.PI * Rm, flatH = half ? Rm : 0, wc = half ? Math.max(6, 2.5 * t) : 0;
+    const L = 2 * flatH + 2 * wc + arcLen;
+    const tw = Math.max(4, Math.min(fw, 14, L / (nTab * 2.2)));      // ancho de cada pestaña de la base
+    const pl = 8;                                                    // profundidad del cierre
+    const clampBack = half ? 0 : 0;
+    // Punto de la pared (en el plano de la planta) a la distancia s desde el inicio de la tira, y hacia dónde mira el exterior
+    const pathAt = x => {
+      if (!half) { const a = x / Rm; return { p: [Rm * Math.cos(a), -Rm * Math.sin(a)], n: [Math.cos(a), -Math.sin(a)] }; }
+      if (x < flatH) return { p: [x, 0], n: [0, 1] };
+      if (x < flatH + wc) return { p: [Rm, 0], n: [1, 0], corner: true };
+      if (x < flatH + wc + arcLen) { const a = (x - flatH - wc) / Rm; return { p: [Rm * Math.cos(a), -Rm * Math.sin(a)], n: [Math.cos(a), -Math.sin(a)] }; }
+      if (x < flatH + 2 * wc + arcLen) return { p: [-Rm, 0], n: [-1, 0], corner: true };
+      return { p: [-Rm + (x - (flatH + 2 * wc + arcLen)), 0], n: [0, 1] };
+    };
+    const inCorner = x => half && ((x > flatH - tw / 2 - 1 && x < flatH + wc + tw / 2 + 1) || (x > flatH + wc + arcLen - tw / 2 - 1 && x < flatH + 2 * wc + arcLen + tw / 2 + 1));
+    const evenly = (n, margin) => Array.from({ length: n }, (_, i) => margin + (L - 2 * margin) * (i + 0.5) / n).filter(x => !inCorner(x));
+    const mClose = pl + tw / 2 + 5;
+    const tabsAt = evenly(nTab, mClose), slotAt = nA ? evenly(4, mClose + 4) : [];
+    const polysOf = fromC;
+    const union = list => polysOf(clip(CL.ClipType.ctUnion, toC(list.map(pts => ({ closed: true, pts })))));
+    const diff = (a, list) => polysOf(clip(CL.ClipType.ctDifference, toC([{ closed: true, pts: a }]), toC(list.map(pts => ({ closed: true, pts })))));
+    const bigger = list => list.reduce((a, b) => polyArea(b.pts) > polyArea(a.pts) ? b : a, list[0]);
+    const rectP = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    const circP = (cx, cy, r) => Array.from({ length: 24 }, (_, i) => [cx + r * Math.cos(i * Math.PI / 12), cy + r * Math.sin(i * Math.PI / 12)]);
+
+    // ----- Pared (tira) -----
+    const cuts = [], adds = [];
+    const top = 0, bot = H;
+    if (puzzle) {
+      const nK = Math.max(1, Math.round(H / 34)), rk = Math.min(5.5, H / nK * 0.3), nk = rk * 0.5, nl = rk * 0.9;
+      for (let j = 0; j < nK; j++) {
+        const yk = H * (j + 0.5) / nK;
+        const knob = () => [rectP(0, yk - nk, nl + 0.2, yk + nk), circP(nl + rk * 0.7, yk, rk)];
+        for (const p of knob()) adds.push(p.map(([x, y]) => [x + L, y]));   // cabeza que sale a la derecha
+        for (const p of knob()) cuts.push(p.map(([x, y]) => [x - 0.2, y]));  // hueco a la izquierda
+      }
+    } else {
+      const n = Math.max(3, 2 * Math.floor(H / (2 * Math.max(5, fw))) + 1), hs = H / n;
+      for (let i = 0; i < n; i++) {
+        if (i % 2 === 0) { adds.push(rectP(L - 0.2, i * hs, L + pl, (i + 1) * hs)); cuts.push(rectP(-0.2, i * hs, pl, (i + 1) * hs)); }
+        else { adds.push(rectP(-pl, i * hs, 0.2, (i + 1) * hs)); cuts.push(rectP(L - pl, i * hs, L + 0.2, (i + 1) * hs)); }
+      }
+    }
+    for (const x of tabsAt) cuts.push(rectP(x - tw / 2, bot - t, x + tw / 2, bot + 1));   // muescas donde entra la base
+    let wallPts = union([rectP(0, top, L, bot), ...adds]).length ? bigger(union([rectP(0, top, L, bot), ...adds])).pts : rectP(0, top, L, bot);
+    const dres = diff(wallPts, cuts);
+    if (dres.length) wallPts = bigger(dres).pts;
+    const holes = [];
+    for (let j = 0; j < nA; j++) {
+      const yc = H * (j + 1) / (nA + 1);
+      for (const x of slotAt) holes.push(rectP(x - tw / 2, yc - t / 2, x + tw / 2, yc + t / 2));
+    }
+    // Líneas de la bisagra: paralelas al eje, solo en la parte que se curva
+    const edge = (puzzle ? pl + 5 : pl + 4);
+    const hx0 = half ? flatH + 1 : edge, hx1 = half ? flatH + 2 * wc + arcLen - 1 : L - edge;
+    const hl = hingeLines(hx0, 5, hx1 - hx0, H - 5 - (t + 5), Lc, br, pa)
+      .filter(ln => !slotAt.some(x => nA && Math.abs(ln.pts[0][0] - x) < tw / 2 + 2));
+    if (hl.length > 14000) return null;
+    const wallG = growPoly(wallPts, k);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of wallG) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+    const sh = ([x, y]) => [x - x0, y - y0];
+    const panels = [{ name: 'Pared flexible', w: x1 - x0, h: y1 - y0, pts: wallG.map(sh), holes: holes.map(hh => growPoly(hh, -k).map(sh)), lines: hl.map(l => l.pts.map(sh)) }];
+
+    // ----- Base, refuerzo de base y aros (en planta) -----
+    const body = (r) => { // círculo o media luna (con el borde recto en la cara interior de la pared de atrás)
+      if (!half) { const nn = Math.max(24, segs(r, 2 * Math.PI)); return Array.from({ length: nn }, (_, i) => [r * Math.cos(i * 2 * Math.PI / nn), r * Math.sin(i * 2 * Math.PI / nn)]); }
+      const y0f = -t / 2, p0 = Math.asin(Math.min(1, -y0f / r)), n = Math.max(12, segs(r, Math.PI - 2 * p0));
+      return Array.from({ length: n + 1 }, (_, i) => { const a = p0 + (Math.PI - 2 * p0) * i / n; return [r * Math.cos(a), -r * Math.sin(a)]; });
+    };
+    const tabRect = x => {
+      const { p, n } = pathAt(x), tg = [-n[1], n[0]];
+      const q = (u, v) => [p[0] + tg[0] * u + n[0] * v, p[1] + tg[1] * u + n[1] * v];
+      return [q(-tw / 2, -t / 2 - 0.4), q(tw / 2, -t / 2 - 0.4), q(tw / 2, t / 2), q(-tw / 2, t / 2)];
+    };
+    const withTabs = (pts, xs) => { const u = union([pts, ...xs.map(tabRect)]); return u.length ? bigger(u).pts : pts; };
+    const basePlan = withTabs(body(Ri), tabsAt);
+    const place = (name, pts, hs = []) => {
+      const outG = growPoly(pts, k);
+      let a0 = Infinity, b0 = Infinity, a1 = -Infinity, b1 = -Infinity;
+      for (const [x, y] of outG) { if (x < a0) a0 = x; if (y < b0) b0 = y; if (x > a1) a1 = x; if (y > b1) b1 = y; }
+      const sh2 = ([x, y]) => [x - a0, y - b0];
+      return { name, w: a1 - a0, h: b1 - b0, pts: outG.map(sh2), holes: hs.map(hh => growPoly(hh, -k).map(sh2)) };
+    };
+    const pieces = [place('Base (con pestañas)', basePlan)];
+    if ((s.p.refuerzo || 'si') !== 'no') pieces.push(place('Refuerzo de base (pegar encima)', body(Ri - 0.4)));
+    const band = Math.max(8, Math.min(16, Ri * 0.18));
+    const rings = [];
+    for (let j = 0; j < nA; j++) {
+      const outer = withTabs(body(Ri - 0.4), slotAt), inner = body(Math.max(6, Ri - band)).map(([x, y]) => [x, half ? y + (half ? 0 : 0) : y]);
+      pieces.push(place(`Aro ${j + 1}`, outer, [inner]));
+      rings.push({ outer, inner, y: H * (j + 1) / (nA + 1) });
+    }
+    const wallW = x1 - x0;
+    return { W: 2 * R, D: half ? R + t : 2 * R, H, t, fingers: false, sep, panels: [...panels, ...pieces], dividers: [], layout: [[panels[0]], pieces],
+      planter: { R, Rm, Ri, half, L, wallW, basePlan, rings, reinf: (s.p.refuerzo || 'si') !== 'no' ? body(Ri - 0.4) : null, hingeLines: hl.length, nTab: tabsAt.length, nSlots: slotAt.length } };
   }
 
   /* ----- Grabado de nombre o logo en la caja ----- */
@@ -1296,6 +1414,7 @@
       case 'box':
       case 'taper':
       case 'cone':
+      case 'planter':
       case 'basket': {
         const m = modelOf(s, false);
         if (!m) return null;
@@ -2879,10 +2998,10 @@
         ? (m.drawer.n > 1 ? `${m.drawer.n} cajones. ` : '') + `Cada cajón por dentro: ${fmt((m.drawer.Wd - 2 * m.t) / unitMM, isInch() ? 3 : 1)} × ${fmt((m.drawer.Dd - 2 * m.t) / unitMM, isInch() ? 3 : 1)} × ${fmt((m.drawer.Hd - m.t) / unitMM, isInch() ? 3 : 1)} ${unitLabel()} (ancho × fondo × alto). El frente decorativo se pega al frente del cajón.`
         : 'Las medidas no alcanzan para el cajón: agranda la caja o baja la holgura.'));
     }
-    if (s.type === 'taper' || s.type === 'cone') {
+    if (s.type === 'taper' || s.type === 'cone' || s.type === 'planter') {
       box.append(h('p', { class: 'tip', id: 'shapeTip' }));
       updateShapeTip(s);
-      box.append(h('button', { class: 'primary wide', onclick: () => open3D(s.id) }, s.type === 'cone' ? 'Ver cono armado en 3D' : 'Ver caja armada en 3D'));
+      box.append(h('button', { class: 'primary wide', onclick: () => open3D(s.id) }, s.type === 'cone' ? 'Ver cono armado en 3D' : s.type === 'planter' ? 'Ver la maceta armada en 3D' : 'Ver caja armada en 3D'));
     }
     if (s.type === 'basket') {
       box.append(h('p', { class: 'tip', id: 'basketTip' }));
@@ -2943,7 +3062,13 @@
     const m = modelOf(s, true);
     el.classList.toggle('err-tip', !m);
     const u = v => fmt(v / unitMM, isInch() ? 3 : 1);
-    if (!m) { el.textContent = s.type === 'cone' ? 'Revisa las medidas: usa dos diámetros distintos (al menos 2 mm de diferencia) y un alto mayor que el grosor.' : 'Las medidas no alcanzan: cada lado debe ser mayor que 4 veces el grosor.'; return; }
+    if (!m) { el.textContent = s.type === 'planter' ? 'Revisa las medidas: el diámetro debe ser al menos 12 veces el grosor y el alto mayor que 6 grosores.' : s.type === 'cone' ? 'Revisa las medidas: usa dos diámetros distintos (al menos 2 mm de diferencia) y un alto mayor que el grosor.' : 'Las medidas no alcanzan: cada lado debe ser mayor que 4 veces el grosor.'; return; }
+    if (s.type === 'planter') {
+      const p = m.planter, wl = p.L, over = wl > doc.sheet.w ? ` Ojo: la pared mide ${u(wl)} ${unitLabel()} de largo y la cama de la máquina ${u(doc.sheet.w)}: reduce el diámetro.` : '';
+      el.textContent = `La pared (${u(wl)} ${unitLabel()} de largo) se curva sola alrededor de la base y se cierra con ${s.p.cierre === 'dedos' ? 'dedos' : 'rompecabezas'}; la base entra por ${p.nTab} muescas (${m.panels.some(q => q.name.startsWith('Refuerzo')) ? 'más un disco de refuerzo pegado encima' : 'sin refuerzo'})`
+        + (p.rings.length ? ` y ${p.rings.length} aro(s) cruzan la pared por ranuras.` : '.') + ' Una vez cerrada no se desarma. Pega con cola de madera el cierre y la base.' + over;
+      return;
+    }
     const tp = m.taper;
     el.textContent = s.type === 'taper'
       ? `Inclinación de las paredes: ${fmt(Math.abs(tp.angW), 1)}° a los lados y ${fmt(Math.abs(tp.angD), 1)}° al frente y atrás. `
@@ -2971,6 +3096,7 @@
     box: ['ancho', 'profundo', 'alto', 'divH', 'grabadoTam', 'logoTam'],
     taper: ['ancho', 'prof', 'anchoArr', 'largoArr', 'alto', 'bandaAnillo'],
     cone: ['d', 'dArr', 'alto', 'largo'],
+    planter: ['d', 'alto'],
     basket: ['ancho', 'alto', 'profundo', 'radio', 'asaAlto', 'asaArco', 'asaAncho', 'marco'],
   };
   const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge', ...Object.keys(SCALE_BOX_SIZE)]);
@@ -4188,7 +4314,7 @@
 
   // Convierte un archivo importado en varios objetos (uno por pieza) en la misma posición
   /* ----- Desagrupar cajas, canastas, conos y bandejas en piezas independientes ----- */
-  const SEPARABLE = new Set(['box', 'basket', 'taper', 'cone']);
+  const SEPARABLE = new Set(['box', 'basket', 'taper', 'cone', 'planter']);
   const polyBox = pts => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
   const polyArea = pts => { const b = polyBox(pts); return (b[2] - b[0]) * (b[3] - b[1]); };
   const inPoly = ([x, y], pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
@@ -4450,6 +4576,22 @@
     return d;
   }
 
+  // Maceta / arreglo floral con bisagra viva: redonda o media redonda, cierre de rompecabezas, base reforzada
+  function planterTemplate(half) {
+    return (units, sheet) => {
+      const d = newDoc(units);
+      if (sheet) d.sheet = { ...sheet };
+      d.name = half ? 'Maceta media redonda (arreglo floral)' : 'Maceta redonda (arreglo floral)';
+      d.params = [['diametro', tv(half ? 160 : 130, units)], ['alto', tv(110, units)], ['grosor', units === 'in' ? '0.118' : '3'], ['dedo', tv(10, units)],
+        ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
+      d.shapes = [node('planter', half ? 'Maceta media redonda' : 'Maceta redonda', 'corte', {
+        forma: half ? 'media' : 'redonda', d: 'diametro', alto: 'alto', t: 'grosor', cierre: 'rompecabezas', dedo: 'dedo', nTab: '8', refuerzo: 'si', nAros: '1',
+        largo: tv(20, units), puente: tv(3, units), paso: units === 'in' ? '0.08' : '2', kerf: 'kerf', sep: 'sep', x: '0', y: '0', rot: '0', rep: 'no',
+      })];
+      return d;
+    };
+  }
+
   function basketTemplate(units, sheet) {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
@@ -4518,6 +4660,8 @@
     typetray: trayTemplate,
     taper: taperTemplate,
     cone: coneTemplate,
+    'planter-round': planterTemplate(false),
+    'planter-half': planterTemplate(true),
     keychain: keychainTemplate,
     coasters: coasterTemplate,
     hinge: hingeTemplate,
@@ -4662,6 +4806,13 @@
     $('#view3dTitle').textContent = s.type === 'taper'
       ? `${s.name} · base ${du(len(s, 'ancho'))} × ${du(len(s, 'prof'))} → boca ${du(len(s, 'anchoArr'))} × ${du(len(s, 'largoArr'))} · alto ${du(len(s, 'alto'))} ${unitLabel()}${s.p.cubierta === 'si' ? ' · con cubierta' : ''}`
       : `${s.name} · ${fmt(m.W / unitMM, 3)} × ${fmt(m.D / unitMM, 3)} × ${fmt(m.H / unitMM, 3)} ${unitLabel()} (exterior)${comps}${m.drawer ? ' · con cajón' : ''}`;
+    if (m.planter) {
+      build3DPlanter(m, window.THREE);
+      v3.group.position.set(-m.W / 2, -m.H / 2, -m.D / 2);
+      v3.pivot.rotation.x = 0;
+      applyExplode();
+      return;
+    }
     if (m.cone) {
       build3DCone(m, window.THREE);
       v3.group.position.set(-m.W / 2, -m.H / 2, -m.D / 2);
@@ -4697,6 +4848,39 @@
     v3.group.position.set(-m.W / 2, -m.H / 2, -m.D / 2);
     v3.pivot.rotation.x = m.wall ? -Math.PI / 2 : 0; // bandeja de pared: el frente abierto mira hacia ti
     applyExplode();
+  }
+  // Maceta: pared curva (cilindro o medio cilindro con pared recta), base con pestañas, refuerzo y aros
+  function build3DPlanter(m, T) {
+    const p = m.planter, cx = m.W / 2, cz = p.half ? p.R : m.D / 2;
+    const mat = c => new T.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0, side: T.DoubleSide });
+    const add = (geos, color, out, pos, rotX) => {
+      const holder = new T.Group();
+      for (const geo of geos) {
+        const mesh = new T.Mesh(geo, mat(color));
+        const edges = new T.LineSegments(new T.EdgesGeometry(geo, 25), new T.LineBasicMaterial({ color: 0x6b4a2b }));
+        for (const o of [mesh, edges]) { o.position.set(...pos); holder.add(o); }
+      }
+      holder.userData.out = out;
+      v3.group.add(holder);
+    };
+    const flat = (pts, holes, y, depth) => {
+      const sh = new T.Shape(pts.map(([x, z]) => new T.Vector2(x, -z)));
+      for (const hl of holes || []) sh.holes.push(new T.Path(hl.map(([x, z]) => new T.Vector2(x, -z))));
+      const g = new T.ExtrudeGeometry(sh, { depth, bevelEnabled: false, curveSegments: 1 });
+      g.rotateX(-Math.PI / 2);
+      g.translate(0, y, 0);
+      return g;
+    };
+    const wallGeos = [];
+    if (p.half) {
+      for (const r of [p.Rm + m.t / 2, p.Ri]) wallGeos.push(new T.CylinderGeometry(r, r, m.H, 64, 1, true, Math.PI / 2, Math.PI));
+      wallGeos.push(new T.BoxGeometry(2 * p.Rm, m.H, m.t));
+    } else for (const r of [p.Rm + m.t / 2, p.Ri]) wallGeos.push(new T.CylinderGeometry(r, r, m.H, 96, 1, true));
+    if (p.half) wallGeos[2].translate(0, 0, 0);
+    add(wallGeos, 0xd9b384, [0, 0, 0], [cx, m.H / 2, cz]);
+    add([flat(p.basePlan, null, 0, m.t)], 0xcfa878, [0, -1, 0], [cx, 0, cz]);
+    if (p.reinf) add([flat(p.reinf, null, m.t, m.t)], 0xb98b5a, [0, 1, 0], [cx, 0, cz]);
+    for (const rg of p.rings) add([flat(rg.outer, [rg.inner], m.H - rg.y - m.t / 2, m.t)], 0xb98b5a, [0, 1, 0], [cx, 0, cz]);
   }
   // Cono: la pared se dibuja como superficie cónica (la bisagra viva no se ve en 3D) y la base como disco
   function build3DCone(m, T) {
@@ -4801,7 +4985,7 @@
     let gid = null;
     if (id && id.startsWith('o')) { gid = id; id = null; } // se pidió una caja desagrupada
     if (!id && !gid) {
-      const is3D = s => s && ['box', 'basket', 'taper', 'cone'].includes(s.type);
+      const is3D = s => s && ['box', 'basket', 'taper', 'cone', 'planter'].includes(s.type);
       const pick = [...sel].map(byId).find(is3D);
       const any = allShapes().find(is3D);
       id = (pick || any || {}).id;
@@ -4838,7 +5022,7 @@
     if (one && one.type === 'panel') updateFingerTip(one);
     if (one && (one.type === 'box' || one.type === 'taper')) updateCoverTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
-    if (one && (one.type === 'taper' || one.type === 'cone')) updateShapeTip(one);
+    if (one && (one.type === 'taper' || one.type === 'cone' || one.type === 'planter')) updateShapeTip(one);
     if (v3.open) build3D();
   }
   function fullRender() {
