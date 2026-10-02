@@ -4608,7 +4608,10 @@
     }
     v3.lastR = R3;
     const comps = m.dividers.length ? ` · ${Math.max(1, Math.round(num(s, 'divX', 1)))} × ${Math.max(1, Math.round(num(s, 'divZ', 1)))} compartimentos` : '';
-    $('#view3dTitle').textContent = `${s.name} · ${fmt(m.W / unitMM, 3)} × ${fmt(m.D / unitMM, 3)} × ${fmt(m.H / unitMM, 3)} ${unitLabel()} (exterior)${comps}${m.drawer ? ' · con cajón' : ''}`;
+    const du = v => fmt(v / unitMM, 3);
+    $('#view3dTitle').textContent = s.type === 'taper'
+      ? `${s.name} · base ${du(len(s, 'ancho'))} × ${du(len(s, 'prof'))} → boca ${du(len(s, 'anchoArr'))} × ${du(len(s, 'largoArr'))} · alto ${du(len(s, 'alto'))} ${unitLabel()}${s.p.cubierta === 'si' ? ' · con cubierta' : ''}`
+      : `${s.name} · ${fmt(m.W / unitMM, 3)} × ${fmt(m.D / unitMM, 3)} × ${fmt(m.H / unitMM, 3)} ${unitLabel()} (exterior)${comps}${m.drawer ? ' · con cajón' : ''}`;
     if (m.cone) {
       build3DCone(m, window.THREE);
       v3.group.position.set(-m.W / 2, -m.H / 2, -m.D / 2);
