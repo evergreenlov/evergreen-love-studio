@@ -901,7 +901,8 @@
     const slotRows = [];
     for (let j = 0; j < nA; j++) { const yc = H * (j + 1) / (nA + 1); slotRows.push([yc - t / 2 - 2, yc + t / 2 + 2]); }
     const hl = [];
-    for (const ln of hingeLines(hx0, 5, hx1 - hx0, H - 5 - (t + 5), Lc, br, pa)) {
+    // Las líneas llegan hasta los bordes de arriba y de abajo (alternadas): una banda maciza en el borde impediría que la pared se curve
+    for (const ln of hingeLines(hx0, 0, hx1 - hx0, H, Lc, br, pa)) {
       const x = ln.pts[0][0];
       let pieces = [[ln.pts[0][1], ln.pts[1][1]]];
       if (slotAt.some(sx => Math.abs(x - sx) < tw / 2 + 2)) {
