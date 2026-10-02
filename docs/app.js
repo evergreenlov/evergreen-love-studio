@@ -562,6 +562,7 @@
         addC('Cubierta Atrás', W, H, 'back', [-1, 0, 0], [0, -1, 0], [0, 0, -1], [W, H, D + c], [0, 0, 1]);
         addC('Cubierta Lado izquierdo', D + 2 * c, H, 'left', [0, 0, 1], [0, -1, 0], [1, 0, 0], [-c, H, -c], [-1, 0, 0]);
         addC('Cubierta Lado derecho', D + 2 * c, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + c, H, D + c], [1, 0, 0]);
+        if (caras === 'todas') addC('Cubierta Base', W + 2 * c, D + 2 * c, 'bottom', [1, 0, 0], [0, 0, 1], [0, 1, 0], [-c, -c, -c], [0, -1, 0]);
         if (caras === 'todas' && lid) addC('Cubierta Tapa', W + 2 * c, D + 2 * c, 'top', [1, 0, 0], [0, 0, 1], [0, -1, 0], [-c, H + c, -c], [0, 1, 0]);
       }
       panels.push(...covers);
@@ -731,6 +732,9 @@
       cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], 0);
       cover('Cubierta Lado izquierdo', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], cD);
       cover('Cubierta Lado derecho', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], cD);
+      const cW = c / Math.cos(alW), bw = Wb + 2 * cW, bd = Db + 2 * cD;
+      const bc = place('Cubierta Base', { pts: [[0, 0], [bw, 0], [bw, bd], [0, bd]] }, [1, 0, 0], [0, 0, 1], [0, 1, 0], [ox - cW, -c, oz - cD], [0, -1, 0]);
+      bc.th = c; bc.color = 0xa9743f; panels.push(bc);
       }
     }
     // Anillos de refuerzo
@@ -2576,6 +2580,18 @@
       h('p', { class: 'tip' }, 'Mide tu madera con un calibre y escribe el grosor real. Todas las cajas, dedos y ranuras se recalculan solas con ese grosor. La especie (basswood, walnut, mahogany) no cambia las medidas, solo el grosor; el kerf sí puede variar un poco por madera.'));
   }
 
+  // Resumen de las piezas de cubierta y cuánto crece la caja por fuera
+  function coverText(s) {
+    const m = modelOf(s, true);
+    const cv = m ? m.panels.filter(q => q.name.startsWith('Cubierta')) : [];
+    if (!cv.length) return 'Las medidas no alcanzan para la cubierta: revisa su grosor.';
+    const c = cv[0].th, u = v => fmt(v / unitMM, isInch() ? 3 : 2), ul = unitLabel();
+    return `Piezas de cubierta (grosor ${u(c)} ${ul}) — ` + cv.map(q => `${q.name.replace('Cubierta ', '')}: ${u(q.w)} × ${u(q.h)} ${ul}`).join(' · ')
+      + `. La caja crece ${u(c)} ${ul} por cada lado cubierto (hacia afuera), así que mide ${u(2 * c)} ${ul} más en ancho y profundo.`;
+  }
+  const coverTip = s => h('p', { class: 'tip', id: 'covTip' }, coverText(s));
+  function updateCoverTip(s) { const el = $('#covTip'); if (el && s.p.cubierta === 'si') el.textContent = coverText(s); }
+
   function buildInspector() {
     buildInspectorFields();
     refreshHints();
@@ -2710,6 +2726,7 @@
           }
           checkpoint(); fullRender();
         })));
+        if (key === 'cubiertaCaras' && (s.type === 'box' || s.type === 'taper')) box.append(coverTip(s));
         if (key === 'dedoModo' && ['taper', 'box', 'panel'].includes(s.type) && s.p.dedoModo !== 'cantidad') {
           box.append(h('p', { class: 'tip' }, 'Para escoger cuántos dedos quieres, cambia a «Por cantidad»: aparecen los campos para escribir la cantidad.'));
         }
@@ -4784,6 +4801,7 @@
     const one = sel.size === 1 && byId([...sel][0]);
     if (one && one.type === 'box') { updateCompTip(one); updateFingerTip(one); }
     if (one && one.type === 'panel') updateFingerTip(one);
+    if (one && (one.type === 'box' || one.type === 'taper')) updateCoverTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
     if (one && (one.type === 'taper' || one.type === 'cone')) updateShapeTip(one);
     if (v3.open) build3D();
