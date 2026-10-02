@@ -897,8 +897,18 @@
     // Líneas de la bisagra: paralelas al eje, solo en la parte que se curva
     const edge = (puzzle ? pl + 5 : pl + 4);
     const hx0 = half ? flatH + 1 : edge, hx1 = half ? flatH + 2 * wc + arcLen - 1 : L - edge;
-    const hl = hingeLines(hx0, 5, hx1 - hx0, H - 5 - (t + 5), Lc, br, pa)
-      .filter(ln => !slotAt.some(x => nA && Math.abs(ln.pts[0][0] - x) < tw / 2 + 2));
+    // Las líneas de la bisagra recorren toda la tira; solo se interrumpen justo donde hay una ranura para un aro (con 2 mm de margen)
+    const slotRows = [];
+    for (let j = 0; j < nA; j++) { const yc = H * (j + 1) / (nA + 1); slotRows.push([yc - t / 2 - 2, yc + t / 2 + 2]); }
+    const hl = [];
+    for (const ln of hingeLines(hx0, 5, hx1 - hx0, H - 5 - (t + 5), Lc, br, pa)) {
+      const x = ln.pts[0][0];
+      let pieces = [[ln.pts[0][1], ln.pts[1][1]]];
+      if (slotAt.some(sx => Math.abs(x - sx) < tw / 2 + 2)) {
+        for (const [g0, g1] of slotRows) pieces = pieces.flatMap(([a, b]) => b <= g0 || a >= g1 ? [[a, b]] : [[a, Math.min(b, g0)], [Math.max(a, g1), b]].filter(([p, q]) => q > p));
+      }
+      for (const [a, b] of pieces) if (b - a > 1) hl.push({ closed: false, pts: [[x, a], [x, b]] });
+    }
     if (hl.length > 14000) return null;
     const wallG = growPoly(wallPts, k);
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
