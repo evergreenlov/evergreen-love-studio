@@ -947,7 +947,7 @@
     }
     const wallW = x1 - x0;
     return { W: 2 * R, D: half ? R + t : 2 * R, H, t, fingers: false, sep, panels: [...panels, ...pieces], dividers: [], layout: [[panels[0]], pieces],
-      planter: { R, Rm, Ri, half, L, wallW, basePlan, rings, reinf: (s.p.refuerzo || 'si') !== 'no' ? body(Ri - 0.4) : null, hingeLines: hl.length, nTab: tabsAt.length, nSlots: slotAt.length } };
+      planter: { R, Rm, Ri, half, L, H, pathAt, hl: hl.map(l => l.pts), wallW, basePlan, rings, reinf: (s.p.refuerzo || 'si') !== 'no' ? body(Ri - 0.4) : null, hingeLines: hl.length, nTab: tabsAt.length, nSlots: slotAt.length } };
   }
 
   /* ----- Grabado de nombre o logo en la caja ----- */
@@ -4881,13 +4881,37 @@
       g.translate(0, y, 0);
       return g;
     };
-    const wallGeos = [];
-    if (p.half) {
-      for (const r of [p.Rm + m.t / 2, p.Ri]) wallGeos.push(new T.CylinderGeometry(r, r, m.H, 64, 1, true, Math.PI / 2, Math.PI));
-      wallGeos.push(new T.BoxGeometry(2 * p.Rm, m.H, m.t));
-    } else for (const r of [p.Rm + m.t / 2, p.Ri]) wallGeos.push(new T.CylinderGeometry(r, r, m.H, 96, 1, true));
-    if (p.half) wallGeos[2].translate(0, 0, 0);
-    add(wallGeos, 0xd9b384, [0, 0, 0], [cx, m.H / 2, cz]);
+    // Pared: cinta que sigue el recorrido real de la tira, con las líneas de la bisagra dibujadas encima
+    const sc = Math.min(8, 2048 / Math.max(p.L, p.H)), cv = document.createElement('canvas');
+    cv.width = Math.max(2, Math.round(p.L * sc)); cv.height = Math.max(2, Math.round(p.H * sc));
+    const cx2 = cv.getContext('2d');
+    cx2.fillStyle = '#dcb887'; cx2.fillRect(0, 0, cv.width, cv.height);
+    cx2.strokeStyle = '#4a2f16'; cx2.lineWidth = Math.max(1, 0.35 * sc); cx2.lineCap = 'round';
+    cx2.beginPath();
+    for (const [a, b] of p.hl) { cx2.moveTo(a[0] * sc, a[1] * sc); cx2.lineTo(b[0] * sc, b[1] * sc); }
+    cx2.stroke();
+    const tex = new T.CanvasTexture(cv);
+    tex.anisotropy = v3.renderer.capabilities.getMaxAnisotropy();
+    const N = Math.min(900, Math.max(24, Math.ceil(p.L / 2))), ribbon = off => {
+      const pos = [], uv = [], idx = [];
+      for (let i = 0; i <= N; i++) {
+        const sP = p.L * i / N, { p: pt, n } = p.pathAt(Math.min(sP, p.L - 1e-6));
+        const x = pt[0] + n[0] * off, z = pt[1] + n[1] * off;
+        pos.push(x, 0, z, x, m.H, z); uv.push(sP / p.L, 0, sP / p.L, 1);
+        if (i) { const a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+      }
+      const g = new T.BufferGeometry();
+      g.setAttribute('position', new T.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx); g.computeVertexNormals();
+      return g;
+    };
+    const wallHolder = new T.Group();
+    for (const off of [m.t / 2, -m.t / 2]) {
+      const g = ribbon(off), mesh = new T.Mesh(g, new T.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      mesh.position.set(cx, 0, cz); wallHolder.add(mesh);
+    }
+    wallHolder.userData.out = [0, 0, 0];
+    v3.group.add(wallHolder);
     add([flat(p.basePlan, null, 0, m.t)], 0xcfa878, [0, -1, 0], [cx, 0, cz]);
     if (p.reinf) add([flat(p.reinf, null, m.t, m.t)], 0xb98b5a, [0, 1, 0], [cx, 0, cz]);
     for (const rg of p.rings) add([flat(rg.outer, [rg.inner], m.H - rg.y - m.t / 2, m.t)], 0xb98b5a, [0, 1, 0], [cx, 0, cz]);
