@@ -1840,7 +1840,7 @@
       const n = nodeList(id), s = byId(id), editable = n.some(q => q.edit);
       msg(`${n.length} puntos en «${(s || {}).name || 'la figura'}». ` + (editable
         ? 'Haz clic en un punto para elegirlo (Shift suma, o arrastra un recuadro) y arrástralo; clic sobre el borde añade un punto; Supr borra los elegidos; flechas los mueven poco a poco (Shift: más); Esc oculta.'
-        : CONVERTIBLE.has(s && s.type) ? 'Si arrastras un punto, la figura se convierte en un dibujo editable.' : 'Pasa el cursor sobre uno para ver sus coordenadas.'));
+        : (CONVERTIBLE.has(s && s.type) || SEPARABLE.has(s && s.type)) ? 'Si arrastras un punto, la figura se convierte en piezas/dibujo editable (te lo pregunta antes).' : 'Pasa el cursor sobre uno para ver sus coordenadas.'));
     }
     buildInspector(); buildObjects(); drawCanvas();
   }
@@ -1900,7 +1900,17 @@
     let s = byId(hit.id);
     if (!hit.edit) {
       if (!s) return null;
-      if (!CONVERTIBLE.has(s.type)) { msg(SEPARABLE.has(s.type) ? 'Para mover los puntos de una caja, primero sepárala en piezas (Desagrupar).' : 'Los puntos de esta figura no se pueden mover.'); return null; }
+      if (SEPARABLE.has(s.type)) {
+        // Cajas, macetas, canastas, conos: se separan en piezas sueltas y se edita el punto en la pieza que se tocó
+        if (!confirm(`Para mover puntos, «${s.name}» se separa en piezas independientes (la pared, la base, etc.) y deja de cambiar con los parámetros. Deshacer la vuelve atrás. ¿Continuar?`)) return null;
+        separateMany([s]);
+        const ids = [...sel];
+        for (const i of ids) nodeShow.add(i);
+        let best = null, bd = Infinity;
+        for (const i of ids) for (const q of nodeList(i)) { if (!q.edit) continue; const d = Math.hypot(q.x - hit.x, q.y - hit.y); if (d < bd) { bd = d; best = { ...q, id: i, kind: 'node' }; } }
+        return best ? startNodeDrag(best, false) : null;
+      }
+      if (!CONVERTIBLE.has(s.type)) { msg('Los puntos de esta figura no se pueden mover.'); return null; }
       if (!confirm('Para mover puntos, esta figura se convierte en un dibujo editable y deja de cambiar con los parámetros. Deshacer la vuelve atrás. ¿Continuar?')) return null;
       const o = convertToEditable(s);
       if (!o) return null;
