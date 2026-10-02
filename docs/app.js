@@ -2275,7 +2275,7 @@
   function startHandleDrag(kind, p) {
     const ts = handleTargets(), b = selectionBox();
     if (!b) return null;
-    const orig = ts.map(s => ({ s, p: { ...s.p } }));
+    const orig = ts.map(s => ({ s, p: { ...s.p } })), params = doc.params.map(q => q.expr);
     const C = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     if (kind === 'rot') {
       // Centro de cada objeto (para girar varios juntos alrededor del centro común)
@@ -2284,16 +2284,18 @@
     }
     // La esquina opuesta queda fija
     const A = { x: kind.includes('w') ? b.x + b.w : b.x, y: kind.includes('n') ? b.y + b.h : b.y };
-    return { mode: 'scale', A, start: p, orig };
+    return { mode: 'scale', A, start: p, orig, params };
   }
   function applyHandleDrag(d, p, e) {
     for (const o of d.orig) o.s.p = { ...o.p };
+    if (d.params) d.params.forEach((ex, i) => { if (doc.params[i]) doc.params[i].expr = ex; });
     if (d.mode === 'scale') {
       const v0 = { x: d.start.x - d.A.x, y: d.start.y - d.A.y }, v = { x: p.x - d.A.x, y: p.y - d.A.y };
       let k = (v.x * v0.x + v.y * v0.y) / ((v0.x * v0.x + v0.y * v0.y) || 1);
       k = Math.max(0.02, k);
       if (!e.altKey) k = Math.round(k * 100) / 100; // pasos de 1 %
       rewriteScale(d.orig.map(o => o.s), null, d.A.x / unitMM, d.A.y / unitMM, k);
+      syncParamInputs();
       $('#stCoords').textContent = `Escala ${fmt(k * 100, 0)} %`;
     } else {
       let deg = (Math.atan2(p.y - d.C.y, p.x - d.C.x) - d.a0) / DEG;
@@ -3138,6 +3140,23 @@
     ];
   }
 
+  // ¿El parámetro es un número que solo usan estas figuras en sus medidas de tamaño? Entonces se puede escalar el parámetro mismo.
+  function paramOnlyFor(name, shapes) {
+    const q = doc.params.find(x => x.name === name);
+    if (!q || !isNumeric(q.expr)) return false;
+    const uses = v => wordRe(name).test(String(v));
+    if (doc.params.some(o => o !== q && uses(o.expr))) return false;
+    for (const sh of allShapes()) {
+      const keys = new Set(shapes.includes(sh) ? SCALE_BOX_SIZE[sh.type] || [] : []);
+      for (const [k, v] of Object.entries(sh.p)) if (uses(v) && !(keys.has(k) && String(v).trim() === name)) return false;
+    }
+    return true;
+  }
+  function syncParamInputs() {
+    const rows = document.querySelectorAll('#params .pexpr');
+    doc.params.forEach((p, i) => { if (rows[i] && rows[i].value !== p.expr) rows[i].value = p.expr; });
+  }
+
   // Aplica a cada medida: posiciones respecto a la esquina (X0, Y0) de la selección; tamaños multiplicados.
   function rewriteScale(shapes, factorText, X0, Y0, kNum) {
     const mul = (e, v) => factorText ? `${e} * ${factorText}` : fmt(v * kNum);
@@ -3151,11 +3170,19 @@
       if (isNumeric(e)) return mul(fmt(parseFloat(e)), parseFloat(e));
       return `(${e}) * ${factorText || fmt(kNum)}`;
     };
+    const scaledParams = new Set();
     for (const s of shapes) {
       for (const key of SCALE_POS_X) if (key in s.p) s.p[key] = pos(s.p[key], X0);
       for (const key of SCALE_POS_Y) if (key in s.p) s.p[key] = pos(s.p[key], Y0);
-      for (const key of SCALE_BOX_SIZE[s.type] || SCALE_SIZE) if (key in s.p && String(s.p[key]).trim() !== '') s.p[key] = size(s.p[key]);
+      for (const key of SCALE_BOX_SIZE[s.type] || SCALE_SIZE) {
+        if (!(key in s.p) || String(s.p[key]).trim() === '') continue;
+        // Si la medida es un parámetro propio de esta figura, se cambia el número del parámetro (así se ve en la lista de Parámetros)
+        const nm = String(s.p[key]).trim();
+        if (!factorText && SCALE_BOX_SIZE[s.type] && paramOnlyFor(nm, shapes)) { scaledParams.add(nm); continue; }
+        s.p[key] = size(s.p[key]);
+      }
     }
+    for (const nm of scaledParams) { const q = doc.params.find(x => x.name === nm); q.expr = fmt(parseFloat(q.expr) * kNum); }
   }
   function selectionCorner(shapes) {
     evaluateParams(); evaluateAll();
