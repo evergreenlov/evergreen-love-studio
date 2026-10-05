@@ -194,7 +194,7 @@
         ['nEsq', 'Dedos por esquina'], ['nBaseT', 'Pestañas de la base por lado'],
         ['nAnillos', 'Anillos de refuerzo'], ['bandaAnillo', 'Ancho del anillo'],
         ['tapa', 'Tapa', { no: 'Sin tapa', si: 'Con tapa' }],
-        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['margenCub', 'Sobrante por lado (cubre las esquinas)'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
         ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'],
         ['x', 'X'], ['y', 'Y'], ROT],
     },
@@ -731,16 +731,19 @@
     if (s.p.cubierta === 'si') {
       const c = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
       if (!(c > 0) || !Number.isFinite(c)) return null;
-      const cD = c / Math.cos(alD), trap = (wTop, wBot, hh) => { const off = (wTop - wBot) / 2; return { pts: [[0, 0], [wTop, 0], [wTop - off, hh], [off, hh]] }; };
+      // Sobrante por lado (0.25 in por defecto): cada panel es más ancho para tapar las rendijas de las esquinas
+      const mg = s.p.margenCub && String(s.p.margenCub).trim() ? len(s, 'margenCub') : 6.35;
+      if (!Number.isFinite(mg) || mg < 0) return null;
+      const cD = c / Math.cos(alD), trap = (wTop, wBot, hh) => { const off = (wTop - wBot) / 2; return { pts: [[0, 0], [wTop + 2 * mg, 0], [wTop + 2 * mg - off, hh], [off, hh]] }; };
       const cover = (name, shape, eu, ev, ew, O, out, du) => {
         const P = place(name, shape, eu, ev, ew, [O[0] + eu[0] * du - ew[0] * c, O[1] + eu[1] * du - ew[1] * c, O[2] + eu[2] * du - ew[2] * c], out);
         P.th = c; P.color = 0xa9743f; panels.push(P);
       };
-      cover('Cubierta Frente', trap(Wt, Wb, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], 0);
+      cover('Cubierta Frente', trap(Wt, Wb, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], -mg);
       if (s.p.cubiertaCaras !== 'frente') {
-      cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], 0);
-      cover('Cubierta Lado izquierdo', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], cD);
-      cover('Cubierta Lado derecho', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], cD);
+      cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], -mg);
+      cover('Cubierta Lado izquierdo', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], cD - mg);
+      cover('Cubierta Lado derecho', trap(Dt - 2 * cD, Db - 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], cD - mg);
       const cW = c / Math.cos(alW), bw = Wb + 2 * cW, bd = Db + 2 * cD;
       const bc = place('Cubierta Base', { pts: [[0, 0], [bw, 0], [bw, bd], [0, bd]] }, [1, 0, 0], [0, 0, 1], [0, 1, 0], [ox - cW, -c, oz - cD], [0, -1, 0]);
       bc.th = c; bc.color = 0xa9743f; panels.push(bc);
@@ -3223,7 +3226,7 @@
     if (key === 'nEsq') return joint === 'planas' || !byCount;
     if (key === 'nBaseT') return !baseOn || !byCount;
     if (key === 'bandaAnillo') return !(Math.round(num(s, 'nAnillos', 0)) > 0);
-    if (key === 'grosorCub' || key === 'cubiertaCaras') return s.p.cubierta !== 'si';
+    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'margenCub') return s.p.cubierta !== 'si';
     return false;
   }
   // En modo bandeja de pared los nombres de las medidas cambian (la caja "acostada")
@@ -4433,8 +4436,8 @@
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
   // Cambia los dedos (u otras uniones) de una caja desagrupada: se regeneran sus piezas en el mismo lugar
   const ORIGIN_FINGER_KEYS = {
-    box: ['t', 'kerf', 'cubierta', 'grosorCub', 'cubiertaCaras', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
-    taper: ['t', 'kerf', 'cubierta', 'grosorCub', 'cubiertaCaras', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
+    box: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
+    taper: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
   };
   function regenOrigin(gid, key, value) {
     const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
