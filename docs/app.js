@@ -140,7 +140,7 @@
   const OPS = { corte: 'Corte', grabado: 'Grabado', marcado: 'Marcado' };
   const IMPORT_OPS = { archivo: 'Según colores del archivo', ...OPS };
   const EDGE_OPTS = { plano: 'Plano', dedos: 'Dedos (salen)', ranuras: 'Ranuras (entran)' };
-  const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar' };
+  const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar', excluir: 'Excluir (quita lo que se cruza)' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
   const JOINT_OPTS = { dedos: 'Con dedos (finger joint)', planas: 'Sin dedos (para pegar)' };
   const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', no: 'Abierta' };
@@ -1586,6 +1586,7 @@
     if (!list.length) return [];
     if (mode === 'unir') return clip(CT.ctUnion, list.flat());
     if (mode === 'restar') return clip(CT.ctDifference, list[0], normalize(list.slice(1).flat()));
+    if (mode === 'excluir') { let x = list[0]; for (const p of list.slice(1)) x = clip(CT.ctXor, x, p); return x; }
     let acc = list[0];
     for (const p of list.slice(1)) acc = clip(CT.ctIntersection, acc, p);
     return acc;
@@ -2877,6 +2878,7 @@
             h('button', { onclick: () => groupSel('unir'), title: 'Une las figuras en una sola silueta' }, 'Unir'),
             h('button', { onclick: () => groupSel('restar'), title: 'A la figura de más abajo en la lista le quita las demás (ej. agujeros)' }, 'Restar'),
             h('button', { onclick: () => groupSel('intersectar'), title: 'Deja solo la parte donde se cruzan' }, 'Intersectar'),
+            h('button', { onclick: () => groupSel('excluir'), title: 'Deja todo menos la parte donde se cruzan' }, 'Excluir'),
             h('button', { onclick: () => groupSel('grupo'), title: 'Agrupa sin combinar (Ctrl+G)' }, 'Agrupar'))
           : h('p', { class: 'tip' }, 'Para combinar, los objetos deben estar en el mismo nivel.'),
         h('p', { class: 'tip' }, 'Restar: la figura de más abajo en la lista de Objetos es la pieza; las demás se recortan de ella.'),
@@ -3098,6 +3100,7 @@
       h('button', { class: 'icon-btn', title: 'Subir en la lista (queda encima)', 'aria-label': 'Subir', disabled: idx >= list.length - 1 ? '' : null, onclick: () => reorder(1) }, '↑'),
       h('button', { class: 'icon-btn', title: 'Bajar en la lista (queda debajo)', 'aria-label': 'Bajar', disabled: idx <= 0 ? '' : null, onclick: () => reorder(-1) }, '↓'),
       h('button', { class: 'danger', onclick: deleteSel }, 'Eliminar')));
+    if (!shapes[0].from || true) { const al = sheetPositionSection(); box.append(...al); }
   }
 
   // Cantidad de dedos equivalente al ancho de dedo actual (para que al cambiar de modo la caja no cambie)
@@ -3416,24 +3419,90 @@
   function selectedRoots() {
     return [...sel].map(byId).filter(s => s && !parentOf(s.id));
   }
+  /* ----- Recorte: dividir figuras con una línea ----- */
+  const clipEO = (type, subj, clp) => { const c = new CL.Clipper(); c.AddPaths(subj, CL.PolyType.ptSubject, true); c.AddPaths(clp, CL.PolyType.ptClip, true); const sol = new CL.Paths(); c.Execute(type, sol, CL.PolyFillType.pftEvenOdd, CL.PolyFillType.pftNonZero); return sol; };
+  function divideWithLine() {
+    evaluateParams(); evaluateAll();
+    const roots = selectedRoots(), lines = roots.filter(s => s.type === 'line'), targets = roots.filter(s => s.type !== 'line');
+    if (lines.length !== 1 || !targets.length) { msg('Dibuja una línea sobre la figura, selecciona la línea y la figura (Shift + clic) y pulsa «Dividir con la línea».'); return; }
+    const L = lines[0], p1 = [len(L, 'x'), len(L, 'y')], p2 = [len(L, 'x2'), len(L, 'y2')], d = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    if (!(d > 0.01)) { msg('La línea es demasiado corta.'); return; }
+    const u = [(p2[0] - p1[0]) / d, (p2[1] - p1[1]) / d], n = [-u[1], u[0]], B = 1e5;
+    const half = sg => [[-B, 0], [B, 0], [B, B], [-B, B]].map(([a, b]) => ({ X: Math.round((p1[0] + u[0] * a + n[0] * b * sg) * SC), Y: Math.round((p1[1] + u[1] * a + n[1] * b * sg) * SC) }));
+    const sides = [half(1), half(-1)];
+    const made = [], skipped = [], notCrossed = [], replaced = [];
+    for (const t of targets) {
+      const r = evalCache.get(t.id);
+      if (!r || SEPARABLE.has(t.type) || r.items.some(it => it.texts.length || (it.images || []).length || it.polys.some(p => !p.closed))) { skipped.push(t.name); continue; }
+      const pieces = [];
+      for (const sd of sides) for (const it of r.items) {
+        const closed = it.polys.filter(p => p.closed && p.pts.length >= 3);
+        if (!closed.length) continue;
+        const part = fromC(clipEO(CL.ClipType.ctIntersection, toC(closed), [sd])).filter(p => Math.abs(polyArea(p.pts)) > 0.01);
+        if (part.length) for (const grp of splitPieces(part)) pieces.push(grp.map(p => ({ ...p, op: it.op })));
+      }
+      const sideHits = sides.map(sd => r.items.some(it => fromC(clipEO(CL.ClipType.ctIntersection, toC(it.polys.filter(p => p.closed)), [sd])).length)).filter(Boolean).length;
+      if (pieces.length < 2 || sideHits < 2) { notCrossed.push(t.name); continue; }
+      const list = listOf(t.id), at = list.indexOf(t);
+      const objs = pieces.map((pl, i) => { const o = importObject(`${t.name} · parte ${i + 1}`, pl, []); o.op = t.op; return o; });
+      list.splice(at, 1, ...objs);
+      made.push(...objs); replaced.push(t.name);
+    }
+    if (!made.length) { msg(skipped.length ? `No se puede dividir «${skipped[0]}» (tiene líneas abiertas, texto o es una caja: sepárala en piezas primero).` : 'La línea no cruza la figura: dibújala de lado a lado.'); return; }
+    const li = listOf(L.id), lx = li.indexOf(L); if (lx >= 0) li.splice(lx, 1);
+    sel = new Set(made.map(o => o.id));
+    checkpoint(); fullRender();
+    msg(`${replaced.length} figura(s) dividida(s) en ${made.length} piezas.` + (skipped.length ? ` No se pudo dividir: ${skipped.join(', ')}.` : '') + (notCrossed.length ? ` La línea no cruzaba: ${notCrossed.join(', ')}.` : ''));
+  }
+
+  let alignRef = 'seleccion';
+  const ALIGN_REFS = { seleccion: 'La selección', hoja: 'La hoja de trabajo', primera: 'La primera figura elegida' };
   function alignmentSection(shapes) {
     if (shapes.some(s => parentOf(s.id))) return [h('p', { class: 'tip' }, 'Alinea los grupos completos desde el nivel principal.')];
+    const gap = h('input', { type: 'number', min: '0', step: 'any', value: fmt(3 / unitMM, 3), 'aria-label': 'Separación' });
+    const gapMM = () => Math.max(0, parseFloat(gap.value) * unitMM || 0);
     return [h('div', { class: 'insp-sub' }, 'Alinear selección'),
+      propRow('Alinear respecto a', selectEl(ALIGN_REFS, alignRef, 'Alinear respecto a', v => { alignRef = v; })),
       h('div', { class: 'btn-grid' }, ...[
         ['left', 'Izquierda'], ['cx', 'Centro horizontal'], ['right', 'Derecha'],
         ['top', 'Arriba'], ['cy', 'Centro vertical'], ['bottom', 'Abajo'],
         ['dx', 'Distribuir horizontal'], ['dy', 'Distribuir vertical']
-      ].map(([mode, label]) => h('button', { onclick: () => alignSelection(mode) }, label)))];
+      ].map(([mode, label]) => h('button', { onclick: () => alignSelection(mode) }, label))),
+      propRow(`Separación (${unitLabel()})`, gap),
+      h('div', { class: 'btn-grid' },
+        h('button', { title: 'Pone las figuras una al lado de otra, con esta separación exacta', onclick: () => stackSelection('x', gapMM()) }, 'En fila'),
+        h('button', { title: 'Pone las figuras una debajo de otra, con esta separación exacta', onclick: () => stackSelection('y', gapMM()) }, 'En columna')),
+      ...recortarSection(shapes)];
   }
-  function alignSelection(mode) {
+  // Para una sola figura: colocarla en la hoja
+  function sheetPositionSection() {
+    return [h('div', { class: 'insp-sub' }, 'Posición en la hoja'),
+      h('div', { class: 'btn-grid' }, ...[
+        ['left', 'A la izquierda'], ['cx', 'Centrar ↔'], ['right', 'A la derecha'],
+        ['top', 'Arriba'], ['cy', 'Centrar ↕'], ['bottom', 'Abajo']
+      ].map(([mode, label]) => h('button', { onclick: () => alignSelection(mode, 'hoja') }, label))),
+      h('button', { class: 'wide', onclick: () => { alignSelection('cx', 'hoja'); alignSelection('cy', 'hoja'); } }, 'Centrar en la hoja')];
+  }
+  // Recortar: dividir con una línea (se muestra si hay una línea y alguna figura elegidas)
+  function recortarSection(shapes) {
+    const hasLine = shapes.filter(s => s.type === 'line').length === 1 && shapes.some(s => s.type !== 'line');
+    return [h('div', { class: 'insp-sub' }, 'Recortar'),
+      h('button', { class: hasLine ? 'primary wide' : 'wide', title: 'Elige una línea dibujada sobre la figura y la figura: se divide en piezas independientes', onclick: divideWithLine }, 'Dividir con la línea'),
+      hasLine ? null : h('p', { class: 'tip' }, 'Dibuja una línea que cruce la figura, elige la línea y la figura (Shift + clic) y pulsa el botón. Para quitar la parte que se cruza usa «Excluir», o «Restar» para recortar un agujero.')];
+  }
+  function alignSelection(mode, refOverride) {
     evaluateParams(); evaluateAll();
+    const ref = refOverride || alignRef;
     const entries = selectedRoots().map(s => ({ s, b: bboxOfItems(worldCache.get(s.id) || []) })).filter(e => e.b);
-    if (entries.length < 2) return;
-    const b = unionBox(entries.map(e => e.b));
+    if (!entries.length || (entries.length < 2 && ref !== 'hoja')) return;
+    let b = unionBox(entries.map(e => e.b));
+    if (ref === 'hoja') b = { x: 0, y: 0, w: doc.sheet.w, h: doc.sheet.h };
+    else if (ref === 'primera') { const first = [...sel].map(byId).find(s => s && entries.some(e => e.s === s)); const fe = entries.find(e => e.s === first); if (fe) b = fe.b; }
     if (mode === 'dx' || mode === 'dy') {
       if (entries.length < 3) { msg('Selecciona al menos tres objetos para distribuir.'); return; }
+      b = unionBox(entries.map(e => e.b));
       const axis = mode === 'dx' ? 'x' : 'y', size = axis === 'x' ? 'w' : 'h';
-      entries.sort((a, b) => a.b[axis] - b.b[axis]);
+      entries.sort((a, c) => a.b[axis] - c.b[axis]);
       const gap = (b[size] - entries.reduce((n, e) => n + e.b[size], 0)) / (entries.length - 1);
       let at = b[axis];
       for (const e of entries) { const d = at - e.b[axis]; moveShape(e.s, { ...e.s.p }, axis === 'x' ? d : 0, axis === 'y' ? d : 0); at += e.b[size] + gap; }
@@ -3445,6 +3514,18 @@
       }
     }
     checkpoint(); fullRender();
+  }
+  // Fila o columna con separación exacta, empezando por la figura de más a la izquierda / más arriba
+  function stackSelection(axis, gapMM) {
+    evaluateParams(); evaluateAll();
+    const entries = selectedRoots().map(s => ({ s, b: bboxOfItems(worldCache.get(s.id) || []) })).filter(e => e.b);
+    if (entries.length < 2) { msg('Selecciona al menos dos objetos.'); return; }
+    const size = axis === 'x' ? 'w' : 'h';
+    entries.sort((a, c) => a.b[axis] - c.b[axis]);
+    let at = entries[0].b[axis];
+    for (const e of entries) { const d = at - e.b[axis]; moveShape(e.s, { ...e.s.p }, axis === 'x' ? d : 0, axis === 'y' ? d : 0); at += e.b[size] + gapMM; }
+    checkpoint(); fullRender();
+    msg(`${entries.length} figuras en ${axis === 'x' ? 'fila' : 'columna'}, ${fmt(gapMM / unitMM, 3)} ${unitLabel()} entre cada una.`);
   }
   const BATCH_MARKER = '{{nombre}}';
   function personalizeShapes(shapes, name, maxWidthMM) {
@@ -3909,7 +3990,7 @@
     if (members.length !== shapes.length) { msg('Para combinar, los objetos deben estar en el mismo nivel.'); return; }
     if (mode !== 'grupo' && members.every(s => TYPES[s.type].open)) { msg('Unir y restar funcionan con figuras cerradas (no líneas ni texto).'); return; }
     const at = list.indexOf(members[0]);
-    const label = { grupo: 'Grupo', unir: 'Unión', restar: 'Resta', intersectar: 'Intersección' }[mode];
+    const label = { grupo: 'Grupo', unir: 'Unión', restar: 'Resta', intersectar: 'Intersección', excluir: 'Exclusión' }[mode];
     const g = { id: uid(), type: 'group', name: nextName(label), op: OPS[members[0].op] ? members[0].op : 'corte', p: { mode, x: '0', y: '0', rot: '0' }, children: members };
     for (const m of members) list.splice(list.indexOf(m), 1);
     list.splice(at, 0, g);
