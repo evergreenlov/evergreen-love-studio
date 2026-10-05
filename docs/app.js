@@ -1787,6 +1787,13 @@
     const sh = $('#sheet');
     sh.setAttribute('x', 0); sh.setAttribute('y', 0);
     sh.setAttribute('width', doc.sheet.w); sh.setAttribute('height', doc.sheet.h);
+    for (const e of [...sh.parentNode.querySelectorAll('.sheet-extra, .sheet-label')]) e.remove();
+    const nSheets = doc.nest && doc.nest.count > 1 ? doc.nest.count : 1;
+    for (let k = 1; k < nSheets; k++) {
+      const r = sh.cloneNode(false); r.removeAttribute('id'); r.classList.add('sheet-extra');
+      r.setAttribute('x', k * (doc.sheet.w + doc.nest.gap));
+      sh.parentNode.insertBefore(r, sh.nextSibling);
+    }
     const a = 6 / view.s * 2;
     $('#axes').setAttribute('d', `M${-a} 0H${a}M0 ${-a}V${a}`);
 
@@ -2762,6 +2769,19 @@
     }
   }
 
+  // Resumen del último acomodo y exportación por hoja
+  function nestSection() {
+    const n = doc.nest;
+    if (!n || !n.count) return h('div', { class: 'nest-box' }, h('div', { class: 'insp-sub' }, 'Acomodo de piezas'), h('button', { class: 'wide', onclick: openNest }, 'Acomodar piezas (ahorrar madera)'));
+    const area = n.w * n.h, u = v => fmt(v / unitMM, isInch() ? 1 : 0);
+    const lines = n.used.map((a, i) => `Hoja ${i + 1}: ${n.pieces[i]} pieza(s), madera usada ${fmt(a / area * 100, 0)} %`);
+    return h('div', { class: 'nest-box' }, h('div', { class: 'insp-sub' }, 'Acomodo de piezas'),
+      h('p', { class: 'tip' }, `${n.count} hoja(s) de ${u(n.w)} × ${u(n.h)} ${unitLabel()}. ` + lines.join(' · ') + (n.failed && n.failed.length ? `. No caben en la hoja: ${n.failed.join(', ')}.` : '')),
+      h('div', { class: 'btn-grid' }, h('button', { onclick: openNest }, 'Volver a acomodar'),
+        n.count > 1 ? h('button', { onclick: () => exportSheets('svg') }, 'SVG por hoja') : h('button', { onclick: () => withFonts(exportSVG) }, 'Exportar SVG')),
+      n.count > 1 ? h('button', { class: 'wide', onclick: () => exportSheets('dxf') }, 'DXF por hoja') : null);
+  }
+
   // Material: madera + grosor (+ kerf). Escribe los parámetros «grosor» y «kerf», que usan todas las plantillas
   const WOODS = ['Basswood (tilo)', 'Walnut (nogal)', 'Mahogany (caoba)', 'Contrachapado (plywood)', 'Acrílico', 'Otro'];
   const THICKNESSES = [[1.5, '1.5 mm (.059")'], [2, '2 mm (.079")'], [3, '3 mm (.118")'], [3.175, '1/8" (.125")'], [4, '4 mm (.157")'], [5, '5 mm (.197")'], [6, '6 mm (.236")'], [6.2, '6.2 mm (.244")'], [6.35, '1/4" (.250")']];
@@ -2830,6 +2850,7 @@
         propRow(`Área ancho (${u})`, numInput(fmt(doc.sheet.w / unitMM, 3), v => { doc.sheet.w = v * unitMM; })),
         propRow(`Área alto (${u})`, numInput(fmt(doc.sheet.h / unitMM, 3), v => { doc.sheet.h = v * unitMM; })),
         propRow(`Paso imán (${u})`, numInput(doc.grid, v => { doc.grid = v; })),
+        nestSection(),
         materialSection(),
         h('p', { class: 'tip' }, 'En cualquier medida puedes escribir fórmulas, por ejemplo ', h('code', {}, 'ancho - 2*grosor'),
           ', y mezclar unidades: ', h('code', {}, '3mm'), ', ', h('code', {}, '1/8in'), ' o ', h('code', {}, '2"'),
@@ -3603,6 +3624,169 @@
     groups.forEach(({ g, b }, i) => { g.p.x = String(((i % columns) * (cellW + gap) - b.x) / unitMM); g.p.y = String((Math.floor(i / columns) * (cellH + gap) - b.y) / unitMM); });
     return groups.map(e => e.g);
   }
+  /* ================= Acomodo automático de piezas (ahorra madera) ================= */
+  // Cada pieza se trata como un rectángulo (su caja) y se acomoda con MaxRects, girándola 90° si así cabe mejor.
+  // Si no caben en una hoja, se crean más hojas en fila hacia la derecha; cada hoja se exporta por separado.
+  const NEST_GAP = 20; // mm entre hojas en el lienzo
+  const SHEET_PRESETS = [
+    ['Área de la máquina (la actual)', null],
+    ['xTool P2S · listones (600 × 305 mm)', [600, 305]],
+    ['xTool P2S · panal (556 × 280 mm)', [556, 280]],
+    ['Madera 12 × 24 in (610 × 305 mm)', [609.6, 304.8]],
+    ['Madera 12 × 18 in (457 × 305 mm)', [457.2, 304.8]],
+    ['Madera 12 × 12 in (305 × 305 mm)', [304.8, 304.8]],
+    ['Madera 24 × 24 in (610 × 610 mm)', [609.6, 609.6]],
+    ['Acrílico 300 × 600 mm', [600, 300]],
+  ];
+  function maxRectsPack(items, W, H, allowRot) {
+    const bins = [];
+    const newBin = () => ({ free: [{ x: 0, y: 0, w: W, h: H }], placed: [] });
+    const split = (bin, r) => {
+      const out = [];
+      for (const f of bin.free) {
+        if (r.x >= f.x + f.w || r.x + r.w <= f.x || r.y >= f.y + f.h || r.y + r.h <= f.y) { out.push(f); continue; }
+        if (r.x > f.x) out.push({ x: f.x, y: f.y, w: r.x - f.x, h: f.h });
+        if (r.x + r.w < f.x + f.w) out.push({ x: r.x + r.w, y: f.y, w: f.x + f.w - r.x - r.w, h: f.h });
+        if (r.y > f.y) out.push({ x: f.x, y: f.y, w: f.w, h: r.y - f.y });
+        if (r.y + r.h < f.y + f.h) out.push({ x: f.x, y: r.y + r.h, w: f.w, h: f.y + f.h - r.y - r.h });
+      }
+      bin.free = out.filter((a, i) => !out.some((b, j) => i !== j && a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h && (a.w < b.w || a.h < b.h || i > j)));
+    };
+    const tryBin = (bin, it) => {
+      let best = null;
+      for (const f of bin.free) {
+        for (const rot of allowRot && it.canRot ? [false, true] : [false]) {
+          const w = rot ? it.h : it.w, h = rot ? it.w : it.h;
+          if (w > f.w + 1e-6 || h > f.h + 1e-6) continue;
+          const s1 = Math.min(f.w - w, f.h - h), s2 = Math.max(f.w - w, f.h - h);
+          if (!best || s1 < best.s1 - 1e-9 || (Math.abs(s1 - best.s1) < 1e-9 && s2 < best.s2)) best = { x: f.x, y: f.y, w, h, rot, s1, s2 };
+        }
+      }
+      return best;
+    };
+    const failed = [];
+    for (const it of items) {
+      if (!(it.w <= W + 1e-6 && it.h <= H + 1e-6) && !(allowRot && it.canRot && it.h <= W + 1e-6 && it.w <= H + 1e-6)) { failed.push(it); continue; }
+      let placed = null, bi = -1;
+      for (let i = 0; i < bins.length && !placed; i++) { placed = tryBin(bins[i], it); bi = i; }
+      if (!placed) { bins.push(newBin()); bi = bins.length - 1; placed = tryBin(bins[bi], it); }
+      if (!placed) { failed.push(it); continue; }
+      bins[bi].placed.push({ it, x: placed.x, y: placed.y, w: placed.w, h: placed.h, rot: placed.rot });
+      split(bins[bi], { x: placed.x, y: placed.y, w: placed.w, h: placed.h });
+    }
+    return { bins, failed };
+  }
+  // Área real de madera de una pieza (contornos menos agujeros), en mm²
+  function pieceArea(items) {
+    const polys = items.flatMap(it => it.polys.filter(p => p.closed && p.pts.length > 2));
+    let a = 0;
+    for (const p of polys) {
+      const depth = polys.filter(q => q !== p && inPoly(p.pts[0], q.pts)).length;
+      a += (depth % 2 === 0 ? 1 : -1) * Math.abs(polyArea(p.pts));
+    }
+    return Math.max(0, a);
+  }
+
+  function runNest(o) {
+    evaluateParams(); evaluateAll();
+    let roots = selectedRoots();
+    if (!roots.length) roots = [...doc.shapes];
+    const boxes = roots.filter(s => SEPARABLE.has(s.type));
+    if (boxes.length) {
+      if (!confirm(`Para acomodar mejor, ${boxes.length > 1 ? 'las cajas se separan' : '«' + boxes[0].name + '» se separa'} en piezas independientes (dejan de cambiar con los parámetros). Deshacer las vuelve a juntar. ¿Continuar?`)) return false;
+      const keep = roots.filter(s => !SEPARABLE.has(s.type));
+      separateMany(boxes);
+      roots = [...keep, ...[...sel].map(byId).filter(x => x && !parentOf(x.id))];
+      evaluateParams(); evaluateAll();
+    }
+    const units = [];
+    for (const s of roots) {
+      const r = evalCache.get(s.id);
+      if (!r || !r.bbox) continue;
+      const canRot = o.rotate && s.type !== 'text' && s.type !== 'line' && 'rot' in s.p && (!s.p.rep || s.p.rep === 'no');
+      units.push({ s, w: r.bbox.w, h: r.bbox.h, area: pieceArea(r.items), canRot });
+    }
+    if (!units.length) { msg('No hay piezas para acomodar.'); return false; }
+    const W = o.w - 2 * o.margin + o.gap, H = o.h - 2 * o.margin + o.gap;
+    const items = units.map(u => ({ ...u, w: u.w + o.gap, h: u.h + o.gap })).sort((a, b) => b.w * b.h - a.w * a.h || Math.max(b.w, b.h) - Math.max(a.w, a.h));
+    const { bins, failed } = maxRectsPack(items, W, H, o.rotate);
+    checkpoint();
+    // 1) gira las piezas que lo pidieron; 2) vuelve a medir; 3) mueve cada una a su lugar
+    const jobs = [];
+    bins.forEach((bin, k) => { for (const p of bin.placed) jobs.push({ u: p.it, k, x: p.x, y: p.y, rot: p.rot }); });
+    for (const j of jobs) if (j.rot) { const cur = j.u.s.p.rot; j.u.s.p.rot = shiftExpr(cur === undefined || cur === '' ? '0' : String(cur), 90); }
+    evaluateParams(); evaluateAll();
+    for (const j of jobs) {
+      const r = evalCache.get(j.u.s.id);
+      if (!r || !r.bbox) continue;
+      const tx = j.k * (o.w + NEST_GAP) + o.margin + j.x, ty = o.margin + j.y;
+      moveShape(j.u.s, { ...j.u.s.p }, tx - r.bbox.x, ty - r.bbox.y);
+    }
+    const used = bins.map(bin => bin.placed.reduce((a, p) => a + p.it.area, 0));
+    doc.sheet = { w: o.w, h: o.h };
+    doc.nest = { count: Math.max(1, bins.length), w: o.w, h: o.h, gap: NEST_GAP, used, pieces: bins.map(b => b.placed.length), failed: failed.map(f => f.s.name) };
+    sel = new Set(jobs.map(j => j.u.s.id));
+    checkpoint(); fullRender(); fitView();
+    const pct = used.reduce((a, b) => a + b, 0) / (doc.nest.count * o.w * o.h) * 100;
+    msg(`${jobs.length} pieza(s) en ${doc.nest.count} hoja(s) · madera usada ${fmt(pct, 0)} %` + (failed.length ? ` · ${failed.length} no cabe(n) en la hoja` : ''));
+    return true;
+  }
+
+  function openNest() {
+    evaluateParams(); evaluateAll();
+    if (!doc.shapes.length) { msg('Primero crea o abre un diseño con piezas para acomodar.'); return; }
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'nestTitle' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const cur = doc.nest && doc.nest.w ? doc.nest : doc.sheet;
+    const presetSel = h('select', { 'aria-label': 'Tamaño de la hoja de madera' }, ...SHEET_PRESETS.map(([l], i) => h('option', { value: String(i) }, l)));
+    const wIn = h('input', { type: 'number', min: '1', step: 'any', value: fmt(cur.w / unitMM, 3) });
+    const hIn = h('input', { type: 'number', min: '1', step: 'any', value: fmt(cur.h / unitMM, 3) });
+    const gapIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(3 / unitMM * (isInch() ? 1 : 1), 3) });
+    const marIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(5 / unitMM, 3) });
+    const rot = h('input', { type: 'checkbox', checked: '' });
+    presetSel.onchange = () => {
+      const p = SHEET_PRESETS[+presetSel.value][1] || [doc.sheet.w, doc.sheet.h];
+      wIn.value = fmt(p[0] / unitMM, 3); hIn.value = fmt(p[1] / unitMM, 3);
+    };
+    const roots = selectedRoots();
+    const status = h('p', { class: 'tip', role: 'status' }, roots.length ? `Se acomodan las ${roots.length} figura(s) seleccionada(s).` : `Se acomodan todas las figuras del diseño (${doc.shapes.length}).`);
+    const go = h('button', { class: 'primary' }, 'Acomodar');
+    go.onclick = () => {
+      const o = { w: parseFloat(wIn.value) * unitMM, h: parseFloat(hIn.value) * unitMM, gap: parseFloat(gapIn.value) * unitMM, margin: parseFloat(marIn.value) * unitMM, rotate: rot.checked };
+      if (![o.w, o.h, o.gap, o.margin].every(Number.isFinite) || o.w < 10 || o.h < 10 || o.gap < 0 || o.margin < 0) { status.textContent = 'Revisa los números: la hoja debe medir al menos 10 mm y la separación no puede ser negativa.'; return; }
+      close();
+      runNest(o);
+    };
+    const cancel = h('button', { onclick: close }, 'Cancelar');
+    const row = (l, el) => h('label', {}, l, el);
+    dialog.append(h('h2', { id: 'nestTitle' }, 'Acomodar piezas (ahorrar madera)'),
+      h('p', {}, 'Coloca las piezas lo más juntas posible dentro de la hoja de madera; si no caben en una, usa más hojas.'),
+      row('Hoja de madera', presetSel),
+      h('div', { class: 'nest-grid' }, row(`Ancho (${unitLabel()})`, wIn), row(`Alto (${unitLabel()})`, hIn), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn)),
+      h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90° (ahorra más madera)'),
+      status,
+      h('div', { class: 'dialog-actions' }, cancel, go));
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+  // Una hoja del acomodo: las piezas cuyo centro cae dentro de ella
+  function sheetItems(k) {
+    const { items } = exportItems(), n = doc.nest, x0 = k * (n.w + n.gap);
+    return { x0, items: items.filter(it => { const b = bboxOfItems([it]); return b && b.x + b.w / 2 >= x0 - 1 && b.x + b.w / 2 <= x0 + n.w + 1; }) };
+  }
+  function exportSheets(kind) {
+    if (!doc.nest || !doc.nest.count) return;
+    let k = 0;
+    const next = () => {
+      if (k >= doc.nest.count) return;
+      const idx = k; withFonts(() => (kind === 'dxf' ? exportDXF : exportSVG)({ sheet: idx }));
+      k++; setTimeout(next, 900);
+    };
+    next();
+    msg(`Exportando ${doc.nest.count} archivo(s), uno por hoja. Si tu navegador pregunta, permite las descargas múltiples.`);
+  }
+
   function openBatch() {
     evaluateParams(); evaluateAll();
     if (!doc.shapes.length) { msg('Primero crea o abre un arte y escribe {{nombre}} en el texto que deseas personalizar.'); return; }
@@ -3656,6 +3840,7 @@
     document.body.append(dialog); dialog.showModal(); names.focus(); refresh();
   }
   $('#btnBatch').onclick = openBatch;
+  $('#btnNest').onclick = openNest;
 
   /* ================= Acciones ================= */
   // Al borrar figuras se borran también las medidas tomadas sobre ellas
@@ -3779,8 +3964,10 @@
     return { items, bad, bbox: bboxOfItems(items) };
   }
 
-  function exportSVG() {
-    const { items, bad, bbox: b } = exportItems();
+  function exportSVG(opts) {
+    let { items, bad, bbox: b } = exportItems();
+    const sh = opts && opts.sheet !== undefined ? sheetItems(opts.sheet) : null;
+    if (sh) { items = sh.items; b = bboxOfItems(items); }
     if (!b) { msg('No hay nada que exportar.'); return; }
     const m = 1;
     const x = b.x - m, y = b.y - m, w = b.w + 2 * m, hgt = b.h + 2 * m;
@@ -3820,13 +4007,16 @@
       out.push('</g>');
     }
     out.push('</svg>');
-    download(safeName() + '.svg', out.join('\n'), 'image/svg+xml');
+    download(safeName() + (sh ? `-hoja-${opts.sheet + 1}` : '') + '.svg', out.join('\n'), 'image/svg+xml');
     msg(`SVG exportado: ${fmt(b.w / unitMM, 2)} × ${fmt(b.h / unitMM, 2)} ${unitLabel()}` + (bad ? ` (${bad} objeto(s) con error omitidos)` : ''));
   }
 
   // DXF (R12, en mm): capas CORTE (rojo), GRABADO (negro/blanco) y MARCADO (azul).
-  function exportDXF() {
-    const { items, bad, bbox: b } = exportItems();
+  function exportDXF(opts) {
+    let { items, bad, bbox: b } = exportItems();
+    const sh = opts && opts.sheet !== undefined ? sheetItems(opts.sheet) : null;
+    if (sh) { items = sh.items; b = bboxOfItems(items); }
+    const dx0 = sh ? sh.x0 : 0;
     if (!b) { msg('No hay nada que exportar.'); return; }
     const LAYERS = { corte: ['CORTE', 1], grabado: ['GRABADO', 7], marcado: ['MARCADO', 5] };
     let skippedImages = 0;
@@ -3855,17 +4045,17 @@
       const layer = LAYERS[it.op][0];
       for (const p of it.polys) {
         g(0, 'POLYLINE'); g(8, layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, p.closed ? 1 : 0);
-        for (const [x, y] of p.pts) { g(0, 'VERTEX'); g(8, layer); g(10, r4(x)); g(20, r4(-y)); g(30, 0); }
+        for (const [x, y] of p.pts) { g(0, 'VERTEX'); g(8, layer); g(10, r4(x - dx0)); g(20, r4(-y)); g(30, 0); }
         g(0, 'SEQEND'); g(8, layer);
       }
       for (const t of it.texts) {
-        g(0, 'TEXT'); g(8, layer); g(10, r4(t.x)); g(20, r4(-t.y)); g(30, 0); g(40, r4(t.size * 0.7)); g(1, dxfStr(t.str)); g(50, r4(-t.rot));
-        if (t.anchor === 'middle') { g(72, 1); g(11, r4(t.x)); g(21, r4(-t.y)); g(31, 0); }
+        g(0, 'TEXT'); g(8, layer); g(10, r4(t.x - dx0)); g(20, r4(-t.y)); g(30, 0); g(40, r4(t.size * 0.7)); g(1, dxfStr(t.str)); g(50, r4(-t.rot));
+        if (t.anchor === 'middle') { g(72, 1); g(11, r4(t.x - dx0)); g(21, r4(-t.y)); g(31, 0); }
       }
       skippedImages += (it.images || []).length;
     }
     g(0, 'ENDSEC'); g(0, 'EOF');
-    download(safeName() + '.dxf', out.join('\r\n') + '\r\n', 'application/dxf');
+    download(safeName() + (sh ? `-hoja-${opts.sheet + 1}` : '') + '.dxf', out.join('\r\n') + '\r\n', 'application/dxf');
     msg(`DXF exportado en mm: ${fmt(b.w, 1)} × ${fmt(b.h, 1)} mm` + (bad ? ` (${bad} objeto(s) con error omitidos)` : '')
       + (skippedImages ? '. El DXF no admite imágenes: para el logo en PNG/JPG usa Exportar SVG.' : ''));
   }
