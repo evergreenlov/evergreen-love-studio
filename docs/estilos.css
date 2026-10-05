@@ -335,3 +335,6 @@ button.wide { width: 100%; margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .sheet-extra { fill: none; stroke: var(--sheet); stroke-width: 1px; stroke-dasharray: 6 4; }
 .nest-box { margin: 10px 0 4px; }
+
+.bez-line { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 3 2; fill: none; pointer-events: none; }
+.bez-handle { fill: #fff; stroke: var(--accent); stroke-width: 1.6px; cursor: pointer; }

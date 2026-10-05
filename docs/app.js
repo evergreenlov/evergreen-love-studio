@@ -1847,7 +1847,11 @@
   function nodeList(id) {
     const s = byId(id), fr = importFrame(s), out = [];
     if (fr && !fr.rotated) {
-      fr.a.polys.forEach((pl, pi) => vertexIdx(pl).forEach(vi => { const [x, y] = frameWorld(fr, pl.pts[vi]); out.push({ x, y, pi, vi, edit: true, key: nkey(id, pi, vi) }); }));
+      fr.a.polys.forEach((pl, pi) => {
+        const cv = fr.a.curves && fr.a.curves[pi];
+        if (cv) cv.n.forEach((nd, vi) => { const [x, y] = frameWorld(fr, nd.p); out.push({ x, y, pi, vi, edit: true, curve: true, smooth: !!nd.s, key: nkey(id, pi, vi) }); });
+        else vertexIdx(pl).forEach(vi => { const [x, y] = frameWorld(fr, pl.pts[vi]); out.push({ x, y, pi, vi, edit: true, key: nkey(id, pi, vi) }); });
+      });
       return out;
     }
     for (const it of worldCache.get(id) || []) for (const pl of it.polys || []) vertexIdx(pl).forEach(i => out.push({ x: pl.pts[i][0], y: pl.pts[i][1] }));
@@ -1864,7 +1868,8 @@
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt' + (q.edit ? ' edit' : '') + (on ? ' on' : '') + (hov ? ' hov' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
-    if (nodeHover && nodeHover.kind === 'seg') { // "+" para añadir un punto sobre el borde
+    drawBezHandles();
+    if (nodeHover && (nodeHover.kind === 'seg' || nodeHover.kind === 'cseg')) { // "+" para añadir un punto sobre el borde
       const [x, y] = nodeHover.pt, r = 6 * px;
       svgEl('circle', { cx: r4(x), cy: r4(y), r: r4(r), class: 'node-add', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       svgEl('path', { d: `M${r4(x - r * 0.5)} ${r4(y)}H${r4(x + r * 0.5)}M${r4(x)} ${r4(y - r * 0.5)}V${r4(y + r * 0.5)}`, class: 'node-add-plus', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
@@ -1902,6 +1907,7 @@
       const fr = importFrame(byId(id));
       if (!fr || fr.rotated) continue;
       fr.a.polys.forEach((pl, pi) => {
+        if (fr.a.curves && fr.a.curves[pi]) return;
         const n = pl.pts.length, last = pl.closed ? n : n - 1;
         for (let i = 0; i < last; i++) {
           const A = frameWorld(fr, pl.pts[i]), B = frameWorld(fr, pl.pts[(i + 1) % n]);
@@ -1968,6 +1974,8 @@
       if (!sh) continue;
       ownAsset(sh);
       const fr = importFrame(sh), pl = fr && fr.a.polys[pi];
+      const cvx = fr && fr.a.curves && fr.a.curves[pi];
+      if (cvx) { const nd = cvx.n[vi]; if (nd) items.push({ id, pi, vi, curve: true, u: nd.p[0], v: nd.p[1] }); continue; }
       if (!pl || !pl.pts[vi]) continue;
       const p0 = pl.pts[vi];
       const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
@@ -1976,12 +1984,15 @@
     return { mode: 'node', items, anchor: { x: hit.x, y: hit.y }, start: null, moved: false };
   }
   function moveNodeItems(items, du, dv) {
+    const redo = new Map();
     for (const it of items) {
       const fr = importFrame(byId(it.id));
       if (!fr) continue;
+      if (it.curve) { fr.a.curves[it.pi].n[it.vi].p = [it.u + du, it.v + dv]; redo.set(it.id + '|' + it.pi, [fr.a, it.pi]); continue; }
       const pl = fr.a.polys[it.pi];
       for (const i of it.same) pl.pts[i] = [it.u + du, it.v + dv, ...(pl.pts[i][2] ? [1] : [])];
     }
+    for (const [a, pi] of redo.values()) reflat(a, pi);
   }
   function applyNodeDrag(d, p, e) {
     const s0 = byId(d.items[0] && d.items[0].id), fr = importFrame(s0);
@@ -1998,6 +2009,13 @@
   function insertNode(seg) {
     const s = byId(seg.id);
     ownAsset(s);
+    if (seg.kind === 'cseg') {
+      const fr0 = importFrame(s), cv = fr0.a.curves[seg.pi], ni = splitBezSeg(cv, seg.si, seg.t);
+      reflat(fr0.a, seg.pi);
+      nodeSel.clear(); nodeSel.add(nkey(seg.id, seg.pi, ni));
+      evaluateParams(); drawCanvas();
+      return { id: seg.id, edit: true, curve: true, x: seg.pt[0], y: seg.pt[1], key: nkey(seg.id, seg.pi, ni) };
+    }
     const fr = importFrame(s), pl = fr.a.polys[seg.pi];
     pl.pts.splice(seg.si + 1, 0, [(seg.pt[0] - fr.x) / fr.w, (seg.pt[1] - fr.y) / fr.sy, 1]);
     nodeSel.clear(); nodeSel.add(nkey(seg.id, seg.pi, seg.si + 1));
@@ -2012,7 +2030,12 @@
     for (const { id, pi, vs } of by.values()) {
       const s = byId(id); if (!s) continue;
       ownAsset(s);
-      const pl = importFrame(s).a.polys[pi], min = pl.closed ? 3 : 2;
+      const fr = importFrame(s), pl = fr.a.polys[pi], min = pl.closed ? 3 : 2, cv = fr.a.curves && fr.a.curves[pi];
+      if (cv) {
+        for (const vi of vs.sort((a, b) => b - a)) { if (cv.n.length > min) { cv.n.splice(vi, 1); removed++; } else kept++; }
+        reflat(fr.a, pi);
+        continue;
+      }
       for (const vi of vs.sort((a, b) => b - a)) { if (pl.pts.length > min) { pl.pts.splice(vi, 1); removed++; } else kept++; }
     }
     nodeSel.clear(); nodeHover = null;
@@ -2026,6 +2049,8 @@
       const { id, pi, vi } = nodeParts(k), sh = byId(id), fr = sh && importFrame(sh);
       if (!fr) continue;
       ownAsset(sh);
+      const cvn = fr.a.curves && fr.a.curves[pi];
+      if (cvn) { const nd = cvn.n[vi]; if (nd) { const sig = id + '|' + pi + '|c' + vi; if (!seen.has(sig)) { seen.add(sig); items.push({ id, pi, vi, curve: true, u: nd.p[0], v: nd.p[1] }); } } continue; }
       const pl = importFrame(sh).a.polys[pi], p0 = pl && pl.pts[vi];
       if (!p0) continue;
       const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
@@ -2049,11 +2074,199 @@
   }
   function updateNodeHover(p) {
     if (!nodeShow.size) { if (nodeHover) { nodeHover = null; drawOverlay(); } return; }
-    const n = nodeNear(p), h = n || segNear(p);
-    const same = (!h && !nodeHover) || (h && nodeHover && h.kind === nodeHover.kind && (h.kind === 'node' ? h.key === nodeHover.key : h.id === nodeHover.id && h.pi === nodeHover.pi && h.si === nodeHover.si && Math.hypot(h.pt[0] - nodeHover.pt[0], h.pt[1] - nodeHover.pt[1]) * view.s < 1));
+    const n = nodeNear(p), h = n || bezHandleNear(p) && { kind: 'bez' } || segNear(p) || csegNear(p);
+    const same = (!h && !nodeHover) || (h && nodeHover && h.kind === nodeHover.kind && (h.kind === 'bez' ? true : h.kind === 'node' ? h.key === nodeHover.key : h.id === nodeHover.id && h.pi === nodeHover.pi && h.si === nodeHover.si && Math.hypot(h.pt[0] - nodeHover.pt[0], h.pt[1] - nodeHover.pt[1]) * view.s < 1));
     nodeHover = h;
-    svg.style.cursor = h ? (h.kind === 'seg' ? 'copy' : 'pointer') : '';
+    svg.style.cursor = h ? (h.kind === 'seg' || h.kind === 'cseg' ? 'copy' : 'pointer') : '';
     if (!same) drawOverlay();
+  }
+
+  /* ----- Curvas Bézier: puntos suaves con manijas y herramienta Pluma ----- */
+  // Los dibujos importados guardan sus trazos como polilíneas (a.polys). Un trazo curvo guarda además sus nodos
+  // en a.curves[indice] = { closed, n: [{ p: [u, v], i: [du, dv] | null, o: [du, dv] | null, s: suave }] } y a.polys se recalcula de ahí.
+  const r6 = v => Math.round(v * 1e6) / 1e6;
+  function flattenBez(nodes, closed, sc) {
+    const n = nodes.length, out = [], segN = closed ? n : n - 1;
+    for (let i = 0; i < segN; i++) {
+      const A = nodes[i], B = nodes[(i + 1) % n], P0 = A.p, P3 = B.p;
+      const c1 = A.o ? [P0[0] + A.o[0], P0[1] + A.o[1]] : P0, c2 = B.i ? [P3[0] + B.i[0], P3[1] + B.i[1]] : P3;
+      out.push([P0[0], P0[1]]);
+      if (A.o || B.i) {
+        const ln = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const steps = Math.max(6, Math.min(80, Math.ceil(Math.sqrt(Math.max(ln(P0, P3), ln(P0, c1) + ln(c1, c2) + ln(c2, P3)) * sc) * 4)));
+        for (let k = 1; k < steps; k++) {
+          const t = k / steps, m = 1 - t, a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t;
+          out.push([a * P0[0] + b * c1[0] + c * c2[0] + d * P3[0], a * P0[1] + b * c1[1] + c * c2[1] + d * P3[1]]);
+        }
+      }
+    }
+    if (!closed && n) out.push([nodes[n - 1].p[0], nodes[n - 1].p[1]]);
+    return out;
+  }
+  const bezAt = (A, B, t) => {
+    const P0 = A.p, P3 = B.p, c1 = A.o ? [P0[0] + A.o[0], P0[1] + A.o[1]] : P0, c2 = B.i ? [P3[0] + B.i[0], P3[1] + B.i[1]] : P3, m = 1 - t;
+    return [0, 1].map(k => m * m * m * P0[k] + 3 * m * m * t * c1[k] + 3 * m * t * t * c2[k] + t * t * t * P3[k]);
+  };
+  function reflat(a, pi) {
+    const cv = a.curves && a.curves[pi];
+    if (cv) a.polys[pi].pts = flattenBez(cv.n, cv.closed, a.realW || 1).map(([u, v]) => [r6(u), r6(v)]);
+  }
+  // Un trazo normal pasa a curva (cada punto es un nodo con esquina); devuelve null si tiene demasiados puntos
+  function toCurve(a, pi) {
+    a.curves = a.curves || {};
+    if (a.curves[pi]) return a.curves[pi];
+    const pl = a.polys[pi];
+    let pts = pl.pts.map(q => [q[0], q[1]]);
+    if (pl.closed && pts.length > 2 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1e-9) pts.pop();
+    if (pts.length > 150) return null;
+    a.curves[pi] = { closed: !!pl.closed, n: pts.map(p => ({ p, i: null, o: null, s: false })) };
+    return a.curves[pi];
+  }
+  // Suavizar o volver esquina los puntos elegidos
+  function smoothSelected(smooth) {
+    if (!nodeSel.size) { msg('Elige primero uno o más puntos (clic, o un recuadro).'); return; }
+    let done = 0, tooMany = 0;
+    for (const k of [...nodeSel]) {
+      const { id, pi, vi } = nodeParts(k), sh = byId(id);
+      if (!sh) continue;
+      ownAsset(sh);
+      const fr = importFrame(sh);
+      if (!fr) continue;
+      const cv = toCurve(fr.a, pi);
+      if (!cv) { tooMany++; continue; }
+      const n = cv.n, nd = n[vi];
+      if (!nd) continue;
+      if (smooth) {
+        const prev = cv.closed || vi > 0 ? n[(vi - 1 + n.length) % n.length] : null, next = cv.closed || vi < n.length - 1 ? n[(vi + 1) % n.length] : null;
+        const dist = (a, b) => Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]);
+        const dir = prev && next ? [next.p[0] - prev.p[0], next.p[1] - prev.p[1]] : next ? [next.p[0] - nd.p[0], next.p[1] - nd.p[1]] : prev ? [nd.p[0] - prev.p[0], nd.p[1] - prev.p[1]] : [1, 0];
+        const dl = Math.hypot(dir[0], dir[1]) || 1, u = [dir[0] / dl, dir[1] / dl];
+        // manijas en la dirección de la curva, de un tercio del largo de cada tramo vecino
+        nd.i = prev ? [-u[0] * dist(nd, prev) / 3, -u[1] * dist(nd, prev) / 3] : null;
+        nd.o = next ? [u[0] * dist(nd, next) / 3, u[1] * dist(nd, next) / 3] : null;
+        nd.s = true;
+      } else { nd.i = null; nd.o = null; nd.s = false; }
+      reflat(fr.a, pi);
+      done++;
+    }
+    if (done) { checkpoint(); fullRender(); msg(smooth ? 'Punto(s) suavizado(s): arrastra las manijas para curvar.' : 'Punto(s) convertido(s) en punta.'); }
+    else if (tooMany) msg('Esta figura tiene demasiados puntos para curvarla punto a punto (más de 150). Usa «Pluma» (N) para dibujar tu propia curva.');
+  }
+  // Manijas de los nodos elegidos (solo en trazos curvos)
+  function bezHandlesOf(id) {
+    const out = [], fr = importFrame(byId(id));
+    if (!fr || fr.rotated || !fr.a.curves) return out;
+    for (const k of nodeSel) {
+      const q = nodeParts(k);
+      if (q.id !== id) continue;
+      const cv = fr.a.curves[q.pi], nd = cv && cv.n[q.vi];
+      if (!nd) continue;
+      const base = frameWorld(fr, nd.p);
+      for (const which of ['i', 'o']) if (nd[which]) { const [x, y] = frameWorld(fr, [nd.p[0] + nd[which][0], nd.p[1] + nd[which][1]]); out.push({ id, pi: q.pi, vi: q.vi, which, x, y, bx: base[0], by: base[1] }); }
+    }
+    return out;
+  }
+  function drawBezHandles() {
+    const px = 1 / view.s;
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      for (const hd of bezHandlesOf(id)) {
+        svgEl('path', { d: `M${r4(hd.bx)} ${r4(hd.by)}L${r4(hd.x)} ${r4(hd.y)}`, class: 'bez-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+        svgEl('circle', { cx: r4(hd.x), cy: r4(hd.y), r: r4(4.5 * px), class: 'bez-handle', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      }
+    }
+  }
+  function bezHandleNear(p) {
+    let best = null, bd = 9 / view.s;
+    for (const id of sel) if (nodeShow.has(id)) for (const hd of bezHandlesOf(id)) { const d = Math.hypot(hd.x - p.x, hd.y - p.y); if (d < bd) { bd = d; best = hd; } }
+    return best;
+  }
+  function startBezDrag(hd) { ownAsset(byId(hd.id)); return { mode: 'bez', hd: { id: hd.id, pi: hd.pi, vi: hd.vi, which: hd.which }, moved: false }; }
+  function applyBezDrag(d, p, e) {
+    const fr = importFrame(byId(d.hd.id));
+    if (!fr) return;
+    const cv = fr.a.curves[d.hd.pi], nd = cv.n[d.hd.vi], other = d.hd.which === 'i' ? 'o' : 'i';
+    const hv = [(p.x - fr.x) / fr.w - nd.p[0], (p.y - fr.y) / fr.sy - nd.p[1]];
+    nd[d.hd.which] = hv;
+    if (nd.s && !e.altKey) { // nodo suave: la otra manija queda en línea recta, con su mismo largo
+      const L = Math.hypot(hv[0], hv[1]) || 1e-9, lo = nd[other] ? Math.hypot(nd[other][0], nd[other][1]) : L;
+      nd[other] = [-hv[0] / L * lo, -hv[1] / L * lo];
+    } else if (e.altKey) nd.s = false;
+    reflat(fr.a, d.hd.pi);
+    d.moved = true;
+    if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; evaluateParams(); drawCanvas(); });
+  }
+  // Punto más cercano sobre un tramo curvo (para añadir un punto sin cambiar la forma)
+  function csegNear(p) {
+    let best = null, bd = 8 / view.s;
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      const fr = importFrame(byId(id));
+      if (!fr || fr.rotated || !fr.a.curves) continue;
+      for (const [pis, cv] of Object.entries(fr.a.curves)) {
+        const pi = +pis, n = cv.n, last = cv.closed ? n.length : n.length - 1;
+        for (let i = 0; i < last; i++) for (let k = 1; k < 24; k++) {
+          const t = k / 24, q = frameWorld(fr, bezAt(n[i], n[(i + 1) % n.length], t)), d = Math.hypot(q[0] - p.x, q[1] - p.y);
+          if (d < bd) { bd = d; best = { kind: 'cseg', id, pi, si: i, t, pt: q }; }
+        }
+      }
+    }
+    return best;
+  }
+  function splitBezSeg(cv, i, t) {
+    const n = cv.n, A = n[i], B = n[(i + 1) % n.length], P0 = A.p, P3 = B.p;
+    const P1 = A.o ? [P0[0] + A.o[0], P0[1] + A.o[1]] : P0, P2 = B.i ? [P3[0] + B.i[0], P3[1] + B.i[1]] : P3;
+    const lp = (a, b) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+    const Q0 = lp(P0, P1), Q1 = lp(P1, P2), Q2 = lp(P2, P3), R0 = lp(Q0, Q1), R1 = lp(Q1, Q2), M = lp(R0, R1);
+    const straight = !A.o && !B.i;
+    A.o = straight ? null : sub(Q0, P0); B.i = straight ? null : sub(Q2, P3);
+    n.splice(i + 1, 0, { p: M, i: straight ? null : sub(R0, M), o: straight ? null : sub(R1, M), s: !straight });
+    return i + 1;
+  }
+
+  // ----- Pluma: clic = punto de esquina, arrastrar = punto suave; clic en el primer punto cierra; Enter o doble clic termina -----
+  const pen = { nodes: [], cur: null };
+  function penCancel() { pen.nodes = []; pen.cur = null; }
+  function penFinish(closed) {
+    const nodes = pen.nodes;
+    if (nodes.length < 2) { penCancel(); drawOverlay(); return; }
+    const pts = flattenBez(nodes, closed, 1);
+    const o = importObject(nextName('Curva'), [{ closed, op: 'corte', pts }], []);
+    const a = doc.assets[o.p.asset], W = a.realW;
+    a.curves = { 0: { closed, n: nodes.map(nd => ({ p: [(nd.p[0] - a.ox) / W, (nd.p[1] - a.oy) / W], i: nd.i ? [nd.i[0] / W, nd.i[1] / W] : null, o: nd.o ? [nd.o[0] / W, nd.o[1] / W] : null, s: !!nd.s })) } };
+    reflat(a, 0);
+    doc.shapes.push(o);
+    penCancel();
+    sel = new Set([o.id]); nodeShow.add(o.id); nodeSel.clear();
+    setTool('select');
+    checkpoint(); fullRender();
+    msg('Curva creada. Arrastra los puntos o sus manijas para ajustarla; «Suavizar» y «Punta» están en el panel.');
+  }
+  function drawPen() {
+    if (tool !== 'pen' || !pen.nodes.length) return;
+    const px = 1 / view.s, preview = pen.nodes.slice();
+    if (pen.cur && !(drag && drag.mode === 'pen')) preview.push({ p: [pen.cur.x, pen.cur.y], i: null, o: null });
+    const pts = flattenBez(preview, false, 1);
+    svgEl('path', { d: pathD([{ closed: false, pts }]), class: 'preview', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    pen.nodes.forEach((nd, i) => {
+      const hs = 7 * px;
+      svgEl('rect', { x: r4(nd.p[0] - hs / 2), y: r4(nd.p[1] - hs / 2), width: r4(hs), height: r4(hs), class: 'node-pt edit' + (i === 0 ? ' on' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      if (i === pen.nodes.length - 1) for (const w of ['i', 'o']) if (nd[w]) {
+        const x = nd.p[0] + nd[w][0], y = nd.p[1] + nd[w][1];
+        svgEl('path', { d: `M${r4(nd.p[0])} ${r4(nd.p[1])}L${r4(x)} ${r4(y)}`, class: 'bez-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+        svgEl('circle', { cx: r4(x), cy: r4(y), r: r4(4 * px), class: 'bez-handle', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      }
+    });
+  }
+  // Herramientas de curvas en el panel de la figura (cuando se ven sus puntos)
+  function nodeToolsSection() {
+    return [h('div', { class: 'insp-sub' }, 'Puntos y curvas'),
+      h('p', { class: 'tip' }, 'Elige uno o varios puntos (clic, Shift o recuadro). «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
+      h('div', { class: 'btn-grid' },
+        h('button', { class: 'primary', onclick: () => smoothSelected(true), title: 'Convierte los puntos elegidos en curva suave' }, 'Suavizar'),
+        h('button', { onclick: () => smoothSelected(false), title: 'Quita las manijas: el punto vuelve a ser una esquina' }, 'Punta'),
+        h('button', { onclick: () => { if (nodeSel.size) deleteNodes(); else msg('Elige primero los puntos que quieres borrar.'); } }, 'Borrar punto'),
+        h('button', { onclick: () => { for (const id of [...sel]) nodeShow.delete(id); nodeSel.clear(); buildInspector(); drawCanvas(); } }, 'Ocultar puntos'))];
   }
 
   function drawOverlay() {
@@ -2077,6 +2290,7 @@
       const it = primitive(shapeFromDrag(drag.start, drag.cur, false));
       if (it && it.polys.length) svgEl('path', { d: pathD(it.polys), class: 'preview', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
+    drawPen();
     drawMeasures();
   }
 
@@ -2453,10 +2667,12 @@
     if (e.button !== 0) return;
     const handle = tool === 'select' && e.target.closest && e.target.closest('[data-handle]');
     if (tool === 'select' && !handle && nodeShow.size) {
-      const hit = nodeNear(p) || segNear(p);
+      const bh = bezHandleNear(p);
+      if (bh) { drag = startBezDrag(bh); drag.start = p; return; }
+      const hit = nodeNear(p) || segNear(p) || csegNear(p);
       if (hit) {
         let d = null;
-        if (hit.kind === 'seg') d = startNodeDrag(insertNode(hit), false);
+        if (hit.kind === 'seg' || hit.kind === 'cseg') d = startNodeDrag(insertNode(hit), false);
         else d = startNodeDrag(hit, e.shiftKey);
         if (d) { d.start = p; drag = d; }
         return;
@@ -2490,6 +2706,16 @@
         drag = { mode: 'marquee', start: p, cur: p, base: e.shiftKey ? new Set(sel) : new Set() };
         if (!e.shiftKey && sel.size) { sel.clear(); buildInspector(); buildObjects(); drawCanvas(); }
       }
+    } else if (tool === 'pen') {
+      e.preventDefault();
+      const now = performance.now();
+      if (pen.last && now - pen.last.t < 350 && Math.hypot(e.clientX - pen.last.x, e.clientY - pen.last.y) < 6 && pen.nodes.length >= 2) { penFinish(false); return; }
+      pen.last = { t: now, x: e.clientX, y: e.clientY };
+      if (pen.nodes.length >= 3 && Math.hypot(pen.nodes[0].p[0] - p.x, pen.nodes[0].p[1] - p.y) * view.s < 9) { penFinish(true); return; }
+      const q = snapPt(p, e);
+      pen.nodes.push({ p: [q.x, q.y], i: null, o: null, s: false });
+      drag = { mode: 'pen', start: p };
+      drawOverlay();
     } else if (tool === 'measure') {
       e.preventDefault();
       measureClick(e, p);
@@ -2539,6 +2765,7 @@
     lastPointer = p;
     $('#stCoords').textContent = `x ${fmt(p.x / unitMM, isInch() ? 3 : 1)} · y ${fmt(p.y / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`;
     if (tool === 'measure' && !drag) measureMove(e, p);
+    if (tool === 'pen' && !drag && pen.nodes.length) { pen.cur = { x: p.x, y: p.y }; drawOverlay(); }
     if (!drag && nodeShow.size) {
       updateNodeHover(p);
       const q = nodeHover && nodeHover.kind === 'node' && nodeHover;
@@ -2549,6 +2776,12 @@
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
       view.y = drag.vy - (e.clientY - drag.sy) / view.s;
       drawCanvas();
+    } else if (drag.mode === 'bez') {
+      applyBezDrag(drag, p, e);
+    } else if (drag.mode === 'pen') {
+      const nd = pen.nodes[pen.nodes.length - 1], hv = [p.x - nd.p[0], p.y - nd.p[1]];
+      if (Math.hypot(hv[0], hv[1]) * view.s > 4) { nd.o = hv; nd.i = [-hv[0], -hv[1]]; nd.s = true; } else { nd.o = null; nd.i = null; nd.s = false; }
+      drawOverlay();
     } else if (drag.mode === 'node') {
       applyNodeDrag(drag, p, e);
     } else if (drag.mode === 'nmarq') {
@@ -2581,7 +2814,9 @@
     const d = drag;
     drag = null;
     stage.classList.remove('panning');
-    if (d.mode === 'node') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
+    if (d.mode === 'bez') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
+    else if (d.mode === 'pen') { drawOverlay(); }
+    else if (d.mode === 'node') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else if (d.mode === 'nmarq') {
       const b = rectFrom(d.start, d.cur);
       if (b.w * view.s < 4 && b.h * view.s < 4) { if (d.had) { nodeSel.clear(); } else { sel.clear(); nodeHover = null; buildInspector(); buildObjects(); } }
@@ -2650,6 +2885,7 @@
     stage.classList.toggle('tool-draw', !['select', 'hand'].includes(t));
     stage.classList.toggle('tool-hand', t === 'hand');
     $('#measureBar').hidden = t !== 'measure';
+    if (t !== 'pen') penCancel();
     meas.a = null; meas.hover = null; meas.cur = null;
     if (t === 'measure') msg('Medir: haz clic en dos puntos (se pegan a esquinas, centros y bordes) o cambia a "Ranura o contorno".');
     if (doc) drawOverlay();
@@ -2900,6 +3136,7 @@
       h('div', { class: 'insp-title' }, h('span', { class: 'type' }, TYPES[s.type].label + (parent ? ` · dentro de "${parent.name}"` : ''))),
       propRow('Nombre', name),
     );
+    if (nodeShow.has(s.id) && importFrame(s) && !importFrame(s).rotated) box.append(...nodeToolsSection());
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },
         h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Aquí abajo puedes cambiar los dedos; para otras medidas hay que volver a la caja. También puedes verlas armadas en 3D.`),
@@ -5630,7 +5867,7 @@
     ]; return d;
   };
 
-  const TOOL_KEYS = { m: 'measure', v: 'select', h: 'hand', r: 'rect', c: 'circle', p: 'polygon', l: 'line', t: 'text', f: 'panel', b: 'hinge', k: 'box' };
+  const TOOL_KEYS = { m: 'measure', v: 'select', h: 'hand', r: 'rect', c: 'circle', p: 'polygon', l: 'line', n: 'pen', t: 'text', f: 'panel', b: 'hinge', k: 'box' };
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
     const inField = e.target.matches && e.target.matches('input, textarea, select');
@@ -5647,6 +5884,11 @@
     if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel('grupo'); return; }
     if (mod && k === 'a') { e.preventDefault(); sel = new Set(doc.shapes.map(s => s.id)); buildInspector(); buildObjects(); drawCanvas(); return; }
     if (mod) return;
+    if (tool === 'pen') {
+      if (e.key === 'Enter') { e.preventDefault(); penFinish(false); return; }
+      if (e.key === 'Escape' && pen.nodes.length) { e.preventDefault(); penCancel(); drawOverlay(); return; }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && pen.nodes.length) { e.preventDefault(); pen.nodes.pop(); drawOverlay(); return; }
+    }
     if (nodeSel.size && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); deleteNodes(); return; }
     if (nodeSel.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       e.preventDefault();
