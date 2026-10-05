@@ -2884,6 +2884,8 @@
         h('p', { class: 'tip' }, 'Restar: la figura de más abajo en la lista de Objetos es la pieza; las demás se recortan de ella.'),
         h('div', { class: 'insp-actions' },
           h('button', { onclick: duplicateSel }, 'Duplicar'),
+          h('button', { onclick: () => copySel(false), title: 'Cmd+C' }, 'Copiar'),
+          h('button', { onclick: () => pasteClip(false), title: 'Cmd+V' }, 'Pegar'),
           h('button', { class: 'danger', onclick: deleteSel }, 'Eliminar')),
       );
       return;
@@ -3472,6 +3474,7 @@
       h('div', { class: 'btn-grid' },
         h('button', { title: 'Pone las figuras una al lado de otra, con esta separación exacta', onclick: () => stackSelection('x', gapMM()) }, 'En fila'),
         h('button', { title: 'Pone las figuras una debajo de otra, con esta separación exacta', onclick: () => stackSelection('y', gapMM()) }, 'En columna')),
+      ...flipSection(),
       ...recortarSection(shapes)];
   }
   // Para una sola figura: colocarla en la hoja
@@ -3481,7 +3484,9 @@
         ['left', 'A la izquierda'], ['cx', 'Centrar ↔'], ['right', 'A la derecha'],
         ['top', 'Arriba'], ['cy', 'Centrar ↕'], ['bottom', 'Abajo']
       ].map(([mode, label]) => h('button', { onclick: () => alignSelection(mode, 'hoja') }, label))),
-      h('button', { class: 'wide', onclick: () => { alignSelection('cx', 'hoja'); alignSelection('cy', 'hoja'); } }, 'Centrar en la hoja')];
+      h('button', { class: 'wide', onclick: () => { alignSelection('cx', 'hoja'); alignSelection('cy', 'hoja'); } }, 'Centrar en la hoja'),
+      ...flipSection(),
+      h('div', { class: 'btn-grid' }, h('button', { onclick: () => copySel(false), title: 'Cmd+C' }, 'Copiar'), h('button', { onclick: () => pasteClip(false), title: 'Cmd+V' }, 'Pegar'))];
   }
   // Recortar: dividir con una línea (se muestra si hay una línea y alguna figura elegidas)
   function recortarSection(shapes) {
@@ -3953,6 +3958,102 @@
     reid(c);
     return c;
   };
+  /* ----- Copiar, cortar y pegar (Cmd+C / Cmd+X / Cmd+V; también pega SVG e imágenes de otros programas) ----- */
+  const CLIP_KEY = 'creaciones-evergreen:clip';
+  let clipboardData = null, pasteCount = 0;
+  function walkShapes(list, fn) { for (const s of list) { fn(s); if (s.children) walkShapes(s.children, fn); } }
+  function copySel(cut) {
+    const roots = selectedRoots();
+    if (!roots.length) { msg('Elige primero lo que quieres copiar.'); return; }
+    const shapes = roots.map(s => JSON.parse(JSON.stringify(s)));
+    const assets = {}, used = [];
+    walkShapes(shapes, s => {
+      for (const k of ['asset', 'grabadoLogo']) if (s.p[k] && doc.assets && doc.assets[s.p[k]]) assets[s.p[k]] = doc.assets[s.p[k]];
+      used.push(...Object.values(s.p).map(String));
+    });
+    // Parámetros que usan las figuras (y los que esos usan), para poder pegar en otro diseño
+    const params = [], seen = new Set();
+    const add = text => { for (const q of doc.params) if (!seen.has(q.name) && wordRe(q.name).test(text)) { seen.add(q.name); params.push({ name: q.name, expr: q.expr }); add(q.expr); } };
+    add(used.join(' '));
+    clipboardData = { shapes, assets: JSON.parse(JSON.stringify(assets)), params, units: doc.units };
+    pasteCount = 0;
+    try { localStorage.setItem(CLIP_KEY, JSON.stringify(clipboardData)); } catch (e) { /* si no cabe, queda solo en memoria */ }
+    msg(`${shapes.length} figura(s) ${cut ? 'cortada(s)' : 'copiada(s)'}. Pega con Cmd+V (Cmd+Mayús+V pega en el mismo lugar).`);
+    if (cut) deleteSel();
+  }
+  function pasteClip(inPlace) {
+    let cd = clipboardData;
+    if (!cd) { try { cd = JSON.parse(localStorage.getItem(CLIP_KEY) || 'null'); } catch (e) { cd = null; } }
+    if (!cd || !Array.isArray(cd.shapes) || !cd.shapes.length) { msg('No hay nada copiado todavía: elige figuras y pulsa Cmd+C.'); return; }
+    for (const q of cd.params || []) if (!doc.params.some(x => x.name === q.name)) doc.params.push({ name: q.name, expr: q.expr });
+    doc.assets = doc.assets || {};
+    for (const [id, a] of Object.entries(cd.assets || {})) if (!doc.assets[id]) doc.assets[id] = JSON.parse(JSON.stringify(a));
+    pasteCount++;
+    const off = inPlace ? 0 : parseFloat(nice(10)) * unitMM * pasteCount;
+    const added = [];
+    for (const src of cd.shapes) {
+      if (!TYPES[src.type]) continue;
+      const c = cloneShape(src);
+      if (off) moveShape(c, src.p, off, off);
+      doc.shapes.push(c);
+      added.push(c);
+    }
+    if (!added.length) return;
+    sel = new Set(added.map(c => c.id));
+    checkpoint(); fullRender();
+    msg(`${added.length} figura(s) pegada(s)` + (cd.units && cd.units !== doc.units ? '. Ojo: se copiaron con otras unidades; revisa las medidas.' : '.'));
+  }
+  // Pegar desde el portapapeles del sistema: SVG, imágenes o texto SVG
+  document.addEventListener('paste', async e => {
+    if (document.querySelector('dialog[open]')) return;
+    const t = e.target;
+    if (t && t.matches && t.matches('input, textarea, select, [contenteditable]')) return;
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const files = [...(dt.files || [])].filter(f => /^image\//.test(f.type) || /\.(svg|dxf)$/i.test(f.name));
+    const text = dt.getData('text/plain') || '';
+    e.preventDefault();
+    try {
+      if (files.length) { for (const f of files) await importFile(f); return; }
+      if (/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(text)) { await importFile(new File([text], 'pegado.svg', { type: 'image/svg+xml' })); return; }
+    } catch (err) { msg('No se pudo pegar eso: ' + err.message); return; }
+    pasteClip(false);
+  });
+
+  /* ----- Voltear (espejo) ----- */
+  function flipSelection(axis) {
+    evaluateParams(); evaluateAll();
+    const roots = selectedRoots().filter(s => evalCache.get(s.id) && evalCache.get(s.id).bbox);
+    if (!roots.length) { msg('Elige primero lo que quieres voltear.'); return; }
+    const b = unionBox(roots.map(s => evalCache.get(s.id).bbox));
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const fp = ([x, y]) => axis === 'x' ? [2 * cx - x, y] : [x, 2 * cy - y];
+    let texts = 0;
+    const made = [];
+    for (const s of roots) {
+      const items = evalCache.get(s.id).items;
+      const polys = items.flatMap(it => it.polys.map(p => ({ closed: p.closed, op: it.op, pts: p.pts.map(fp) })));
+      const tx = items.flatMap(it => it.texts.map(t => ({ ...t, op: it.op, ...(() => { const [x, y] = fp([t.x, t.y]); return { x, y }; })() })));
+      texts += tx.length;
+      if (items.some(it => (it.images || []).length)) { msg('Las imágenes (PNG/JPG) no se pueden voltear aquí: voltea el archivo original.'); return; }
+      if (!polys.length && !tx.length) continue;
+      const o = importObject(s.name || 'Figura', polys, tx);
+      if (polys.length === 0 || new Set(polys.map(p => p.op)).size === 1) o.op = s.op;
+      const list = listOf(s.id), i = list.indexOf(s);
+      list.splice(i, 1, o);
+      made.push(o);
+    }
+    sel = new Set(made.map(o => o.id));
+    checkpoint(); fullRender();
+    msg(`${made.length} figura(s) volteada(s) ${axis === 'x' ? 'de izquierda a derecha' : 'de arriba abajo'}; ahora son dibujos editables.` + (texts ? ' Los textos cambian de lugar pero sus letras no se invierten.' : ''));
+  }
+  function flipSection() {
+    return [h('div', { class: 'insp-sub' }, 'Voltear (espejo)'),
+      h('div', { class: 'btn-grid' },
+        h('button', { title: 'Espejo de izquierda a derecha', onclick: () => flipSelection('x') }, 'Voltear ↔'),
+        h('button', { title: 'Espejo de arriba abajo', onclick: () => flipSelection('y') }, 'Voltear ↕'))];
+  }
+
   function duplicateSel() {
     if (!sel.size) return;
     const off = parseFloat(nice(10)) * unitMM;
@@ -5541,6 +5642,8 @@
     if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (mod && k === 'y') { e.preventDefault(); redo(); return; }
     if (mod && k === 'd') { e.preventDefault(); duplicateSel(); return; }
+    if (mod && k === 'c') { e.preventDefault(); copySel(false); return; }
+    if (mod && k === 'x') { e.preventDefault(); copySel(true); return; }
     if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel('grupo'); return; }
     if (mod && k === 'a') { e.preventDefault(); sel = new Set(doc.shapes.map(s => s.id)); buildInspector(); buildObjects(); drawCanvas(); return; }
     if (mod) return;
