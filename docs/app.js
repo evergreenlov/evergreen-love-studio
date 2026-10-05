@@ -1183,6 +1183,32 @@
       panels.push(...divs);
       allDivs.push(...divs);
     }
+    // Cubierta de otra madera: lados, atrás, base y techo del mueble, y un panel sobre cada frente decorativo (se desliza con su cajón)
+    if (s.p.cubierta === 'si') {
+      const cv = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
+      if (!(cv > 0) || !Number.isFinite(cv)) return null;
+      const caras = s.p.cubiertaCaras || 'todas', fL = s.p.cubiertaLargas === 'frente', ex = fL ? cv : 0, sx = fL ? 0 : cv;
+      const covers = [];
+      const addC = (name, w, h, place, eu, ev, ew, oo, out, extra) => covers.push({ name, w, h, place, holes: [], pts: rect(w, h), th: cv, color: 0xa9743f, ...extra, axes: { eu, ev, ew, o: oo, out } });
+      const Lz = D + t; // largo exterior del mueble contando el frente decorativo
+      if (caras !== 'frente') {
+        addC('Cubierta Atrás', W + 2 * ex, H, 'back', [-1, 0, 0], [0, -1, 0], [0, 0, -1], [W + ex, H, D + cv], [0, 0, 1]);
+        addC('Cubierta Lado izq.', Lz + 2 * sx, H, 'left', [0, 0, 1], [0, -1, 0], [1, 0, 0], [-cv, H, -t - sx], [-1, 0, 0]);
+        addC('Cubierta Lado der.', Lz + 2 * sx, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + cv, H, D + sx], [1, 0, 0]);
+        if (caras === 'todas') {
+          addC('Cubierta Base', W + 2 * cv, Lz + 2 * cv, 'bottom', [1, 0, 0], [0, 0, 1], [0, 1, 0], [-cv, -cv, -t - cv], [0, -1, 0]);
+          addC('Cubierta Techo', W + 2 * cv, Lz + 2 * cv, 'top', [1, 0, 0], [0, 0, 1], [0, -1, 0], [-cv, H + cv, -t - cv], [0, 1, 0]);
+        }
+      }
+      for (const f of panels.filter(q => q.face)) {
+        const tg = n > 1 ? ` ${f.faceIndex + 1}` : '';
+        addC(`Cubierta frente${tg}`, W + 2 * ex, f.h, 'front', [1, 0, 0], [0, -1, 0], [0, 0, 1], [f.axes.o[0] - ex, f.axes.o[1], -t - cv], [0, 0, -1],
+          { drawer: true, drawerIndex: f.drawerIndex });
+        const last = covers[covers.length - 1];
+        last.holes = f.holes.map(hh => hh.map(([u, v]) => [u + ex, v]));
+      }
+      panels.push(...covers);
+    }
     const layout = [panels];
     return { W, D, H, t, fingers, sep, panels, dividers: [], layout, drawer: { Wd, Hd, Dd, c, n } };
   }
@@ -2909,7 +2935,7 @@
           }
           checkpoint(); fullRender();
         })));
-        if (key === 'cubiertaCaras' && (s.type === 'box' || s.type === 'taper')) box.append(coverTip(s));
+        if (key === 'cubiertaLargas' && (s.type === 'box' || s.type === 'taper')) box.append(coverTip(s));
         if (key === 'dedoModo' && ['taper', 'box', 'panel'].includes(s.type) && s.p.dedoModo !== 'cantidad') {
           box.append(h('p', { class: 'tip' }, 'Para escoger cuántos dedos quieres, cambia a «Por cantidad»: aparecen los campos para escribir la cantidad.'));
         }
@@ -3243,8 +3269,7 @@
   // Campos de la caja que no aplican según las opciones elegidas
   function boxFieldHidden(s, key) {
     if (key === 'colgar') return s.p.pared !== 'si';
-    if (key === 'cubierta') return s.p.cajon === 'si' && s.p.pared !== 'si';       // el cajón aún no lleva cubierta
-    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'cubiertaLargas') return s.p.cubierta !== 'si' || (s.p.cajon === 'si' && s.p.pared !== 'si');
+    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'cubiertaLargas') return s.p.cubierta !== 'si';
     if (s.p.pared === 'si' && ['tapa', 'cajon', 'nCaj', 'holguraC', 'borde', 'holgura', 'agarre'].includes(key)) return true;
     const drawer = s.p.cajon === 'si';
     if (key === 'holguraC' || key === 'nCaj') return !drawer;
