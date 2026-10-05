@@ -175,7 +175,7 @@
       props: [['pared', 'Uso', { no: 'Caja normal', si: 'Bandeja de pared (TypeTray)' }], ['colgar', 'Agujeros para colgar', { si: 'Con agujeros', no: 'Sin agujeros' }],
         ['uniones', 'Uniones', JOINT_OPTS], ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }],
         ['nAncho', 'Dedos a lo ancho'], ['nProf', 'Dedos a lo profundo'], ['nAlto', 'Dedos a lo alto'], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
-        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }], ['cubiertaLargas', 'Cubiertas más largas', { lados: 'Los lados (izquierdo y derecho)', frente: 'Frente y atrás' }],
         ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
@@ -194,7 +194,7 @@
         ['nEsq', 'Dedos por esquina'], ['nBaseT', 'Pestañas de la base por lado'],
         ['nAnillos', 'Anillos de refuerzo'], ['bandaAnillo', 'Ancho del anillo'],
         ['tapa', 'Tapa', { no: 'Sin tapa', si: 'Con tapa' }],
-        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['margenCub', 'Sobrante extra por lado (0 = al ras)'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }],
+        ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['margenCub', 'Sobrante extra por lado (0 = al ras)'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }], ['cubiertaLargas', 'Cubiertas más largas', { lados: 'Los lados (izquierdo y derecho)', frente: 'Frente y atrás' }],
         ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'],
         ['x', 'X'], ['y', 'Y'], ROT],
     },
@@ -234,7 +234,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'refuerzo']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'refuerzo']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -565,11 +565,14 @@
       if (!(c > 0) || !Number.isFinite(c)) return null;
       const caras = s.p.cubiertaCaras || 'todas', covers = [];
       const addC = (name, w, h, place, eu, ev, ew, o, out) => covers.push({ name, w, h, place, holes: [], pts: rect(w, h), th: c, color: 0xa9743f, axes: { eu, ev, ew, o, out } });
-      addC('Cubierta Frente', W, H, 'front', [1, 0, 0], [0, -1, 0], [0, 0, 1], [0, H, -c], [0, 0, -1]);
+      // Dos de las cubiertas son más largas (suman el grosor de la chapa en cada punta) para cerrar las esquinas al ras:
+      // los lados por defecto, o frente y atrás si se elige.
+      const fL = s.p.cubiertaLargas === 'frente', ex = fL ? c : 0, sx = fL ? 0 : c;
+      addC('Cubierta Frente', W + 2 * ex, H, 'front', [1, 0, 0], [0, -1, 0], [0, 0, 1], [-ex, H, -c], [0, 0, -1]);
       if (caras !== 'frente') {
-        addC('Cubierta Atrás', W, H, 'back', [-1, 0, 0], [0, -1, 0], [0, 0, -1], [W, H, D + c], [0, 0, 1]);
-        addC('Cubierta Lado izquierdo', D + 2 * c, H, 'left', [0, 0, 1], [0, -1, 0], [1, 0, 0], [-c, H, -c], [-1, 0, 0]);
-        addC('Cubierta Lado derecho', D + 2 * c, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + c, H, D + c], [1, 0, 0]);
+        addC('Cubierta Atrás', W + 2 * ex, H, 'back', [-1, 0, 0], [0, -1, 0], [0, 0, -1], [W + ex, H, D + c], [0, 0, 1]);
+        addC('Cubierta Lado izquierdo', D + 2 * sx, H, 'left', [0, 0, 1], [0, -1, 0], [1, 0, 0], [-c, H, -sx], [-1, 0, 0]);
+        addC('Cubierta Lado derecho', D + 2 * sx, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + c, H, D + sx], [1, 0, 0]);
         if (caras === 'todas') addC('Cubierta Base', W + 2 * c, D + 2 * c, 'bottom', [1, 0, 0], [0, 0, 1], [0, 1, 0], [-c, -c, -c], [0, -1, 0]);
         if (caras === 'todas' && lid) addC('Cubierta Tapa', W + 2 * c, D + 2 * c, 'top', [1, 0, 0], [0, 0, 1], [0, -1, 0], [-c, H + c, -c], [0, 1, 0]);
       }
@@ -740,11 +743,12 @@
         const P = place(name, shape, eu, ev, ew, [O[0] + eu[0] * du - ew[0] * c, O[1] + eu[1] * du - ew[1] * c, O[2] + eu[2] * du - ew[2] * c], out);
         P.th = c; P.color = 0xa9743f; panels.push(P);
       };
-      cover('Cubierta Frente', trap(Wt, Wb, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], -mg);
+      const longFB = s.p.cubiertaLargas === 'frente', cW0 = c / Math.cos(alW), exF = longFB ? cW0 : 0, exS = longFB ? 0 : cD;
+      cover('Cubierta Frente', trap(Wt + 2 * exF, Wb + 2 * exF, Lf), [1, 0, 0], [0, -H / Lf, dD / Lf], [0, dD / Lf, H / Lf], [ox - dW, yT, oz - dD], [0, 0, -1], -exF - mg);
       if (s.p.cubiertaCaras !== 'frente') {
-      cover('Cubierta Atrás', trap(Wt, Wb, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], -mg);
-      cover('Cubierta Lado izquierdo', trap(Dt + 2 * cD, Db + 2 * cD, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], -cD - mg);
-      cover('Cubierta Lado derecho', trap(Dt + 2 * cD, Db + 2 * cD, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], -cD - mg);
+      cover('Cubierta Atrás', trap(Wt + 2 * exF, Wb + 2 * exF, Lf), [-1, 0, 0], [0, -H / Lf, -dD / Lf], [0, dD / Lf, -H / Lf], [ox + Wb + dW, yT, oz + Db + dD], [0, 0, 1], -exF - mg);
+      cover('Cubierta Lado izquierdo', trap(Dt + 2 * exS, Db + 2 * exS, Ls), [0, 0, 1], [dW / Ls, -H / Ls, 0], [H / Ls, dW / Ls, 0], [ox - dW, yT, oz - dD], [-1, 0, 0], -exS - mg);
+      cover('Cubierta Lado derecho', trap(Dt + 2 * exS, Db + 2 * exS, Ls), [0, 0, -1], [-dW / Ls, -H / Ls, 0], [-H / Ls, dW / Ls, 0], [ox + Wb + dW, yT, oz + Db + dD], [1, 0, 0], -exS - mg);
       const cW = c / Math.cos(alW), bw = Wb + 2 * cW, bd = Db + 2 * cD;
       const bc = place('Cubierta Base', { pts: [[0, 0], [bw, 0], [bw, bd], [0, bd]] }, [1, 0, 0], [0, 0, 1], [0, 1, 0], [ox - cW, -c, oz - cD], [0, -1, 0]);
       bc.th = c; bc.color = 0xa9743f; panels.push(bc);
@@ -3227,7 +3231,7 @@
     if (key === 'nEsq') return joint === 'planas' || !byCount;
     if (key === 'nBaseT') return !baseOn || !byCount;
     if (key === 'bandaAnillo') return !(Math.round(num(s, 'nAnillos', 0)) > 0);
-    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'margenCub') return s.p.cubierta !== 'si';
+    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'cubiertaLargas' || key === 'margenCub') return s.p.cubierta !== 'si';
     return false;
   }
   // En modo bandeja de pared los nombres de las medidas cambian (la caja "acostada")
@@ -3240,7 +3244,7 @@
   function boxFieldHidden(s, key) {
     if (key === 'colgar') return s.p.pared !== 'si';
     if (key === 'cubierta') return s.p.cajon === 'si' && s.p.pared !== 'si';       // el cajón aún no lleva cubierta
-    if (key === 'grosorCub' || key === 'cubiertaCaras') return s.p.cubierta !== 'si' || (s.p.cajon === 'si' && s.p.pared !== 'si');
+    if (key === 'grosorCub' || key === 'cubiertaCaras' || key === 'cubiertaLargas') return s.p.cubierta !== 'si' || (s.p.cajon === 'si' && s.p.pared !== 'si');
     if (s.p.pared === 'si' && ['tapa', 'cajon', 'nCaj', 'holguraC', 'borde', 'holgura', 'agarre'].includes(key)) return true;
     const drawer = s.p.cajon === 'si';
     if (key === 'holguraC' || key === 'nCaj') return !drawer;
@@ -4437,8 +4441,8 @@
   // Vuelve a la caja con parámetros: quita las piezas sueltas y repone el objeto original
   // Cambia los dedos (u otras uniones) de una caja desagrupada: se regeneran sus piezas en el mismo lugar
   const ORIGIN_FINGER_KEYS = {
-    box: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
-    taper: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
+    box: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'cubiertaLargas', 'uniones', 'dedoModo', 'dedo', 'nAncho', 'nProf', 'nAlto'],
+    taper: ['t', 'kerf', 'cubierta', 'grosorCub', 'margenCub', 'cubiertaCaras', 'cubiertaLargas', 'uniones', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'dedoModo', 'dedo', 'nEsq', 'nBaseT', 'nAnillos', 'bandaAnillo'],
   };
   function regenOrigin(gid, key, value) {
     const og = doc.origins && doc.origins[gid], snap = og && (og.shape || og);
