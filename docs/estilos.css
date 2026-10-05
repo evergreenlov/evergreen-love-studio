@@ -338,3 +338,12 @@ button.wide { width: 100%; margin-top: 10px; }
 
 .bez-line { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 3 2; fill: none; pointer-events: none; }
 .bez-handle { fill: #fff; stroke: var(--accent); stroke-width: 1.6px; cursor: pointer; }
+
+.ruler { position: absolute; z-index: 3; background: var(--panel); touch-action: none; }
+.ruler-top { left: 18px; top: 0; height: 18px; cursor: row-resize; }
+.ruler-left { left: 0; top: 18px; width: 18px; cursor: col-resize; }
+.ruler-corner { position: absolute; left: 0; top: 0; width: 18px; height: 18px; z-index: 3; background: var(--panel); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.guide-line { stroke: #0e9fd8; stroke-width: 1px; fill: none; pointer-events: none; }
+.snap-line { stroke: #d6336c; stroke-width: 1px; stroke-dasharray: 4 3; fill: none; pointer-events: none; }
+.guide-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; font-size: 12px; }
+.guides-box { margin: 10px 0 4px; }

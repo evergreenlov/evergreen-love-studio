@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261007-curvas-2">
+<link rel="stylesheet" href="estilos.css?v=20261007-guias-2">
 </head>
 <body>
 <header class="topbar">
@@ -85,6 +85,9 @@
       <g id="layerShapes"></g>
       <g id="layerOverlay"></g>
     </svg>
+    <canvas id="rulerTop" class="ruler ruler-top" title="Arrastra hacia el lienzo para crear una guía"></canvas>
+    <canvas id="rulerLeft" class="ruler ruler-left" title="Arrastra hacia el lienzo para crear una guía"></canvas>
+    <div class="ruler-corner"></div>
     <div class="view3d" id="view3d" hidden>
       <div class="view3d-bar">
         <strong id="view3dTitle">Vista 3D</strong>
@@ -143,6 +146,6 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261007-curvas-2"></script>
+<script src="app.js?v=20261007-guias-2"></script>
 </body>
 </html>

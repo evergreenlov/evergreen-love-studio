@@ -1807,6 +1807,7 @@
       renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true);
     }
     drawOverlay();
+    drawRulers();
     $('#zoomLabel').textContent = Math.round(view.s / 3 * 100) + '%';
   }
 
@@ -2081,6 +2082,133 @@
     if (!same) drawOverlay();
   }
 
+  /* ================= Reglas, guías e imán a objetos ================= */
+  const RULER = 18;
+  const rulerTop = $('#rulerTop'), rulerLeft = $('#rulerLeft');
+  let guideDrag = null, snapLines = null;
+  function niceRulerStep(pxPerUnit) {
+    const base = isInch() ? [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 5, 10, 20, 50] : [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+    return base.find(b => b * pxPerUnit >= 64) || base[base.length - 1];
+  }
+  function drawRulers() {
+    if (!rulerTop || !rulerLeft) return;
+    const dpr = window.devicePixelRatio || 1, W = stage.clientWidth, H = stage.clientHeight;
+    const css = getComputedStyle(document.documentElement), fg = css.getPropertyValue('--muted').trim() || '#667', bg = css.getPropertyValue('--panel').trim() || '#fff', line = css.getPropertyValue('--border').trim() || '#ccd';
+    const step = niceRulerStep(view.s * unitMM), minor = isInch() ? step / (step >= 1 ? 5 : 4) : step / 5;
+    const draw = (cv, horizontal) => {
+      const len2 = horizontal ? W - RULER : H - RULER, thick = RULER;
+      cv.width = Math.max(1, Math.round((horizontal ? len2 : thick) * dpr)); cv.height = Math.max(1, Math.round((horizontal ? thick : len2) * dpr));
+      cv.style.width = (horizontal ? len2 : thick) + 'px'; cv.style.height = (horizontal ? thick : len2) + 'px';
+      const c = cv.getContext('2d');
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.fillStyle = bg; c.fillRect(0, 0, cv.width, cv.height);
+      c.strokeStyle = fg; c.fillStyle = fg; c.lineWidth = 1; c.font = '10px -apple-system, sans-serif';
+      const v0 = (horizontal ? view.x : view.y) / unitMM, v1 = v0 + (len2 + RULER) / view.s / unitMM;
+      const pos = v => ((v * unitMM) - (horizontal ? view.x : view.y)) * view.s - RULER;
+      for (let v = Math.floor(v0 / minor) * minor; v <= v1 + 1e-9; v += minor) {
+        const q = pos(v);
+        if (q < -1 || q > len2 + 1) continue;
+        const major = Math.abs(v / step - Math.round(v / step)) < 1e-6;
+        c.beginPath();
+        if (horizontal) { c.moveTo(q + 0.5, thick); c.lineTo(q + 0.5, thick - (major ? 10 : 4)); } else { c.moveTo(thick, q + 0.5); c.lineTo(thick - (major ? 10 : 4), q + 0.5); }
+        c.stroke();
+        if (major) {
+          const label = fmt(v, isInch() ? 3 : 1);
+          if (horizontal) c.fillText(label, q + 3, 9);
+          else { c.save(); c.translate(9, q + 3); c.rotate(-Math.PI / 2); c.fillText(label, -c.measureText(label).width - 2, 0); c.restore(); }
+        }
+      }
+      c.strokeStyle = line; c.beginPath();
+      if (horizontal) { c.moveTo(0, thick - 0.5); c.lineTo(len2, thick - 0.5); } else { c.moveTo(thick - 0.5, 0); c.lineTo(thick - 0.5, len2); }
+      c.stroke();
+    };
+    draw(rulerTop, true); draw(rulerLeft, false);
+  }
+  function drawGuides() {
+    const gs = doc.guides || [];
+    if (!gs.length && !snapLines) return;
+    const vw = stage.clientWidth / view.s, vh = stage.clientHeight / view.s;
+    for (const g of gs) svgEl('path', { d: g.axis === 'x' ? `M${r4(g.pos)} ${r4(view.y)}V${r4(view.y + vh)}` : `M${r4(view.x)} ${r4(g.pos)}H${r4(view.x + vw)}`, class: 'guide-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    if (snapLines) {
+      if (snapLines.x != null) svgEl('path', { d: `M${r4(snapLines.x)} ${r4(view.y)}V${r4(view.y + vh)}`, class: 'snap-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      if (snapLines.y != null) svgEl('path', { d: `M${r4(view.x)} ${r4(snapLines.y)}H${r4(view.x + vw)}`, class: 'snap-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+    }
+  }
+  function guideAt(p) {
+    let best = null, bd = 4 / view.s;
+    for (const g of doc.guides || []) { const d = Math.abs((g.axis === 'x' ? p.x : p.y) - g.pos); if (d < bd) { bd = d; best = g; } }
+    return best;
+  }
+  // Arrastrar desde una regla crea una guía; arrastrarla de vuelta a la regla la borra
+  for (const [el, axis] of [[rulerLeft, 'x'], [rulerTop, 'y']]) {
+    if (!el) continue;
+    el.addEventListener('pointerdown', e => {
+      el.setPointerCapture(e.pointerId);
+      const p = toWorld(e), g = { id: uid(), axis, pos: axis === 'x' ? p.x : p.y };
+      (doc.guides = doc.guides || []).push(g);
+      guideDrag = { g, el };
+      drawOverlay();
+    });
+    el.addEventListener('pointermove', e => {
+      if (!guideDrag) return;
+      const p = toWorld(e), v = axis === 'x' ? p.x : p.y;
+      guideDrag.g.pos = snapOn(e) ? snapV(v, e) : v;
+      drawOverlay();
+    });
+    const up = e => {
+      if (!guideDrag) return;
+      const r = svg.getBoundingClientRect(), g = guideDrag.g, onRuler = axis === 'x' ? e.clientX - r.left < RULER : e.clientY - r.top < RULER;
+      guideDrag = null;
+      if (onRuler) doc.guides = doc.guides.filter(x => x !== g);
+      checkpoint(); drawOverlay(); buildInspector();
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+  // Líneas a las que se pega lo que arrastras: guías, bordes, centros de las otras figuras y la hoja
+  let guideSnapCache = { sig: '', xs: [], ys: [] };
+  function snapCands(exclude) {
+    const sig = evalVersion + '|' + [...exclude].sort().join(',') + '|' + (doc.guides || []).map(g => g.axis + g.pos).join(',') + '|' + doc.sheet.w + 'x' + doc.sheet.h;
+    if (guideSnapCache.sig === sig) return guideSnapCache;
+    const xs = [0, doc.sheet.w / 2, doc.sheet.w], ys = [0, doc.sheet.h / 2, doc.sheet.h];
+    for (const g of doc.guides || []) (g.axis === 'x' ? xs : ys).push(g.pos);
+    for (const [id, r] of evalCache) {
+      if (exclude.has(id) || !r.bbox) continue;
+      const b = r.bbox;
+      xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+    }
+    guideSnapCache = { sig, xs, ys };
+    return guideSnapCache;
+  }
+  const nearestLine = (list, v, tol) => { let best = null, bd = tol; for (const l of list) { const d = Math.abs(l - v); if (d < bd) { bd = d; best = l; } } return best; };
+  // Mueve la selección: sus bordes y su centro se pegan a las líneas de referencia; si no hay ninguna cerca, a la cuadrícula
+  function snapMoveDelta(d, dx, dy, e) {
+    snapLines = null;
+    if (!snapOn(e)) return [dx, dy];
+    const b = d.bbox0, c = snapCands(new Set(sel)), tol = 7 / view.s;
+    let rx = null, ry = null;
+    if (b) {
+      for (const off of [0, b.w / 2, b.w]) { const L = nearestLine(c.xs, b.x + off + dx, tol); if (L !== null && (rx === null || Math.abs(L - (b.x + off + dx)) < Math.abs(rx.L - rx.pos))) rx = { L, pos: b.x + off + dx }; }
+      for (const off of [0, b.h / 2, b.h]) { const L = nearestLine(c.ys, b.y + off + dy, tol); if (L !== null && (ry === null || Math.abs(L - (b.y + off + dy)) < Math.abs(ry.L - ry.pos))) ry = { L, pos: b.y + off + dy }; }
+    }
+    const nx = rx ? dx + (rx.L - rx.pos) : snapV(dx, e), ny = ry ? dy + (ry.L - ry.pos) : snapV(dy, e);
+    if (rx || ry) snapLines = { x: rx ? rx.L : null, y: ry ? ry.L : null };
+    return [nx, ny];
+  }
+  function guidesSection() {
+    const gs = doc.guides || [];
+    const axisSel = h('select', { 'aria-label': 'Tipo de guía' }, h('option', { value: 'x' }, 'Vertical (x)'), h('option', { value: 'y' }, 'Horizontal (y)'));
+    const posIn = h('input', { type: 'number', step: 'any', value: '0', 'aria-label': 'Posición de la guía' });
+    return h('div', { class: 'guides-box' }, h('div', { class: 'insp-sub' }, 'Guías'),
+      h('p', { class: 'tip' }, 'Arrastra desde la regla de arriba o de la izquierda para crear una guía; las figuras se pegan a ellas. Arrástrala de vuelta a la regla para borrarla.'),
+      ...gs.map(g => h('div', { class: 'guide-row' }, h('span', {}, `${g.axis === 'x' ? 'Vertical' : 'Horizontal'} · ${fmt(g.pos / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`),
+        h('button', { class: 'icon-btn del', 'aria-label': 'Borrar guía', onclick: () => { doc.guides = doc.guides.filter(x => x !== g); checkpoint(); drawOverlay(); buildInspector(); } }, '×'))),
+      h('div', { class: 'btn-grid' }, axisSel, posIn),
+      h('div', { class: 'btn-grid' },
+        h('button', { onclick: () => { const v = parseFloat(posIn.value); if (!Number.isFinite(v)) return; (doc.guides = doc.guides || []).push({ id: uid(), axis: axisSel.value, pos: v * unitMM }); checkpoint(); drawOverlay(); buildInspector(); } }, 'Añadir guía'),
+        gs.length ? h('button', { class: 'danger', onclick: () => { doc.guides = []; checkpoint(); drawOverlay(); buildInspector(); } }, 'Borrar todas') : null));
+  }
+
   /* ----- Curvas Bézier: puntos suaves con manijas y herramienta Pluma ----- */
   // Los dibujos importados guardan sus trazos como polilíneas (a.polys). Un trazo curvo guarda además sus nodos
   // en a.curves[indice] = { closed, n: [{ p: [u, v], i: [du, dv] | null, o: [du, dv] | null, s: suave }] } y a.polys se recalcula de ahí.
@@ -2271,6 +2399,7 @@
 
   function drawOverlay() {
     layerOverlay.replaceChildren();
+    drawGuides();
     const pad = 3 / view.s;
     for (const id of sel) {
       const items = worldCache.get(id);
@@ -2582,7 +2711,11 @@
   // Paso del imán en mm (doc.grid está en unidades del documento)
   const gridMM = () => doc.grid * unitMM;
   const snapV = (v, e) => snapOn(e) ? Math.round(v / gridMM()) * gridMM() : v;
-  const snapPt = (p, e) => ({ x: snapV(p.x, e), y: snapV(p.y, e) });
+  const snapPt = (p, e) => {
+    if (!snapOn(e)) return { x: p.x, y: p.y };
+    const c = snapCands(new Set(sel)), tol = 7 / view.s, lx = nearestLine(c.xs, p.x, tol), ly = nearestLine(c.ys, p.y, tol);
+    return { x: lx !== null ? lx : snapV(p.x, e), y: ly !== null ? ly : snapV(p.y, e) };
+  };
 
   function defaultsFor(type) {
     const has = n => doc.params.some(p => p.name === n);
@@ -2687,6 +2820,8 @@
       return;
     }
     if (tool === 'select') {
+      const gh = !handle && guideAt(p);
+      if (gh) { drag = { mode: 'guide', g: gh, del: false }; return; }
       const hit = e.target.closest && e.target.closest('[data-id]');
       const id = hit && hit.dataset.id;
       const dbl = isDoubleClick(e, id);
@@ -2700,7 +2835,7 @@
         const insideSel = [...sel].some(sid => sid !== id && topOf(sid) && topOf(sid).id === id);
         if (e.shiftKey) { sel.has(id) ? sel.delete(id) : sel.add(id); }
         else if (!sel.has(id) && !insideSel) sel = new Set([id]);
-        drag = { mode: 'move', start: p, moved: false, orig: [...sel].map(byId).filter(Boolean).map(s => ({ s, p: { ...s.p } })) };
+        drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(Boolean).map(s => ({ s, p: { ...s.p } })) };
         buildInspector(); buildObjects(); drawCanvas();
       } else {
         drag = { mode: 'marquee', start: p, cur: p, base: e.shiftKey ? new Set(sel) : new Set() };
@@ -2776,6 +2911,11 @@
       view.x = drag.vx - (e.clientX - drag.sx) / view.s;
       view.y = drag.vy - (e.clientY - drag.sy) / view.s;
       drawCanvas();
+    } else if (drag.mode === 'guide') {
+      const r = svg.getBoundingClientRect(), v = drag.g.axis === 'x' ? p.x : p.y;
+      drag.g.pos = snapOn(e) ? snapV(v, e) : v;
+      drag.del = drag.g.axis === 'x' ? e.clientX - r.left < RULER : e.clientY - r.top < RULER;
+      drawOverlay();
     } else if (drag.mode === 'bez') {
       applyBezDrag(drag, p, e);
     } else if (drag.mode === 'pen') {
@@ -2789,7 +2929,7 @@
     } else if (drag.mode === 'scale' || drag.mode === 'rotate') {
       applyHandleDrag(drag, p, e);
     } else if (drag.mode === 'move') {
-      const dx = snapV(p.x - drag.start.x, e), dy = snapV(p.y - drag.start.y, e);
+      const [dx, dy] = snapMoveDelta(drag, p.x - drag.start.x, p.y - drag.start.y, e);
       if (!drag.moved && Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * view.s < 3) return;
       drag.moved = true;
       for (const o of drag.orig) moveShape(o.s, o.p, dx, dy);
@@ -2814,7 +2954,9 @@
     const d = drag;
     drag = null;
     stage.classList.remove('panning');
-    if (d.mode === 'bez') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
+    if (snapLines) { snapLines = null; drawOverlay(); }
+    if (d.mode === 'guide') { if (d.del) doc.guides = doc.guides.filter(x => x !== d.g); checkpoint(); drawOverlay(); buildInspector(); }
+    else     if (d.mode === 'bez') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else if (d.mode === 'pen') { drawOverlay(); }
     else if (d.mode === 'node') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else if (d.mode === 'nmarq') {
@@ -3087,6 +3229,7 @@
         propRow(`Área ancho (${u})`, numInput(fmt(doc.sheet.w / unitMM, 3), v => { doc.sheet.w = v * unitMM; })),
         propRow(`Área alto (${u})`, numInput(fmt(doc.sheet.h / unitMM, 3), v => { doc.sheet.h = v * unitMM; })),
         propRow(`Paso imán (${u})`, numInput(doc.grid, v => { doc.grid = v; })),
+        guidesSection(),
         nestSection(),
         materialSection(),
         h('p', { class: 'tip' }, 'En cualquier medida puedes escribir fórmulas, por ejemplo ', h('code', {}, 'ancho - 2*grosor'),
