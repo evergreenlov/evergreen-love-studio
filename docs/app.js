@@ -3451,6 +3451,12 @@
         if (a.kind === 'vector' && a.polys.length > 1 && a.polys.length <= 300) {
           box.append(h('button', { class: 'wide', onclick: () => explodeImport(s, true) }, `Separar cada trazo (${a.polys.length})`));
         }
+        if (a.kind === 'image') {
+          box.append(h('div', { class: 'insp-sub' }, 'Editar la imagen'),
+            h('div', { class: 'btn-grid' },
+              h('button', { class: 'primary', onclick: () => openBgTool(s), title: 'Quita el fondo por color o con un pincel' }, 'Quitar fondo…'),
+              h('button', { class: 'primary', onclick: () => openTraceTool(s), title: 'Convierte la imagen en contornos que se pueden cortar o grabar' }, 'Vectorizar…')));
+        }
         if (a.realW) box.append(h('button', { class: 'wide', onclick: () => { s.p.w = fmt(a.realW / unitMM); s.p.prop = 'si'; checkpoint(); fullRender(); } }, 'Volver al tamaño original'));
       }
     }
@@ -4251,6 +4257,290 @@
     };
     next();
     msg(`Exportando ${doc.nest.count} archivo(s), uno por hoja. Si tu navegador pregunta, permite las descargas múltiples.`);
+  }
+
+  /* ================= Imágenes: quitar el fondo y vectorizar (trace) ================= */
+  const loadImage = href => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('imagen no válida')); i.src = href; });
+  function workCanvas(img, maxSide) {
+    const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, c.width, c.height);
+    return { c, x, w: c.width, h: c.height };
+  }
+  // Luminosidad 0-255 (lo transparente cuenta como blanco)
+  function grayOf(data, w, h) {
+    const g = new Float32Array(w * h);
+    for (let i = 0, p = 0; i < g.length; i++, p += 4) {
+      const a = data[p + 3] / 255;
+      g[i] = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) * a + 255 * (1 - a);
+    }
+    return g;
+  }
+  function otsuLevel(g) {
+    const hist = new Array(256).fill(0);
+    for (const v of g) hist[Math.max(0, Math.min(255, Math.round(v)))]++;
+    const total = g.length;
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sB = 0, wB = 0, best = 0, lvl = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue;
+      const wF = total - wB; if (!wF) break;
+      sB += t * hist[t];
+      const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; lvl = t; }
+    }
+    return lvl;
+  }
+  function boxBlurField(src, w, h, r) {
+    if (r <= 0) return src;
+    const tmp = new Float32Array(src.length), out = new Float32Array(src.length), n = 2 * r + 1;
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      for (let x = -r; x <= r; x++) acc += src[y * w + Math.max(0, Math.min(w - 1, x))];
+      for (let x = 0; x < w; x++) {
+        tmp[y * w + x] = acc / n;
+        acc += src[y * w + Math.min(w - 1, x + r + 1)] - src[y * w + Math.max(0, x - r)];
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -r; y <= r; y++) acc += tmp[Math.max(0, Math.min(h - 1, y)) * w + x];
+      for (let y = 0; y < h; y++) {
+        out[y * w + x] = acc / n;
+        acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+      }
+    }
+    return out;
+  }
+  // Curvas de nivel (marching squares): devuelve lazos cerrados [[x, y], …] donde el valor cruza "level"; lo que está por debajo queda dentro
+  function contoursAt(f, w, h, level) {
+    const val = (x, y) => (x < 0 || y < 0 || x >= w || y >= h) ? 255 : f[y * w + x];
+    const stride = w + 2, eid = (horiz, x, y) => ((y + 1) * stride + (x + 1)) * 2 + (horiz ? 0 : 1);
+    const edges = new Map(), segs = [];
+    const lerp = (a, b) => { const d = b - a; return d === 0 ? 0.5 : (level - a) / d; };
+    const getEdge = (id, pt) => { let e = edges.get(id); if (!e) { e = { pt, s: [] }; edges.set(id, e); } return e; };
+    const TABLE = [[], [[3, 0]], [[0, 1]], [[3, 1]], [[1, 2]], [[3, 0], [1, 2]], [[0, 2]], [[3, 2]], [[3, 2]], [[0, 2]], [[0, 1], [3, 2]], [[1, 2]], [[3, 1]], [[0, 1]], [[3, 0]], []];
+    for (let y = -1; y < h; y++) for (let x = -1; x < w; x++) {
+      const tl = val(x, y), tr = val(x + 1, y), br = val(x + 1, y + 1), bl = val(x, y + 1);
+      const idx = (tl < level ? 1 : 0) | (tr < level ? 2 : 0) | (br < level ? 4 : 0) | (bl < level ? 8 : 0);
+      if (idx === 0 || idx === 15) continue;
+      const pts = [
+        () => getEdge(eid(true, x, y), [x + lerp(tl, tr), y]),       // 0: arriba
+        () => getEdge(eid(false, x + 1, y), [x + 1, y + lerp(tr, br)]), // 1: derecha
+        () => getEdge(eid(true, x, y + 1), [x + lerp(bl, br), y + 1]),  // 2: abajo
+        () => getEdge(eid(false, x, y), [x, y + lerp(tl, bl)]),         // 3: izquierda
+      ];
+      for (const [a, b] of TABLE[idx]) { const ea = pts[a](), eb = pts[b](); const sg = { a: ea, b: eb, used: false }; ea.s.push(sg); eb.s.push(sg); segs.push(sg); }
+    }
+    const loops = [];
+    for (const sg0 of segs) {
+      if (sg0.used) continue;
+      sg0.used = true;
+      const path = [sg0.a.pt]; let cur = sg0.b, start = sg0.a, guard = 0;
+      while (cur !== start && guard++ < 5e6) {
+        path.push(cur.pt);
+        const nx = cur.s.find(q => !q.used);
+        if (!nx) break;
+        nx.used = true;
+        cur = nx.a === cur ? nx.b : nx.a;
+      }
+      if (path.length >= 3) loops.push(path);
+    }
+    return loops;
+  }
+  const loopArea = pts => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };
+  function simplifyLoop(pts, tol) {
+    if (tol <= 0 || pts.length < 6) return pts;
+    const sd = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; if (!L) return Math.hypot(p[0] - a[0], p[1] - a[1]); const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)); return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy)); };
+    const dp = (arr) => {
+      const keep = new Array(arr.length).fill(false); keep[0] = keep[arr.length - 1] = true;
+      const stack = [[0, arr.length - 1]];
+      while (stack.length) {
+        const [i, j] = stack.pop(); let md = 0, mi = -1;
+        for (let k = i + 1; k < j; k++) { const d = sd(arr[k], arr[i], arr[j]); if (d > md) { md = d; mi = k; } }
+        if (md > tol && mi > 0) { keep[mi] = true; stack.push([i, mi], [mi, j]); }
+      }
+      return arr.filter((_, k) => keep[k]);
+    };
+    // lazo cerrado: se parte por el punto más lejano del primero
+    let far = 0, fd = 0; for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+    const a = dp(pts.slice(0, far + 1)), b = dp([...pts.slice(far), pts[0]]);
+    return [...a.slice(0, -1), ...b.slice(0, -1)];
+  }
+  function traceImageData(id, w, h, o) {
+    let g = grayOf(id.data, w, h);
+    if (o.invert) g = g.map(v => 255 - v);
+    g = boxBlurField(g, w, h, o.blur);
+    const loops = contoursAt(g, w, h, o.level);
+    const out = [];
+    for (const lp of loops) {
+      if (Math.abs(loopArea(lp)) < o.minArea) continue;
+      const s = simplifyLoop(lp, o.tol);
+      if (s.length >= 3) out.push(s);
+    }
+    return out;
+  }
+
+  // Ventana común (vista previa a la izquierda, controles a la derecha)
+  function imageDialog(title, help) {
+    const dialog = h('dialog', { class: 'batch-dialog imgtool-dialog', 'aria-label': title });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    return { dialog, close, head: [h('h2', {}, title), h('p', { class: 'tip' }, help)] };
+  }
+  const sliderRow = (label, min, max, step, value, onInput, fmtv = v => v) => {
+    const out = h('span', { class: 'slider-val' }, String(fmtv(value))), inp = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(value) });
+    inp.addEventListener('input', () => { out.textContent = String(fmtv(+inp.value)); onInput(+inp.value); });
+    return { el: h('label', { class: 'slider-row' }, h('span', {}, label, ' ', out), inp), inp, out };
+  };
+
+  async function openTraceTool(s) {
+    const a = doc.assets[s.p.asset];
+    if (!a || a.kind !== 'image') return;
+    let img;
+    try { img = await loadImage(a.href); } catch (e) { msg('No se pudo leer la imagen.'); return; }
+    const W = workCanvas(img, 700), id = W.x.getImageData(0, 0, W.w, W.h);
+    const { dialog, close, head } = imageDialog('Vectorizar imagen (trace)', 'Convierte la imagen en contornos que se pueden cortar o grabar. Funciona mejor con logos, dibujos y siluetas con buen contraste.');
+    const st = { level: otsuLevel(grayOf(id.data, W.w, W.h)), blur: 1, tol: 0.6, minArea: 30, invert: false, mode: 'corte', keep: false };
+    const view = h('canvas', { class: 'imgtool-canvas' });
+    view.width = W.w; view.height = W.h;
+    const status = h('p', { class: 'tip', role: 'status' });
+    let loops = [], timer = 0;
+    const draw = () => {
+      const c = view.getContext('2d');
+      c.clearRect(0, 0, W.w, W.h); c.globalAlpha = 0.35; c.drawImage(W.c, 0, 0); c.globalAlpha = 1;
+      c.lineWidth = Math.max(1, W.w / 400); c.strokeStyle = '#e0301e'; c.fillStyle = st.mode === 'grabado' ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0)';
+      c.beginPath();
+      for (const lp of loops) { lp.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
+      if (st.mode === 'grabado') c.fill('evenodd'); c.stroke();
+    };
+    const run = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loops = traceImageData(id, W.w, W.h, st);
+        draw();
+        const pts = loops.reduce((n, l) => n + l.length, 0);
+        status.textContent = loops.length ? `${loops.length} contorno(s), ${pts} puntos.` + (pts > 20000 ? ' Son muchos puntos: sube «Suavidad».' : '') : 'No se encontró ninguna forma: mueve el umbral o cambia «La forma es lo oscuro / lo claro».';
+        go.disabled = !loops.length;
+      }, 90);
+    };
+    const levelRow = sliderRow('Umbral (qué es forma)', 1, 254, 1, Math.round(st.level), v => { st.level = v; run(); });
+    const blurRow = sliderRow('Suavizar la imagen', 0, 5, 1, st.blur, v => { st.blur = v; run(); });
+    const tolRow = sliderRow('Suavidad del contorno (menos puntos)', 0, 5, 0.1, st.tol, v => { st.tol = v; run(); }, v => v.toFixed(1));
+    const areaRow = sliderRow('Ignorar manchas menores a (px²)', 0, 500, 5, st.minArea, v => { st.minArea = v; run(); });
+    const auto = h('button', { onclick: () => { st.level = otsuLevel(grayOf(id.data, W.w, W.h)); levelRow.inp.value = st.level; levelRow.out.textContent = Math.round(st.level); run(); } }, 'Umbral automático');
+    const inv = h('select', { 'aria-label': 'Qué parte es la forma' }, h('option', { value: 'no' }, 'La forma es lo oscuro'), h('option', { value: 'si' }, 'La forma es lo claro'));
+    inv.onchange = () => { st.invert = inv.value === 'si'; run(); };
+    const modeSel = h('select', { 'aria-label': 'Resultado' }, h('option', { value: 'corte' }, 'Contorno para cortar (rojo)'), h('option', { value: 'grabado' }, 'Relleno para grabar (negro)'));
+    modeSel.onchange = () => { st.mode = modeSel.value; draw(); };
+    const keep = h('input', { type: 'checkbox' }); keep.onchange = () => { st.keep = keep.checked; };
+    const go = h('button', { class: 'primary', disabled: '' }, 'Crear vectores');
+    go.onclick = () => {
+      if (!loops.length) return;
+      const x = len(s, 'x'), y = len(s, 'y'), wmm = Math.abs(len(s, 'w')), hmm = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : wmm * a.h / a.w;
+      const rot = num(s, 'rot', 0) || 0, cx = x + wmm / 2, cy = y + hmm / 2, cs = Math.cos(rot * DEG), sn = Math.sin(rot * DEG);
+      const place = ([px, py]) => { const X = x + px * wmm / W.w, Y = y + py * hmm / W.h; return rot ? [cx + (X - cx) * cs - (Y - cy) * sn, cy + (X - cx) * sn + (Y - cy) * cs] : [X, Y]; };
+      const polys = loops.map(lp => ({ closed: true, op: st.mode, pts: lp.map(place) }));
+      const o = importObject(nextName((s.name || 'Imagen') + ' vectorizada'), polys, []);
+      o.op = st.mode;
+      const list = listOf(s.id), i = list.indexOf(s);
+      list.splice(st.keep ? i + 1 : i, st.keep ? 0 : 1, o);
+      sel = new Set([o.id]);
+      close(); checkpoint(); fullRender();
+      msg(`Vectorizada: ${loops.length} contorno(s). Edita sus puntos con doble clic y conviértelos en curvas con la Pluma.`);
+    };
+    const side = h('div', { class: 'imgtool-side' },
+      h('label', {}, 'Qué parte es la forma', inv), levelRow.el, auto, blurRow.el, tolRow.el, areaRow.el,
+      h('label', {}, 'Resultado', modeSel), h('label', { class: 'check' }, keep, ' Conservar la imagen original'), status);
+    dialog.append(...head, h('div', { class: 'imgtool' }, h('div', { class: 'imgtool-view' }, view), side),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    run();
+  }
+
+  async function openBgTool(s) {
+    const a = doc.assets[s.p.asset];
+    if (!a || a.kind !== 'image') return;
+    let img;
+    try { img = await loadImage(a.href); } catch (e) { msg('No se pudo leer la imagen.'); return; }
+    const W = workCanvas(img, 900), src = W.x.getImageData(0, 0, W.w, W.h), n = W.w * W.h;
+    const { dialog, close, head } = imageDialog('Quitar el fondo', 'Haz clic en el fondo para elegir su color; ajusta la tolerancia. Con el pincel borras o recuperas a mano.');
+    const st = { target: [src.data[0], src.data[1], src.data[2]], tol: 40, contiguous: true, feather: 1, tool: 'pick', size: 18 };
+    const manual = new Int16Array(n).fill(-1);
+    let alpha = new Uint8Array(n).fill(255), timer = 0;
+    const view = h('canvas', { class: 'imgtool-canvas checker' });
+    view.width = W.w; view.height = W.h;
+    const status = h('p', { class: 'tip', role: 'status' });
+    const dist = i => { const p = i * 4; return Math.sqrt(((src.data[p] - st.target[0]) ** 2 + (src.data[p + 1] - st.target[1]) ** 2 + (src.data[p + 2] - st.target[2]) ** 2) / 3); };
+    const compute = () => {
+      const bg = new Uint8Array(n), isBg = i => src.data[i * 4 + 3] < 12 || dist(i) <= st.tol;
+      if (st.contiguous) {
+        const stack = [];
+        const push = i => { if (!bg[i] && isBg(i)) { bg[i] = 1; stack.push(i); } };
+        for (let x = 0; x < W.w; x++) { push(x); push((W.h - 1) * W.w + x); }
+        for (let y = 0; y < W.h; y++) { push(y * W.w); push(y * W.w + W.w - 1); }
+        if (st.seed !== undefined) push(st.seed);
+        while (stack.length) {
+          const i = stack.pop(), x = i % W.w, y = (i - x) / W.w;
+          if (x > 0) push(i - 1); if (x < W.w - 1) push(i + 1); if (y > 0) push(i - W.w); if (y < W.h - 1) push(i + W.w);
+        }
+      } else for (let i = 0; i < n; i++) if (isBg(i)) bg[i] = 1;
+      let f = Float32Array.from(bg, v => v ? 0 : 255);
+      f = boxBlurField(f, W.w, W.h, st.feather);
+      alpha = Uint8Array.from(f, v => Math.max(0, Math.min(255, Math.round(v))));
+    };
+    const render = () => {
+      const out = W.x.createImageData(W.w, W.h);
+      let kept = 0;
+      for (let i = 0; i < n; i++) {
+        const a2 = manual[i] >= 0 ? manual[i] : alpha[i], p = i * 4;
+        out.data[p] = src.data[p]; out.data[p + 1] = src.data[p + 1]; out.data[p + 2] = src.data[p + 2]; out.data[p + 3] = Math.round(src.data[p + 3] * a2 / 255);
+        if (a2 > 127) kept++;
+      }
+      view.getContext('2d').putImageData(out, 0, 0);
+      status.textContent = `Se conserva el ${Math.round(kept / n * 100)} % de la imagen.`;
+      return out;
+    };
+    const recompute = () => { clearTimeout(timer); timer = setTimeout(() => { compute(); render(); }, 70); };
+    compute(); render();
+    const posOf = e => { const r = view.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) * W.w / r.width), Math.floor((e.clientY - r.top) * W.h / r.height)]; };
+    const paint = (x, y, restore) => {
+      const r = st.size * W.w / view.getBoundingClientRect().width / 2;
+      for (let yy = Math.max(0, Math.floor(y - r)); yy <= Math.min(W.h - 1, Math.ceil(y + r)); yy++) for (let xx = Math.max(0, Math.floor(x - r)); xx <= Math.min(W.w - 1, Math.ceil(x + r)); xx++) if ((xx - x) ** 2 + (yy - y) ** 2 <= r * r) manual[yy * W.w + xx] = restore ? 255 : 0;
+    };
+    let painting = false;
+    view.addEventListener('pointerdown', e => {
+      const [x, y] = posOf(e);
+      if (x < 0 || y < 0 || x >= W.w || y >= W.h) return;
+      if (st.tool === 'pick') { const p = (y * W.w + x) * 4; st.target = [src.data[p], src.data[p + 1], src.data[p + 2]]; st.seed = y * W.w + x; swatch.style.background = `rgb(${st.target.join(',')})`; manual.fill(-1); compute(); render(); return; }
+      painting = true; view.setPointerCapture(e.pointerId); paint(x, y, st.tool === 'restore'); render();
+    });
+    view.addEventListener('pointermove', e => { if (!painting) return; const [x, y] = posOf(e); paint(x, y, st.tool === 'restore'); render(); });
+    view.addEventListener('pointerup', () => { painting = false; });
+    const swatch = h('span', { class: 'swatch' }); swatch.style.background = `rgb(${st.target.join(',')})`;
+    const tolRow = sliderRow('Tolerancia del color', 0, 150, 1, st.tol, v => { st.tol = v; recompute(); });
+    const featRow = sliderRow('Suavizar el borde', 0, 4, 1, st.feather, v => { st.feather = v; recompute(); });
+    const sizeRow = sliderRow('Tamaño del pincel', 4, 80, 2, st.size, v => { st.size = v; });
+    const toolSel = h('select', { 'aria-label': 'Herramienta' }, h('option', { value: 'pick' }, 'Elegir el color del fondo (clic)'), h('option', { value: 'erase' }, 'Pincel: borrar'), h('option', { value: 'restore' }, 'Pincel: recuperar'));
+    toolSel.onchange = () => { st.tool = toolSel.value; view.style.cursor = st.tool === 'pick' ? 'crosshair' : 'cell'; };
+    const cont = h('input', { type: 'checkbox', checked: '' }); cont.onchange = () => { st.contiguous = cont.checked; recompute(); };
+    const reset = h('button', { onclick: () => { manual.fill(-1); render(); } }, 'Deshacer el pincel');
+    const go = h('button', { class: 'primary' }, 'Quitar fondo');
+    go.onclick = () => {
+      const out = render(), c = document.createElement('canvas');
+      c.width = W.w; c.height = W.h; c.getContext('2d').putImageData(out, 0, 0);
+      const nid = 'a' + uid();
+      doc.assets[nid] = { ...a, w: W.w, h: W.h, href: c.toDataURL('image/png') };
+      s.p.asset = nid;
+      close(); checkpoint(); fullRender();
+      msg('Fondo quitado. Ahora puedes vectorizar la imagen para cortarla o dejarla para grabar.');
+    };
+    const side = h('div', { class: 'imgtool-side' }, h('label', {}, 'Herramienta', toolSel), h('div', { class: 'swatch-row' }, 'Color del fondo ', swatch),
+      tolRow.el, h('label', { class: 'check' }, cont, ' Solo el fondo que toca el borde'), featRow.el, sizeRow.el, reset, status);
+    dialog.append(...head, h('div', { class: 'imgtool' }, h('div', { class: 'imgtool-view' }, view), side),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
   }
 
   function openBatch() {

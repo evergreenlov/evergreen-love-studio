@@ -347,3 +347,16 @@ button.wide { width: 100%; margin-top: 10px; }
 .snap-line { stroke: #d6336c; stroke-width: 1px; stroke-dasharray: 4 3; fill: none; pointer-events: none; }
 .guide-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; font-size: 12px; }
 .guides-box { margin: 10px 0 4px; }
+
+.imgtool-dialog { width: min(980px, 94vw); }
+.imgtool { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.imgtool-view { background: var(--canvas); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; justify-content: center; max-height: 62vh; overflow: auto; }
+.imgtool-canvas { max-width: 100%; max-height: 58vh; image-rendering: auto; cursor: crosshair; touch-action: none; }
+.imgtool-canvas.checker { background: conic-gradient(#cfd5d1 25%, #fff 0 50%, #cfd5d1 0 75%, #fff 0) 0 0 / 16px 16px; }
+.imgtool-side { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.imgtool-side label { display: flex; flex-direction: column; gap: 5px; }
+.imgtool-side label.check { flex-direction: row; align-items: center; gap: 8px; }
+.slider-row input { width: 100%; }
+.swatch { display: inline-block; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; }
+.swatch-row { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 760px) { .imgtool { grid-template-columns: 1fr; } }
