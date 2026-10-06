@@ -237,7 +237,7 @@
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
   const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'refuerzo', 'curva', 'trazo']);
-  const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros']);
+  const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros', 'puentes']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
   // Nombre sugerido al convertir una propiedad en parámetro
@@ -1540,7 +1540,7 @@
     const dr = Math.atan2(m[1], m[0]) / DEG;
     return items.map(it => ({
       op: it.op,
-      polys: it.polys.map(p => ({ ...p, pts: p.pts.map(q => apply(m, q)) })),
+      polys: it.polys.map(p => ({ ...p, pts: p.pts.map(q => apply(m, q)), ...(p.ref ? { ref: p.ref.map(q => apply(m, q)) } : {}) })),
       texts: it.texts.map(t => { const [x, y] = apply(m, [t.x, t.y]); return { ...t, x, y, rot: t.rot + dr }; }),
       images: (it.images || []).map(g => { const [x, y] = apply(m, [g.x, g.y]); return { ...g, x, y, rot: g.rot + dr }; }),
     }));
@@ -1695,10 +1695,51 @@
     }
     items = transformItems(items, m);
     if (m !== M_ID) for (const [id, it] of desc) desc.set(id, transformItems(it, m));
+    items = applyBridges(items, s);
     bb = bboxOfItems(items);
     const copies = repMatrices(s, bb);
     if (copies.length > 1) items = copies.flatMap(c => transformItems(items, c));
     return { id: s.id, items, desc, bbox: bboxOfItems(items) };
+  }
+
+  // Puentes: pequeños tramos sin cortar en el contorno de la pieza, para que no se mueva mientras el láser termina
+  let bridgeSeq = 0;
+  function bridgePieces(P, n, gap, id) {
+    const m = P.length, cum = [0];
+    for (let i = 0; i < m; i++) cum.push(cum[i] + Math.hypot(P[(i + 1) % m][0] - P[i][0], P[(i + 1) % m][1] - P[i][1]));
+    const L = cum[m];
+    if (!(L > n * gap * 3)) return null;
+    const segAt = c => { let k = 0; while (k < m - 1 && cum[k + 1] < c) k++; return k; };
+    const snap = c => { const k = segAt(c), a = cum[k], b = cum[k + 1]; return b - a >= gap * 1.6 ? Math.max(a + gap * 0.8, Math.min(b - gap * 0.8, c)) : c; };
+    const centers = Array.from({ length: n }, (_, i) => snap(L * (i + 0.5) / n)).sort((a, b) => a - b);
+    for (let i = 1; i < centers.length; i++) if (centers[i] - centers[i - 1] < gap * 1.5) return null;
+    const pointAt = s => { s = ((s % L) + L) % L; const k = segAt(s), a = P[k], b = P[(k + 1) % m], t = (s - cum[k]) / ((cum[k + 1] - cum[k]) || 1); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; };
+    const extract = (sa, sb) => {
+      const pts = [pointAt(sa)];
+      for (let lap = 0; lap < 2; lap++) for (let i = 0; i < m; i++) { const v = cum[i] + lap * L; if (v > sa + 1e-9 && v < sb - 1e-9) pts.push([P[i][0], P[i][1]]); }
+      pts.push(pointAt(sb));
+      return pts;
+    };
+    const ref = P.map(q => [q[0], q[1]]), out = [];
+    for (let i = 0; i < n; i++) {
+      const sa = centers[i] + gap / 2; let sb = centers[(i + 1) % n] - gap / 2; if (i === n - 1) sb += L;
+      if (sb - sa > 0.05) out.push({ closed: false, pts: extract(sa, sb), refId: id, ref });
+    }
+    return out.length ? out : null;
+  }
+  function applyBridges(items, s) {
+    const n = Math.round(num(s, 'puentes', 0) || 0);
+    if (!(n > 0) || !Number.isFinite(n)) return items;
+    const gap = s.p.puenteAncho && String(s.p.puenteAncho).trim() ? len(s, 'puenteAncho') : 1.5;
+    if (!(gap > 0)) return items;
+    return items.map(it => {
+      if (it.op !== 'corte') return it;
+      const closed = it.polys.filter(p => p.closed && p.pts.length >= 3);
+      if (!closed.length) return it;
+      const outer = closed.reduce((a, b) => shoelace(b.pts) > shoelace(a.pts) ? b : a);
+      const pieces = bridgePieces(outer.pts, Math.min(n, 40), gap, ++bridgeSeq);
+      return pieces ? { ...it, polys: [...it.polys.filter(p => p !== outer), ...pieces] } : it;
+    });
   }
 
   // Texto sobre una curva: cada letra se coloca (con su giro) sobre un arco o sobre el trazo de otra figura
@@ -3631,6 +3672,10 @@
       box.append(exprRow(s, 'off', 'Contorno ±'));
       if (!CL) box.append(h('p', { class: 'tip' }, 'No se encontró lib/clipper.js: el contorno está desactivado.'));
     }
+    if (!TYPES[s.type].open || s.type === 'hinge') {
+      box.append(exprRow(s, 'puentes', 'Puentes (cantidad)'), exprRow(s, 'puenteAncho', 'Ancho de cada puente'));
+      if (s.op === 'corte' && Math.round(num(s, 'puentes', 0) || 0) > 0) box.append(h('p', { class: 'tip' }, 'Los puentes son tramos del contorno que el láser no corta, para que la pieza no se mueva. Se rompen con la mano o con un cuchillo. En madera fina usa 3 o 4 puentes de 1 a 2 mm.'));
+    }
     box.append(propRow('Repetir', selectEl(REP_OPTS, s.p.rep || 'no', 'Repetir', v => {
       s.p.rep = v; repDefaults(s, v); checkpoint(); fullRender();
     })));
@@ -5236,22 +5281,32 @@
   const ptsBox = pts => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return { x0, y0, x1, y1 }; };
   // Contornos en el orden en que conviene cortarlos: primero lo de adentro (líneas, agujeros), después el contorno de cada pieza; pieza por pieza, de izquierda a derecha y de arriba abajo
   function orderContours(group) {
-    const cs = group.flatMap(it => it.polys.filter(p => p.pts.length >= 2).map(p => ({ p, b: ptsBox(p.pts), area: p.closed ? shoelace(p.pts) : 0, kids: [], parent: null })));
-    const closed = cs.filter(c => c.p.closed && c.p.pts.length >= 3);
+    // Los tramos de un contorno con puentes forman un solo contorno (se cortan juntos, al final de la pieza)
+    const byRef = new Map(), cs = [];
+    for (const it of group) for (const p of it.polys) {
+      if (p.pts.length < 2) continue;
+      if (p.ref) {
+        const key = p.refId + '|' + p.ref[0].join(',');
+        let c = byRef.get(key);
+        if (!c) { c = { pieces: [], b: ptsBox(p.ref), area: shoelace(p.ref), contain: p.ref, test: p.pts[0], kids: [], parent: null, solid: true }; byRef.set(key, c); cs.push(c); }
+        c.pieces.push(p);
+      } else cs.push({ pieces: [p], b: ptsBox(p.pts), area: p.closed ? shoelace(p.pts) : 0, contain: p.pts, test: p.pts[0], kids: [], parent: null, solid: !!(p.closed && p.pts.length >= 3) });
+    }
+    const closed = cs.filter(c => c.solid);
     const place = c => ({ row: Math.round(c.b.y0 / 25), x: c.b.x0 });
     const byPos = (a, b) => { const A = place(a), B = place(b); return A.row - B.row || A.x - B.x; };
-    if (closed.length > 800) return cs.sort((a, b) => a.area - b.area).map(c => c.p); // demasiados contornos: de los chicos a los grandes
+    if (closed.length > 800) return cs.sort((a, b) => a.area - b.area).flatMap(c => c.pieces);
     for (const c of cs) {
       let best = null;
       for (const d of closed) {
-        if (d === c || d.b.x0 > c.b.x0 || d.b.y0 > c.b.y0 || d.b.x1 < c.b.x1 || d.b.y1 < c.b.y1) continue;
-        if (c.p.closed && d.area <= c.area) continue;
-        if (!inPoly(c.p.pts[0], d.p.pts)) continue;
+        if (d === c || d.b.x0 > c.b.x0 + 1e-6 || d.b.y0 > c.b.y0 + 1e-6 || d.b.x1 < c.b.x1 - 1e-6 || d.b.y1 < c.b.y1 - 1e-6) continue;
+        if (c.solid && d.area <= c.area) continue;
+        if (!inPoly(c.test, d.contain)) continue;
         if (!best || d.area < best.area) best = d;
       }
       if (best) { c.parent = best; best.kids.push(c); }
     }
-    const out = [], visit = c => { for (const k of c.kids.sort(byPos)) visit(k); out.push(c.p); };
+    const out = [], visit = c => { for (const k of c.kids.sort(byPos)) visit(k); out.push(...c.pieces); };
     for (const r of cs.filter(c => !c.parent).sort(byPos)) visit(r);
     return out;
   }
