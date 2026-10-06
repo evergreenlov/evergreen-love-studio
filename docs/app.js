@@ -157,7 +157,9 @@
     polygon: { label: 'Polígono', props: [['x', 'Centro X'], ['y', 'Centro Y'], ['d', 'Diámetro'], ['n', 'Lados'],
       ['forma', 'Forma', { poligono: 'Polígono regular', estrella: 'Estrella' }], ['profEst', 'Profundidad de las puntas %'], ['redond', 'Redondear puntas'], ROT] },
     line: { label: 'Línea', open: true, props: [['x', 'X inicio'], ['y', 'Y inicio'], ['x2', 'X final'], ['y2', 'Y final']] },
-    text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['fuente', 'Tipografía', 'font'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'], ROT] },
+    text: { label: 'Texto', open: true, props: [['texto', 'Texto', 'text'], ['fuente', 'Tipografía', 'font'], ['x', 'X'], ['y', 'Y (base)'], ['tam', 'Tamaño'],
+      ['curva', 'Forma del texto', { no: 'Recto', arriba: 'Arco hacia arriba', abajo: 'Arco hacia abajo', trazo: 'Sobre un trazo (curva, línea o figura)' }], ['radioC', 'Radio del arco'],
+      ['trazo', 'Trazo donde va el texto', 'shape'], ['desde', 'Distancia desde el inicio del trazo'], ['sepTrazo', 'Separación del trazo (hacia arriba)'], ['espaciado', 'Espaciado extra entre letras'], ROT] },
     panel: {
       label: 'Panel con dedos',
       props: [['x', 'X'], ['y', 'Y'], ['w', 'Ancho'], ['h', 'Alto'], ['t', 'Grosor material'],
@@ -234,7 +236,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'refuerzo']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'refuerzo', 'curva', 'trazo']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -1441,6 +1443,11 @@
       case 'text': {
         const x = len(s, 'x'), y = len(s, 'y'), size = Math.abs(len(s, 'tam', 10)), str = String(s.p.texto || ''), rot = num(s, 'rot', 0) || 0;
         // El giro es alrededor del centro del texto (no de su esquina), como en cualquier programa de diseño
+        const curva = s.p.curva || 'no';
+        if (curva !== 'no' && str && Number.isFinite(x + y + size)) {
+          const placed = curvedTextItems(s, x, y, size, str);
+          if (placed) { it.texts.push(...placed); break; }
+        }
         let ax = x, ay = y;
         if (rot && Number.isFinite(rot)) [ax, ay] = apply(mR(rot, x + Math.max(size * 0.3, measureTextWidth(str, size, s.p.fuente)) / 2, y - size * 0.35), [x, y]);
         it.texts.push({ x: ax, y: ay, size, str, rot, font: s.p.fuente });
@@ -1692,6 +1699,61 @@
     const copies = repMatrices(s, bb);
     if (copies.length > 1) items = copies.flatMap(c => transformItems(items, c));
     return { id: s.id, items, desc, bbox: bboxOfItems(items) };
+  }
+
+  // Texto sobre una curva: cada letra se coloca (con su giro) sobre un arco o sobre el trazo de otra figura
+  let textPathDepth = 0;
+  function pathPolyline(id) {
+    const sh = byId(id);
+    if (!sh || textPathDepth > 2) return null;
+    textPathDepth++;
+    try {
+      const r = evalShape(sh);
+      const pl = r && r.items.flatMap(i => i.polys).filter(p => p.pts.length >= 2).sort((a, b) => b.pts.length - a.pts.length)[0];
+      if (!pl) return null;
+      const pts = pl.closed ? [...pl.pts, pl.pts[0]] : pl.pts;
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      return { pts, cum, total: cum[cum.length - 1] };
+    } catch (e) { return null; } finally { textPathDepth--; }
+  }
+  function curvedTextItems(s, x, y, size, str) {
+    const chars = [...str], font = s.p.fuente, track = s.p.espaciado && String(s.p.espaciado).trim() ? len(s, 'espaciado') : 0;
+    const wd = chars.map(c => measureTextWidth(c, size, font));
+    const total = wd.reduce((a, b) => a + b, 0) + track * (chars.length - 1);
+    if (!Number.isFinite(total) || !(total > 0)) return null;
+    const out = [], mk = (str1, px, py, rot) => ({ x: px, y: py, size, str: str1, rot, font, anchor: 'middle' });
+    let cum = 0;
+    if (s.p.curva === 'arriba' || s.p.curva === 'abajo') {
+      const R = Math.max(size * 0.8, Math.abs(s.p.radioC && String(s.p.radioC).trim() ? len(s, 'radioC') : 40));
+      if (!Number.isFinite(R)) return null;
+      const cx = x + total / 2, top = s.p.curva === 'arriba', cy = top ? y + R : y - R;
+      chars.forEach((c, i) => {
+        const sc = -total / 2 + cum + wd[i] / 2, th = sc / R;
+        cum += wd[i] + track;
+        if (c.trim() === '') return;
+        out.push(top ? mk(c, cx + R * Math.sin(th), cy - R * Math.cos(th), th / DEG) : mk(c, cx + R * Math.sin(th), cy + R * Math.cos(th), -th / DEG));
+      });
+      return out;
+    }
+    // sobre el trazo de otra figura
+    const path = s.p.trazo && s.p.trazo !== s.id ? pathPolyline(s.p.trazo) : null;
+    if (!path || !(path.total > 0)) return null;
+    const d0 = s.p.desde && String(s.p.desde).trim() ? len(s, 'desde') : 0, lift = s.p.sepTrazo && String(s.p.sepTrazo).trim() ? len(s, 'sepTrazo') : 0;
+    const at = d => {
+      let i = 1; while (i < path.cum.length - 1 && path.cum[i] < d) i++;
+      const a = path.pts[i - 1], b = path.pts[i], seg = path.cum[i] - path.cum[i - 1] || 1, t = Math.max(0, Math.min(1, (d - path.cum[i - 1]) / seg));
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, ang];
+    };
+    chars.forEach((c, i) => {
+      const sc = d0 + cum + wd[i] / 2;
+      cum += wd[i] + track;
+      if (c.trim() === '' || sc < 0 || sc + wd[i] / 2 > path.total + 1e-6) return;
+      const [px, py, ang] = at(sc);
+      out.push(mk(c, px + Math.sin(ang) * lift, py - Math.cos(ang) * lift, ang / DEG));
+    });
+    return out;
   }
 
   function evaluateAll() {
@@ -3366,6 +3428,15 @@
         box.append(propRow(label, selectEl(MODES, s.p.mode || 'grupo', label, v => { s.p.mode = v; checkpoint(); fullRender(); })));
         if (isPlainGroup) box.append(h('p', { class: 'tip' }, 'Cada objeto del grupo conserva su propia operación (corte, grabado o marcado).'));
         else if (s.p.mode === 'restar') box.append(h('p', { class: 'tip' }, 'Al primer objeto del grupo (el de más abajo en la lista) se le restan los demás.'));
+      } else if (s.type === 'text' && ((key === 'radioC' && !['arriba', 'abajo'].includes(s.p.curva)) || (['trazo', 'desde', 'sepTrazo'].includes(key) && s.p.curva !== 'trazo') || (key === 'espaciado' && (s.p.curva || 'no') === 'no'))) {
+        continue;
+      } else if (kind === 'shape') {
+        const sl = h('select', { 'aria-label': label }, h('option', { value: '' }, 'Elige una figura…'));
+        for (const o2 of allShapes()) if (o2.id !== s.id && o2.type !== 'text') sl.append(h('option', { value: o2.id }, o2.name));
+        sl.value = s.p[key] || '';
+        sl.addEventListener('change', () => { s.p[key] = sl.value; checkpoint(); fullRender(); });
+        box.append(propRow(label, sl));
+        if (!s.p[key]) box.append(h('p', { class: 'tip' }, 'Dibuja antes una línea, una curva (Pluma) o una figura, y elígela aquí: el texto sigue su recorrido.'));
       } else if (kind === 'font') {
         const sl = h('select', { 'aria-label': label });
         for (const f of FONTS) sl.append(h('option', { value: f.id, style: f.id === 'arial' ? null : `font-family:${fontCss(f.id)}` }, f.name));
