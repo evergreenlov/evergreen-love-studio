@@ -3520,6 +3520,11 @@
 
     if (s.type === 'box') { updateCompTip(s); updateFingerTip(s); }
     if (s.type === 'panel') updateFingerTip(s);
+    if (s.type === 'text') {
+      box.append(h('div', { class: 'insp-sub' }, 'Letras'),
+        h('button', { class: 'wide', onclick: () => withFonts(() => openWeldTool(s)), title: 'Une las letras en un solo contorno (cursivas, nombres para llaveros)' }, 'Soldar letras…'),
+        h('p', { class: 'tip' }, 'Funciona con las tipografías de la lista (no con Arial del sistema). Convierte el texto en curvas: después ya no se puede cambiar el texto.'));
+    }
     if (s.type === 'import') {
       const a = doc.assets && doc.assets[s.p.asset];
       if (a) {
@@ -4784,6 +4789,73 @@
     checkpoint(); fullRender();
     msg(`Recortado: ${made.length} figura(s).` + (empty.length ? ` Quedaron fuera: ${empty.join(', ')}.` : '') + (skipped.length ? ` No se pudo recortar: ${skipped.join(', ')}.` : ''));
   }
+
+  /* ================= Soldar letras (unir las letras en un solo contorno) ================= */
+  function roundGrow(paths, d) {
+    const co = new CL.ClipperOffset(2, 0.01 * SC);
+    co.AddPaths(paths, CL.JoinType.jtRound, CL.EndType.etClosedPolygon);
+    const sol = new CL.Paths();
+    co.Execute(sol, d * SC);
+    return sol;
+  }
+  async function openWeldTool(s) {
+    if (!s || s.type !== 'text') return;
+    const fid = s.p.fuente || 'arial';
+    if (fid === 'arial') { msg('Para soldar las letras elige una de las tipografías de la lista (no «Arial del sistema»): así se pueden convertir en curvas.'); return; }
+    try { await loadFont(fid); } catch (e) { msg('No se pudo cargar la tipografía.'); return; }
+    evaluateParams(); evaluateAll();
+    const r = evalCache.get(s.id);
+    if (!r) return;
+    const base = r.items.flatMap(it => fontOutlines(it).polys).filter(p => p.closed && p.pts.length >= 3);
+    if (!base.length) { msg('No hay letras que convertir: escribe el texto primero.'); return; }
+    const dialog = h('dialog', { class: 'batch-dialog imgtool-dialog', 'aria-label': 'Soldar letras' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const st = { grow: 0, fill: false, op: 'corte', keep: false };
+    const bb = ptsBoxAll(base), pad = 4, W = 760, sc = W / (bb.x1 - bb.x0 + 2 * pad), CW = Math.round((bb.x1 - bb.x0 + 2 * pad) * sc), CH = Math.max(60, Math.round((bb.y1 - bb.y0 + 2 * pad) * sc));
+    const cv = h('canvas', { class: 'imgtool-canvas', width: String(CW), height: String(CH) });
+    const status = h('p', { class: 'tip', role: 'status' });
+    let polys = [];
+    const compute = () => {
+      let u = normalize(toC(base));
+      if (st.grow > 0) u = roundGrow(u, st.grow);
+      polys = fromC(u);
+      if (st.fill) polys = polys.filter(p => !polys.some(q => q !== p && inPoly(p.pts[0], q.pts)));
+      const c = cv.getContext('2d');
+      c.clearRect(0, 0, CW, CH);
+      c.beginPath();
+      for (const p of polys) { p.pts.forEach(([x, y], i) => { const X = (x - bb.x0 + pad + (st.grow > 0 ? 0 : 0)) * sc, Y = (y - bb.y0 + pad) * sc; i ? c.lineTo(X, Y) : c.moveTo(X, Y); }); c.closePath(); }
+      c.fillStyle = st.op === 'grabado' ? 'rgba(0,0,0,0.8)' : 'rgba(224,48,30,0.15)'; c.fill('evenodd');
+      c.strokeStyle = '#e0301e'; c.lineWidth = 1.4; c.stroke();
+      const pieces = splitPieces(polys).length;
+      status.textContent = `${pieces} pieza(s) y ${polys.length} contorno(s)` + (pieces === 1 ? ': todo el texto queda unido en una sola pieza.' : `: las letras no se tocan, quedan ${pieces} piezas sueltas. Sube «Engrosar» para unirlas.`);
+    };
+    const growRow = sliderRow('Engrosar para unir letras (mm)', 0, 4, 0.1, 0, v => { st.grow = v * unitMM / unitMM; compute(); }, v => v.toFixed(1));
+    const fillCb = h('input', { type: 'checkbox' }); fillCb.onchange = () => { st.fill = fillCb.checked; compute(); };
+    const opSel = h('select', { 'aria-label': 'Resultado' }, h('option', { value: 'corte' }, 'Cortar el contorno (rojo)'), h('option', { value: 'grabado' }, 'Grabar relleno (negro)'));
+    opSel.onchange = () => { st.op = opSel.value; compute(); };
+    const keepCb = h('input', { type: 'checkbox' }); keepCb.onchange = () => { st.keep = keepCb.checked; };
+    const go = h('button', { class: 'primary' }, 'Soldar letras');
+    go.onclick = () => {
+      if (!polys.length) return;
+      const o = importObject(nextName((s.name || 'Texto') + ' soldado'), polys.map(p => ({ ...p, op: st.op })), []);
+      o.op = st.op;
+      const list = listOf(s.id), i = list.indexOf(s);
+      list.splice(st.keep ? i + 1 : i, st.keep ? 0 : 1, o);
+      sel = new Set([o.id]);
+      close(); checkpoint(); fullRender();
+      msg('Letras soldadas: ahora es un dibujo editable (ya no cambia con el texto). Puedes mover sus puntos o darle contorno.');
+    };
+    const side = h('div', { class: 'imgtool-side' }, growRow.el,
+      h('label', { class: 'check' }, fillCb, ' Rellenar los huecos de las letras (O, A, B…)'),
+      h('label', {}, 'Resultado', opSel), h('label', { class: 'check' }, keepCb, ' Conservar el texto original'), status);
+    dialog.append(h('h2', {}, 'Soldar letras'), h('p', { class: 'tip' }, 'Une las letras que se tocan o se enciman en un solo contorno, para que el láser no pase dos veces por el mismo lugar. Con «Engrosar» también une letras que quedan muy cerca.'),
+      h('div', { class: 'imgtool' }, h('div', { class: 'imgtool-view' }, cv), side),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    compute();
+  }
+  function ptsBoxAll(polys) { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of polys) for (const [x, y] of p.pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return { x0, y0, x1, y1 }; }
 
   function openBatch() {
     evaluateParams(); evaluateAll();
