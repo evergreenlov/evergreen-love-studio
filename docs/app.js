@@ -2501,6 +2501,61 @@
         h('button', { onclick: () => { for (const id of [...sel]) nodeShow.delete(id); nodeSel.clear(); buildInspector(); drawCanvas(); } }, 'Ocultar puntos'))];
   }
 
+  /* ----- Texto en arco: flecha para encorvarlo más o menos arrastrando ----- */
+  function textArcInfo(s) {
+    if (!s || s.type !== 'text' || !['arriba', 'abajo'].includes(s.p.curva)) return null;
+    const str = String(s.p.texto || '');
+    if (!str) return null;
+    const x = len(s, 'x'), y = len(s, 'y'), size = Math.abs(len(s, 'tam', 10)), track = s.p.espaciado && String(s.p.espaciado).trim() ? len(s, 'espaciado') : 0;
+    const chars = [...str], total = chars.reduce((a, c) => a + measureTextWidth(c, size, s.p.fuente), 0) + track * (chars.length - 1);
+    const R = Math.max(size * 0.8, Math.abs(s.p.radioC && String(s.p.radioC).trim() ? len(s, 'radioC') : 40));
+    if (![x, y, size, total, R].every(Number.isFinite) || !(total > 0)) return null;
+    const top = s.p.curva === 'arriba', cx = x + total / 2;
+    return { x, y, size, total, R, cx, cy: top ? y + R : y - R, top, arcDeg: Math.min(360, total / R / DEG) };
+  }
+  // Flechas ↕ en los dos extremos del texto: jálalas hacia abajo (o hacia arriba, si el arco va por abajo) para encorvarlo más
+  const ARC_OFF = 0.9; // la flecha queda debajo de la línea base, a esta distancia (en tamaños de letra)
+  function arcEnds(a) {
+    const th = Math.min(Math.PI, a.total / 2 / a.R), dx = a.R * Math.sin(th), y = a.top ? a.cy - a.R * Math.cos(th) : a.cy + a.R * Math.cos(th);
+    return [[a.cx - dx, y], [a.cx + dx, y]];
+  }
+  function drawArcHandle() {
+    if (tool !== 'select' || sel.size !== 1) return;
+    const s = byId([...sel][0]), a = textArcInfo(s);
+    if (!a) return;
+    const px = 1 / view.s;
+    arcEnds(a).forEach(([x, y], i) => {
+      const g = svgEl('g', { 'data-arc': s.id, class: 'arc-handle', transform: `translate(${r4(x)} ${r4(y + a.size * ARC_OFF)}) scale(${r4(px)})` }, layerOverlay);
+      svgEl('circle', { r: 12 }, g);
+      svgEl('path', { d: 'M0 -8L-4.5 -2.5H4.5ZM0 8L-4.5 2.5H4.5Z', class: 'arc-arrow' }, g);
+    });
+  }
+  function startArcDrag(id) { return { mode: 'arc', id, moved: false }; }
+  // Con el largo del texto fijo (arco) y cuánto baja el extremo, se calcula el radio
+  function radiusForDrop(half, drop) {
+    if (drop < 0.3) return 2000;
+    const g = th => half * (1 - Math.cos(th)) / th;
+    if (drop >= g(Math.PI)) return half / Math.PI;
+    let lo = 1e-4, hi = Math.PI;
+    for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; g(mid) < drop ? lo = mid : hi = mid; }
+    return half / ((lo + hi) / 2);
+  }
+  function applyArcDrag(d, p) {
+    const s = byId(d.id), a = textArcInfo(s);
+    if (!a) return;
+    const target = p.y - a.size * ARC_OFF, drop = a.top ? target - a.y : a.y - target;
+    s.p.radioC = fmt(Math.max(a.size * 0.8, Math.min(2000, radiusForDrop(a.total / 2, drop))) / unitMM, isInch() ? 3 : 2);
+    d.moved = true;
+    if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; evaluateParams(); drawCanvas(); });
+    $('#stCoords').textContent = `Arco de ${fmt(textArcInfo(s).arcDeg, 0)}° · radio ${s.p.radioC} ${unitLabel()}`;
+  }
+  function bendText(s, factor) {
+    const a = textArcInfo(s);
+    if (!a) return;
+    s.p.radioC = fmt(Math.max(a.size * 0.8, Math.min(2000, a.R * factor)) / unitMM, isInch() ? 3 : 2);
+    checkpoint(); fullRender();
+  }
+
   function drawOverlay() {
     layerOverlay.replaceChildren();
     drawGuides();
@@ -2523,6 +2578,7 @@
       const it = primitive(shapeFromDrag(drag.start, drag.cur, false));
       if (it && it.polys.length) svgEl('path', { d: pathD(it.polys), class: 'preview', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
+    drawArcHandle();
     drawPen();
     drawMeasures();
   }
@@ -2904,6 +2960,8 @@
     }
     if (e.button !== 0) return;
     const handle = tool === 'select' && e.target.closest && e.target.closest('[data-handle]');
+    const arcH = tool === 'select' && e.target.closest && e.target.closest('[data-arc]');
+    if (arcH) { drag = startArcDrag(arcH.dataset.arc); drag.start = p; return; }
     if (tool === 'select' && !handle && nodeShow.size) {
       const bh = bezHandleNear(p);
       if (bh) { drag = startBezDrag(bh); drag.start = p; return; }
@@ -3021,6 +3079,8 @@
       drag.g.pos = snapOn(e) ? snapV(v, e) : v;
       drag.del = drag.g.axis === 'x' ? e.clientX - r.left < RULER : e.clientY - r.top < RULER;
       drawOverlay();
+    } else if (drag.mode === 'arc') {
+      applyArcDrag(drag, p);
     } else if (drag.mode === 'bez') {
       applyBezDrag(drag, p, e);
     } else if (drag.mode === 'pen') {
@@ -3062,6 +3122,7 @@
     stage.classList.remove('panning');
     if (snapLines) { snapLines = null; drawOverlay(); }
     if (d.mode === 'guide') { if (d.del) doc.guides = doc.guides.filter(x => x !== d.g); checkpoint(); drawOverlay(); buildInspector(); }
+    else     if (d.mode === 'arc') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else     if (d.mode === 'bez') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
     else if (d.mode === 'pen') { drawOverlay(); }
     else if (d.mode === 'node') { if (d.raf) cancelAnimationFrame(d.raf); if (d.moved) { checkpoint(); buildInspector(); } drawCanvas(); }
@@ -3685,6 +3746,11 @@
     if (s.type === 'panel') updateFingerTip(s);
     if (s.type === 'text') {
       box.append(h('div', { class: 'insp-sub' }, 'Letras'),
+        ...(textArcInfo(s) ? [
+          h('p', { class: 'tip' }, `Arco de ${fmt(textArcInfo(s).arcDeg, 0)}°. Jala las flechas ↕ de los extremos del texto (en el lienzo) o usa los botones.`),
+          h('div', { class: 'btn-grid' },
+            h('button', { onclick: () => bendText(s, 0.8), title: 'Cierra la curva: el radio baja' }, '⌒ Encorvar más'),
+            h('button', { onclick: () => bendText(s, 1.25), title: 'Abre la curva: el radio sube' }, '⌣ Encorvar menos'))] : []),
         h('button', { class: 'wide', onclick: () => withFonts(() => openWeldTool(s)), title: 'Une las letras en un solo contorno (cursivas, nombres para llaveros)' }, 'Soldar letras…'),
         h('p', { class: 'tip' }, 'Funciona con las tipografías de la lista (no con Arial del sistema). Convierte el texto en curvas: después ya no se puede cambiar el texto.'));
     }
