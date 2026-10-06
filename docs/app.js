@@ -3241,6 +3241,118 @@
     if (p) p.expr = v; else doc.params.push({ name, expr: v });
     checkpoint(); fullRender();
   }
+  /* ================= Biblioteca de materiales (tus valores del láser) ================= */
+  const MAT_KEY = 'creaciones-evergreen:materials';
+  const BUILTIN_MATS = [
+    { id: 'basswood', name: 'Basswood (tilo)', thick: [3, 3.175, 6] }, { id: 'walnut', name: 'Walnut (nogal)', thick: [3, 6] },
+    { id: 'mahogany', name: 'Mahogany (caoba)', thick: [3, 6] }, { id: 'abedul', name: 'Contrachapado de abedul (plywood)', thick: [3, 4, 6] },
+    { id: 'mdf', name: 'MDF', thick: [3, 6] }, { id: 'bambu', name: 'Bambú', thick: [3] }, { id: 'acrilico', name: 'Acrílico', thick: [2, 3, 5] },
+    { id: 'carton', name: 'Cartón / cartulina', thick: [1, 1.5] }, { id: 'cuero', name: 'Cuero', thick: [2] }, { id: 'fieltro', name: 'Fieltro', thick: [3] },
+  ];
+  const loadMats = () => { try { return JSON.parse(localStorage.getItem(MAT_KEY) || '{}') || {}; } catch (e) { return {}; } };
+  const saveMats = m => { try { localStorage.setItem(MAT_KEY, JSON.stringify(m)); return true; } catch (e) { return false; } };
+  function allMaterials() {
+    const st = loadMats(), out = BUILTIN_MATS.map(m => ({ ...m, ...(st[m.id] || {}), thick: [...new Set([...(m.thick), ...((st[m.id] && st[m.id].thick) || [])])].sort((a, b) => a - b) }));
+    for (const [id, m] of Object.entries(st)) if (m.custom && !BUILTIN_MATS.some(b => b.id === id)) out.push({ id, ...m, thick: m.thick || [] });
+    return out;
+  }
+  function currentMaterial() {
+    const all = allMaterials();
+    return all.find(m => m.id === doc.materialId) || all.find(m => m.name === doc.wood) || null;
+  }
+  const thickKey = mm => fmt(mm, 2);
+  function materialSettings(mat, tMM) { const st = loadMats(), rec = st[mat.id] || {}; return (rec.byThick && rec.byThick[thickKey(tMM)]) || null; }
+  // Nota con el material y tus valores, para los archivos que exportas (los programas de corte la ignoran)
+  function materialNote() {
+    const mat = currentMaterial();
+    if (!mat) return '';
+    const tMM = vars.grosor !== undefined ? vars.grosor * unitMM : null;
+    const set = tMM ? materialSettings(mat, tMM) : null;
+    const parts = [`Material: ${mat.name}${tMM ? ' ' + fmt(tMM, 2) + ' mm' : ''}`];
+    if (set) for (const op of ['corte', 'grabado', 'marcado']) { const v = set[op]; if (v && (v.p || v.v)) parts.push(`${op}: ${v.p ? v.p + '% ' : ''}${v.v ? v.v + ' mm/s ' : ''}${v.n && v.n > 1 ? v.n + ' pasadas' : ''}`.trim()); }
+    if (set && set.notas) parts.push(set.notas.replace(/[-<>&\r\n]+/g, ' '));
+    return parts.join(' · ');
+  }
+  function chooseMaterial(id) {
+    const mat = allMaterials().find(m => m.id === id);
+    if (!mat) return;
+    doc.materialId = id; doc.wood = mat.name;
+    const st = loadMats(), rec = st[id] || {};
+    const gMM = vars.grosor !== undefined ? vars.grosor * unitMM : null;
+    if (rec.kerf > 0) { const q = doc.params.find(p => p.name === 'kerf'); const v = fmt(rec.kerf / unitMM, isInch() ? 4 : 3); if (q) q.expr = v; else doc.params.push({ name: 'kerf', expr: v }); }
+    if (mat.thick.length && (gMM === null || !mat.thick.some(t => Math.abs(t - gMM) < 0.01)) && doc.params.some(p => p.name === 'grosor')) {
+      const q = doc.params.find(p => p.name === 'grosor'); q.expr = fmt(mat.thick[0] / unitMM, isInch() ? 4 : 3);
+    }
+    checkpoint(); fullRender();
+    msg(`Material: ${mat.name}.` + (rec.kerf > 0 ? ` Kerf ${fmt(rec.kerf, 3)} mm de tu biblioteca.` : ' Aún no guardaste tus valores del láser para él: usa «Mis ajustes del láser…».'));
+  }
+  function openMaterialDialog(isNew) {
+    evaluateParams();
+    const st = loadMats();
+    let mat = isNew ? null : currentMaterial();
+    const tMM = vars.grosor !== undefined ? vars.grosor * unitMM : 3;
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Material y ajustes del láser' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const name = h('input', { value: mat ? mat.name : '', placeholder: 'Ej.: Cerezo 3 mm' });
+    if (mat && BUILTIN_MATS.some(b => b.id === mat.id)) name.disabled = true;
+    const thick = h('input', { type: 'number', step: 'any', min: '0.1', value: fmt(tMM / unitMM, isInch() ? 4 : 3) });
+    const rec = mat && st[mat.id] || {};
+    const kerf = h('input', { type: 'number', step: 'any', min: '0', value: rec.kerf > 0 ? String(fmt(rec.kerf / unitMM, isInch() ? 4 : 3)) : '' , placeholder: isInch() ? '0.004' : '0.1' });
+    const cur = mat ? materialSettings(mat, tMM) || {} : {};
+    const field = (op, key, ph) => h('input', { type: 'number', step: 'any', min: '0', value: cur[op] && cur[op][key] ? String(cur[op][key]) : '', placeholder: ph, 'aria-label': `${op} ${key}` });
+    const rows = { corte: [field('corte', 'p', '%'), field('corte', 'v', 'mm/s'), field('corte', 'n', '1')], grabado: [field('grabado', 'p', '%'), field('grabado', 'v', 'mm/s'), field('grabado', 'n', '1')], marcado: [field('marcado', 'p', '%'), field('marcado', 'v', 'mm/s'), field('marcado', 'n', '1')] };
+    const notes = h('textarea', { rows: '3', placeholder: 'Ej.: probado con el soplador al máximo, sale bien con 2 pasadas' }); notes.value = cur.notas || '';
+    const status = h('p', { class: 'tip', role: 'status' });
+    const table = h('table', { class: 'mat-table' }, h('tr', {}, h('th', {}, ''), h('th', {}, 'Potencia %'), h('th', {}, 'Velocidad mm/s'), h('th', {}, 'Pasadas')),
+      ...Object.entries(rows).map(([op, cells]) => h('tr', {}, h('td', {}, op[0].toUpperCase() + op.slice(1)), ...cells.map(c => h('td', {}, c)))));
+    const save = h('button', { class: 'primary' }, 'Guardar');
+    save.onclick = () => {
+      const nm = name.value.trim(), tm = parseFloat(thick.value) * unitMM, km = kerf.value === '' ? 0 : parseFloat(kerf.value) * unitMM;
+      if (!nm) { status.textContent = 'Ponle un nombre al material.'; return; }
+      if (!(tm > 0)) { status.textContent = 'Escribe el grosor real de la madera.'; return; }
+      let id = mat ? mat.id : 'u-' + uid();
+      const s2 = loadMats(), r = s2[id] || {};
+      if (!BUILTIN_MATS.some(b => b.id === id)) { r.custom = true; r.name = nm; }
+      r.thick = [...new Set([...(r.thick || []), +fmt(tm, 2)])].sort((a, b) => a - b);
+      if (km > 0) r.kerf = km; else delete r.kerf;
+      r.byThick = r.byThick || {};
+      const sv = {}; for (const [op, cells] of Object.entries(rows)) { const [p, v, n] = cells.map(c => parseFloat(c.value)); if (p || v || n) sv[op] = { p: p || 0, v: v || 0, n: n || 1 }; }
+      if (notes.value.trim()) sv.notas = notes.value.trim();
+      if (Object.keys(sv).length) r.byThick[thickKey(tm)] = sv; else delete r.byThick[thickKey(tm)];
+      s2[id] = r;
+      if (!saveMats(s2)) { status.textContent = 'No se pudo guardar en este navegador.'; return; }
+      doc.materialId = id; doc.wood = nm;
+      setParamMM('grosor', tm);
+      if (km > 0) setParamMM('kerf', km);
+      close(); msg(`Guardado «${nm}» (${fmt(tm, 2)} mm). Tus valores se recuerdan en este navegador y salen como nota en los archivos exportados.`);
+    };
+    const del = mat && !BUILTIN_MATS.some(b => b.id === mat.id) ? h('button', { class: 'danger', onclick: () => { const s2 = loadMats(); delete s2[mat.id]; saveMats(s2); if (doc.materialId === mat.id) doc.materialId = null; close(); fullRender(); msg('Material borrado de tu biblioteca.'); } }, 'Borrar este material') : null;
+    dialog.append(h('h2', {}, isNew ? 'Nuevo material' : 'Mis ajustes del láser'),
+      h('p', { class: 'tip' }, 'Escribe los valores que TÚ probaste en tu xTool con este material y este grosor. La app los recuerda (en este navegador) y los pone como nota en los SVG y DXF que exportas. Haz siempre una prueba en un recorte antes de cortar la pieza buena.'),
+      h('label', {}, 'Material', name), h('div', { class: 'nest-grid' }, h('label', {}, `Grosor real (${unitLabel()})`, thick), h('label', {}, `Kerf medido (${unitLabel()})`, kerf)),
+      table, h('label', {}, 'Notas', notes), status, h('div', { class: 'dialog-actions' }, ...(del ? [del] : []), h('button', { onclick: close }, 'Cancelar'), save));
+    document.body.append(dialog); dialog.showModal();
+  }
+  // Plantilla de prueba: ranuras de distinto ancho para medir el kerf de tu madera
+  function kerfTestTemplate(units, sheet) {
+    const d = newDoc(units);
+    if (sheet) d.sheet = { ...sheet };
+    const u = mm => fmt(units === 'in' ? mm / 25.4 : mm, units === 'in' ? 4 : 3);
+    d.name = 'Prueba de kerf (ajuste de ranuras)';
+    d.params = [['grosor', units === 'in' ? '0.118' : '3']].map(([name, expr]) => ({ name, expr }));
+    const deltas = [-0.4, -0.3, -0.25, -0.2, -0.15, -0.1, -0.05, 0, 0.05], step = 12, x0 = 12;
+    const W = x0 * 2 + (deltas.length - 1) * step, kids = [node('rect', 'Placa', 'corte', { x: '0', y: '0', w: u(W), h: u(60), r: '2', rot: '0' })];
+    deltas.forEach((dl, i) => {
+      const cx = x0 + i * step;
+      kids.push(node('rect', `Ranura ${dl.toFixed(2)}`, 'corte', { x: `${u(cx)} - (grosor + (${u(dl)}))/2`, y: u(22), w: `grosor + (${u(dl)})`, h: u(26), r: '0', rot: '0' }));
+    });
+    d.shapes = [node('group', 'Placa con ranuras', 'corte', { mode: 'restar', x: '0', y: '0', rot: '0' }, kids)];
+    deltas.forEach((dl, i) => d.shapes.push(node('text', `Número ${dl.toFixed(2)}`, 'grabado', { texto: dl.toFixed(2), fuente: 'arial', x: u(x0 + i * step - 4), y: u(16), tam: u(3.5), rot: '0' })));
+    d.shapes.push(node('text', 'Instrucción', 'grabado', { texto: 'Prueba tu madera: la ranura donde entra justa da el kerf = -(número)', fuente: 'arial', x: u(3), y: u(56), tam: u(2.6), rot: '0' }));
+    return d;
+  }
+
   function materialSection() {
     const gMM = vars.grosor !== undefined ? vars.grosor * unitMM : null;
     const near = THICKNESSES.find(([mm]) => gMM !== null && Math.abs(mm - gMM) < 0.005);
@@ -3252,10 +3364,16 @@
     kIn.addEventListener('change', () => { const v = parseFloat(kIn.value); if (v >= 0) setParamMM('kerf', v * unitMM); else fullRender(); });
     return h('div', { class: 'material-box' },
       h('div', { class: 'insp-sub' }, 'Material'),
-      propRow('Madera', selectEl(Object.fromEntries(WOODS.map(w => [w, w])), doc.wood || WOODS[0], 'Madera', v => { doc.wood = v; checkpoint(); })),
+      propRow('Material', (() => {
+        const cm = currentMaterial(), opts2 = Object.fromEntries(allMaterials().map(m => [m.id, m.name]));
+        opts2.__nuevo = '＋ Nuevo material…';
+        return selectEl(opts2, cm ? cm.id : '', 'Material', v => { if (v === '__nuevo') { openMaterialDialog(true); fullRender(); } else chooseMaterial(v); });
+      })()),
+      h('button', { class: 'wide', onclick: () => openMaterialDialog(false), title: 'Guarda la potencia y la velocidad que te funcionaron para este material y grosor' }, 'Mis ajustes del láser…'),
       propRow('Grosor', selectEl(opts, near ? String(near[0]) : '', 'Grosor de la madera', v => { if (v !== '') setParamMM('grosor', parseFloat(v)); })),
       propRow(`Grosor real (${unitLabel()})`, gIn),
       propRow(`Kerf (${unitLabel()})`, kIn),
+      (() => { const nt = materialNote(); return nt ? h('p', { class: 'tip' }, nt) : null; })(),
       h('p', { class: 'tip' }, 'Mide tu madera con un calibre y escribe el grosor real. Todas las cajas, dedos y ranuras se recalculan solas con ese grosor. La especie (basswood, walnut, mahogany) no cambia las medidas, solo el grosor; el kerf sí puede variar un poco por madera.'));
   }
 
@@ -5262,6 +5380,7 @@
       '<?xml version="1.0" encoding="UTF-8"?>',
       `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${r4(w)}mm" height="${r4(hgt)}mm" viewBox="${r4(x)} ${r4(y)} ${r4(w)} ${r4(hgt)}">`,
       `<!-- ${esc(doc.name)} · Evergreen Love Studio · rojo = corte, negro = grabado, azul = marcado -->`,
+      ...(materialNote() ? [`<!-- ${esc(materialNote())} -->`] : []),
       // Copia del diseño editable: al abrir este SVG en Evergreen Love Studio se recupera todo (los programas de corte la ignoran)
       `<metadata id="evergreen-love-studio">${designPayload()}</metadata>`,
     ];
@@ -5313,6 +5432,7 @@
     // Copia del diseño editable en comentarios (código 999), que los programas de CAD y corte ignoran
     const payload = designPayload();
     g(999, 'Evergreen Love Studio: ' + dxfStr(doc.name || ''));
+    if (materialNote()) g(999, dxfStr(materialNote()));
     for (let i = 0; i < payload.length; i += 200) g(999, 'ELS:' + payload.slice(i, i + 200));
     g(0, 'SECTION'); g(2, 'HEADER');
     g(9, '$ACADVER'); g(1, 'AC1009');
@@ -6226,6 +6346,7 @@
     keychain: keychainTemplate,
     coasters: coasterTemplate,
     hinge: hingeTemplate,
+    'kerf-test': kerfTestTemplate,
   };
 
   /* ================= Vista 3D (Three.js en lib/) ================= */

@@ -369,3 +369,7 @@ button.wide { width: 100%; margin-top: 10px; }
 #objects li.is-hidden { opacity: .5; }
 #objects li.is-locked .type::after { content: ' · bloqueado'; }
 .layer-btns { display: inline-flex; gap: 6px; }
+
+.mat-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+.mat-table th, .mat-table td { padding: 4px 6px; text-align: left; }
+.mat-table input { width: 100%; box-sizing: border-box; }
