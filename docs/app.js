@@ -1645,7 +1645,7 @@
     let items;
     const desc = new Map();
     if (s.type === 'group') {
-      const kids = (s.children || []).map(evalShape).filter(Boolean);
+      const kids = (s.children || []).filter(k => !k.hidden).map(evalShape).filter(Boolean);
       for (const k of kids) {
         for (const [id, it] of k.desc) desc.set(id, it);
         desc.set(k.id, k.items);
@@ -1802,8 +1802,8 @@
     layerShapes.replaceChildren();
     for (const s of doc.shapes) {
       const r = evalCache.get(s.id);
-      if (!r || !r.items.length) continue;
-      const grp = svgEl('g', { 'data-id': s.id }, layerShapes);
+      if (!r || !r.items.length || s.hidden) continue;
+      const grp = svgEl('g', { 'data-id': s.id, style: s.locked ? 'pointer-events:none' : null }, layerShapes);
       renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true);
     }
     drawOverlay();
@@ -2173,7 +2173,8 @@
     const xs = [0, doc.sheet.w / 2, doc.sheet.w], ys = [0, doc.sheet.h / 2, doc.sheet.h];
     for (const g of doc.guides || []) (g.axis === 'x' ? xs : ys).push(g.pos);
     for (const [id, r] of evalCache) {
-      if (exclude.has(id) || !r.bbox) continue;
+      const shx = byId(id);
+      if (exclude.has(id) || !r.bbox || (shx && shx.hidden)) continue;
       const b = r.bbox;
       xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h);
     }
@@ -2642,6 +2643,7 @@
     const b = selectionBox();
     if (!ts.length || !b) return;
     if (ts.some(t => nodeShow.has(t.id))) return; // con los puntos visibles se editan puntos, no se escala
+    if (ts.some(t => t.locked)) return;
     const px = 1 / view.s, hs = 9 * px, pad = 3 * px;
     const canScale = ts.every(s => SCALABLE.has(s.type));
     const canRotate = ts.every(s => s.type !== 'line');
@@ -2835,7 +2837,7 @@
         const insideSel = [...sel].some(sid => sid !== id && topOf(sid) && topOf(sid).id === id);
         if (e.shiftKey) { sel.has(id) ? sel.delete(id) : sel.add(id); }
         else if (!sel.has(id) && !insideSel) sel = new Set([id]);
-        drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(Boolean).map(s => ({ s, p: { ...s.p } })) };
+        drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(s => s && !s.locked).map(s => ({ s, p: { ...s.p } })) };
         buildInspector(); buildObjects(); drawCanvas();
       } else {
         drag = { mode: 'marquee', start: p, cur: p, base: e.shiftKey ? new Set(sel) : new Set() };
@@ -2939,7 +2941,8 @@
       const m = rectFrom(drag.start, drag.cur);
       sel = new Set(drag.base);
       for (const [id, r] of evalCache) {
-        const b = r.bbox;
+        const b = r.bbox, sh = byId(id);
+        if (sh && (sh.hidden || sh.locked)) continue;
         if (b && b.x < m.x + m.w && b.x + b.w > m.x && b.y < m.y + m.h && b.y + b.h > m.y) sel.add(id);
       }
       drawCanvas();
@@ -3455,7 +3458,8 @@
           box.append(h('div', { class: 'insp-sub' }, 'Editar la imagen'),
             h('div', { class: 'btn-grid' },
               h('button', { class: 'primary', onclick: () => openBgTool(s), title: 'Quita el fondo por color o con un pincel' }, 'Quitar fondo…'),
-              h('button', { class: 'primary', onclick: () => openTraceTool(s), title: 'Convierte la imagen en contornos que se pueden cortar o grabar' }, 'Vectorizar…')));
+              h('button', { class: 'primary', onclick: () => openTraceTool(s), title: 'Convierte la imagen en contornos que se pueden cortar o grabar' }, 'Vectorizar…'),
+              h('button', { class: 'primary', onclick: () => openCropTool(s), title: 'Recorta la imagen con un recuadro' }, 'Recortar…')));
         }
         if (a.realW) box.append(h('button', { class: 'wide', onclick: () => { s.p.w = fmt(a.realW / unitMM); s.p.prop = 'si'; checkpoint(); fullRender(); } }, 'Volver al tamaño original'));
       }
@@ -3484,6 +3488,8 @@
     const list = listOf(s.id), idx = list.indexOf(s);
     box.append(h('div', { class: 'insp-actions' },
       h('button', { onclick: duplicateSel }, 'Duplicar'),
+      h('button', { onclick: () => toggleLayer(s, 'hidden'), title: 'Oculta la figura: no se ve ni se exporta' }, s.hidden ? 'Mostrar' : 'Ocultar'),
+      h('button', { onclick: () => toggleLayer(s, 'locked'), title: 'Bloquea la figura: no se puede mover por accidente' }, s.locked ? 'Desbloquear' : 'Bloquear'),
       s.type === 'group' || SEPARABLE.has(s.type) ? h('button', { onclick: ungroupSel, title: 'Convierte cada pieza en un objeto independiente (Ctrl+Shift+G)' }, 'Desagrupar') : null,
       h('button', { class: 'icon-btn', title: 'Subir en la lista (queda encima)', 'aria-label': 'Subir', disabled: idx >= list.length - 1 ? '' : null, onclick: () => reorder(1) }, '↑'),
       h('button', { class: 'icon-btn', title: 'Bajar en la lista (queda debajo)', 'aria-label': 'Bajar', disabled: idx <= 0 ? '' : null, onclick: () => reorder(-1) }, '↓'),
@@ -3777,9 +3783,35 @@
   }
 
   /* ================= Panel: Objetos ================= */
+  /* ----- Capas: ocultar y bloquear figuras ----- */
+  const ICON_EYE = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 3l18 18M10.6 6.1A9.7 9.7 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 4M6.5 6.9A17 17 0 0 0 2 12s4 7 10 7c1.6 0 3-.4 4.3-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  const ICON_LOCK = '<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+  const ICON_UNLOCK = '<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></svg>';
+  function layerBtn(svg, title, active, onclick) {
+    const b = h('button', { class: 'layer-btn' + (active ? ' on' : ''), title, 'aria-label': title, onclick: e => { e.stopPropagation(); onclick(); } });
+    b.innerHTML = svg;
+    return b;
+  }
+  function toggleLayer(s, key) {
+    s[key] = !s[key];
+    if (key === 'locked' && s.locked) nodeShow.delete(s.id);
+    checkpoint(); fullRender();
+  }
+  function layerButtons() {
+    const all = [...allShapes()];
+    const anyHidden = all.some(s => s.hidden), anyLocked = all.some(s => s.locked);
+    const box = $('#layerBtns');
+    if (!box) return;
+    box.replaceChildren();
+    if (anyHidden) box.append(h('button', { class: 'small', onclick: () => { all.forEach(s => { s.hidden = false; }); checkpoint(); fullRender(); } }, 'Mostrar todo'));
+    if (anyLocked) box.append(h('button', { class: 'small', onclick: () => { all.forEach(s => { s.locked = false; }); checkpoint(); fullRender(); } }, 'Desbloquear todo'));
+  }
+
   function buildObjects() {
     const ul = $('#objects');
     ul.replaceChildren();
+    layerButtons();
     if (!doc.shapes.length) {
       ul.append(h('li', { class: 'empty' }, 'Aún no hay objetos. Dibuja con las herramientas de la izquierda.'));
       return;
@@ -3789,14 +3821,15 @@
         const type = s.type === 'group' ? `Grupo · ${MODES[s.p.mode || 'grupo']}` : TYPES[s.type].label;
         const isPlain = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
         ul.append(h('li', {
-          class: (sel.has(s.id) ? 'selected' : '') + (depth ? ' child' : ''),
+          class: (sel.has(s.id) ? 'selected' : '') + (depth ? ' child' : '') + (s.hidden ? ' is-hidden' : '') + (s.locked ? ' is-locked' : ''),
           style: depth ? `padding-left:${8 + depth * 14}px` : null,
           onclick: e => {
             if (e.shiftKey) { sel.has(s.id) ? sel.delete(s.id) : sel.add(s.id); }
             else sel = new Set([s.id]);
             buildInspector(); buildObjects(); drawCanvas();
           },
-        }, h('span', {}, isPlain ? h('span', { class: 'dot group' }) : h('span', { class: 'dot op-' + s.op }), s.name), h('span', { class: 'type' }, type)));
+        }, h('span', {}, isPlain ? h('span', { class: 'dot group' }) : h('span', { class: 'dot op-' + s.op }), s.name), h('span', { class: 'type' }, type),
+          h('span', { class: 'layer-ctrls' }, layerBtn(s.hidden ? ICON_EYE_OFF : ICON_EYE, s.hidden ? 'Mostrar' : 'Ocultar', !!s.hidden, () => toggleLayer(s, 'hidden')), layerBtn(s.locked ? ICON_LOCK : ICON_UNLOCK, s.locked ? 'Desbloquear' : 'Bloquear (no se puede mover)', !!s.locked, () => toggleLayer(s, 'locked')))));
         if (s.children) add(s.children, depth + 1);
       }
     };
@@ -3878,6 +3911,7 @@
   function recortarSection(shapes) {
     const hasLine = shapes.filter(s => s.type === 'line').length === 1 && shapes.some(s => s.type !== 'line');
     return [h('div', { class: 'insp-sub' }, 'Recortar'),
+      h('button', { class: 'wide', title: 'Las figuras elegidas se quedan solo con la parte que cae dentro de la figura de más arriba', onclick: cropWithShape }, 'Recortar con la figura de encima'),
       h('button', { class: hasLine ? 'primary wide' : 'wide', title: 'Elige una línea dibujada sobre la figura y la figura: se divide en piezas independientes', onclick: divideWithLine }, 'Dividir con la línea'),
       hasLine ? null : h('p', { class: 'tip' }, 'Dibuja una línea que cruce la figura, elige la línea y la figura (Shift + clic) y pulsa el botón. Para quitar la parte que se cruza usa «Excluir», o «Restar» para recortar un agujero.')];
   }
@@ -4162,7 +4196,8 @@
   function runNest(o) {
     evaluateParams(); evaluateAll();
     let roots = selectedRoots();
-    if (!roots.length) roots = [...doc.shapes];
+    if (!roots.length) roots = doc.shapes.filter(s => !s.hidden);
+    roots = roots.filter(s => !s.hidden && !s.locked);
     const boxes = roots.filter(s => SEPARABLE.has(s.type));
     if (boxes.length) {
       if (!confirm(`Para acomodar mejor, ${boxes.length > 1 ? 'las cajas se separan' : '«' + boxes[0].name + '» se separa'} en piezas independientes (dejan de cambiar con los parámetros). Deshacer las vuelve a juntar. ¿Continuar?`)) return false;
@@ -4543,6 +4578,135 @@
     document.body.append(dialog); dialog.showModal();
   }
 
+  /* ================= Recortar (crop) ================= */
+  // Aplica un recorte (en píxeles de trabajo) a la imagen de una figura, dejando lo que queda en su mismo lugar
+  function applyImageCrop(s, a, W, r) {
+    const x = len(s, 'x'), y = len(s, 'y'), wmm = Math.abs(len(s, 'w')), hmm = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : wmm * a.h / a.w;
+    const kx = wmm / W.w, ky = hmm / W.h;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(r.w)); c.height = Math.max(1, Math.round(r.h));
+    c.getContext('2d').drawImage(W.c, Math.round(r.x), Math.round(r.y), c.width, c.height, 0, 0, c.width, c.height);
+    const nid = 'a' + uid();
+    doc.assets[nid] = { ...a, w: c.width, h: c.height, href: c.toDataURL('image/png'), realW: a.realW ? a.realW * c.width / W.w : a.realW };
+    s.p.asset = nid;
+    s.p.x = fmt((x + Math.round(r.x) * kx) / unitMM); s.p.y = fmt((y + Math.round(r.y) * ky) / unitMM);
+    s.p.w = fmt(c.width * kx / unitMM, 3);
+    if (s.p.prop === 'no') s.p.h = fmt(c.height * ky / unitMM, 3);
+  }
+  async function openCropTool(s) {
+    const a = doc.assets[s.p.asset];
+    if (!a || a.kind !== 'image') return;
+    if ((num(s, 'rot', 0) || 0) !== 0) { msg('Pon la rotación de la imagen en 0° para recortarla.'); return; }
+    let img;
+    try { img = await loadImage(a.href); } catch (e) { msg('No se pudo leer la imagen.'); return; }
+    const W = workCanvas(img, 1600);
+    const { dialog, close, head } = imageDialog('Recortar imagen', 'Arrastra el recuadro o sus bordes y esquinas para elegir lo que se queda. Arrastra fuera del recuadro para dibujar uno nuevo.');
+    let r = { x: W.w * 0.1, y: W.h * 0.1, w: W.w * 0.8, h: W.h * 0.8 }, ratio = 0, act = null;
+    const view = h('canvas', { class: 'imgtool-canvas' });
+    view.width = W.w; view.height = W.h;
+    const info = h('p', { class: 'tip', role: 'status' });
+    const clamp = () => {
+      r.w = Math.max(8, Math.min(W.w, r.w)); r.h = Math.max(8, Math.min(W.h, r.h));
+      r.x = Math.max(0, Math.min(W.w - r.w, r.x)); r.y = Math.max(0, Math.min(W.h - r.h, r.y));
+    };
+    const draw = () => {
+      const c = view.getContext('2d');
+      c.clearRect(0, 0, W.w, W.h); c.drawImage(W.c, 0, 0);
+      c.fillStyle = 'rgba(0,0,0,0.5)'; c.beginPath(); c.rect(0, 0, W.w, W.h); c.rect(r.x, r.y, r.w, r.h); c.fill('evenodd');
+      const f = W.w / 700 + 0.5;
+      c.strokeStyle = '#fff'; c.lineWidth = 2 * f; c.strokeRect(r.x, r.y, r.w, r.h);
+      c.fillStyle = '#fff'; c.strokeStyle = '#2f7d4f'; c.lineWidth = 1.5 * f;
+      for (const [hx, hy] of handles()) { c.beginPath(); c.rect(hx - 5 * f, hy - 5 * f, 10 * f, 10 * f); c.fill(); c.stroke(); }
+      const k = a.realW ? a.realW / W.w : 0;
+      info.textContent = `Recorte: ${Math.round(r.w)} × ${Math.round(r.h)} px (${fmt(r.w / W.w * 100, 0)} % del ancho).`;
+    };
+    const handles = () => [[r.x, r.y], [r.x + r.w / 2, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h / 2], [r.x + r.w, r.y + r.h], [r.x + r.w / 2, r.y + r.h], [r.x, r.y + r.h], [r.x, r.y + r.h / 2]];
+    const NAMES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+    const pos = e => { const b = view.getBoundingClientRect(); return [(e.clientX - b.left) * W.w / b.width, (e.clientY - b.top) * W.h / b.height, W.w / b.width]; };
+    view.addEventListener('pointerdown', e => {
+      const [px, py, f] = pos(e);
+      const hs = handles(), hi = hs.findIndex(([x, y]) => Math.abs(x - px) < 12 * f && Math.abs(y - py) < 12 * f);
+      view.setPointerCapture(e.pointerId);
+      if (hi >= 0) act = { kind: NAMES[hi], r0: { ...r } };
+      else if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) act = { kind: 'move', r0: { ...r }, sx: px, sy: py };
+      else act = { kind: 'new', sx: px, sy: py };
+    });
+    view.addEventListener('pointermove', e => {
+      if (!act) return;
+      const [px, py] = pos(e), o = act.r0;
+      if (act.kind === 'move') { r.x = o.x + px - act.sx; r.y = o.y + py - act.sy; clamp(); }
+      else if (act.kind === 'new') { r = { x: Math.min(act.sx, px), y: Math.min(act.sy, py), w: Math.abs(px - act.sx), h: Math.abs(py - act.sy) }; if (ratio) r.h = r.w / ratio; clamp(); }
+      else {
+        let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+        const k = act.kind;
+        if (k.includes('w')) x0 = Math.min(px, x1 - 8); if (k.includes('e')) x1 = Math.max(px, x0 + 8);
+        if (k.includes('n')) y0 = Math.min(py, y1 - 8); if (k.includes('s')) y1 = Math.max(py, y0 + 8);
+        x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(W.w, x1); y1 = Math.min(W.h, y1);
+        r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        if (ratio) {
+          if (k === 'n' || k === 's') { const nw = r.h * ratio; r.x += (r.w - nw) / 2; r.w = nw; }
+          else { const nh = r.w / ratio; if (k.includes('n')) r.y = y1 - nh; r.h = nh; }
+        }
+        clamp();
+      }
+      draw();
+    });
+    const end = () => { act = null; };
+    view.addEventListener('pointerup', end); view.addEventListener('pointercancel', end);
+    const ratioSel = h('select', { 'aria-label': 'Proporción' }, ...[['Libre', 0], ['Cuadrado 1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4], ['16:9', 16 / 9], ['Como la imagen', W.w / W.h]].map(([l, v]) => h('option', { value: String(v) }, l)));
+    ratioSel.onchange = () => { ratio = +ratioSel.value; if (ratio) { r.h = r.w / ratio; clamp(); if (r.h > W.h) { r.h = W.h; r.w = r.h * ratio; clamp(); } } draw(); };
+    const all = h('button', { onclick: () => { r = { x: 0, y: 0, w: W.w, h: W.h }; draw(); } }, 'Toda la imagen');
+    const go = h('button', { class: 'primary' }, 'Recortar');
+    go.onclick = () => { applyImageCrop(s, a, W, r); close(); checkpoint(); fullRender(); msg('Imagen recortada; sigue en su mismo lugar. Puedes quitarle el fondo o vectorizarla.'); };
+    dialog.append(...head, h('div', { class: 'imgtool' }, h('div', { class: 'imgtool-view' }, view), h('div', { class: 'imgtool-side' }, h('label', {}, 'Proporción', ratioSel), all, info)),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    draw();
+  }
+  // Recortar con la figura de encima: las demás figuras se quedan solo con la parte que cae dentro de ella (las imágenes, dentro de su caja)
+  async function cropWithShape() {
+    evaluateParams(); evaluateAll();
+    const order = selectedRoots().sort((p, q) => doc.shapes.indexOf(p) - doc.shapes.indexOf(q));
+    if (order.length < 2) { msg('Dibuja un rectángulo (o cualquier figura cerrada) encima de lo que quieres recortar, elige todo con Shift + clic y pulsa «Recortar con la figura de encima».'); return; }
+    const cutter = order[order.length - 1], targets = order.slice(0, -1), cr = evalCache.get(cutter.id);
+    const closed = cr ? cr.items.flatMap(it => it.polys.filter(p => p.closed && p.pts.length >= 3)) : [];
+    if (!closed.length) { msg('La figura de encima debe ser cerrada (rectángulo, círculo, polígono…).'); return; }
+    const clipPaths = normalize(toC(closed)), cb = cr.bbox;
+    const made = [], skipped = [], empty = [];
+    for (const t of targets) {
+      const r = evalCache.get(t.id), a = t.type === 'import' && doc.assets && doc.assets[t.p.asset];
+      if (!r || SEPARABLE.has(t.type)) { skipped.push(t.name); continue; }
+      if (a && a.kind === 'image') {
+        if ((num(t, 'rot', 0) || 0) !== 0) { skipped.push(t.name); continue; }
+        let img; try { img = await loadImage(a.href); } catch (e) { skipped.push(t.name); continue; }
+        const Wc = workCanvas(img, 1600), x = len(t, 'x'), y = len(t, 'y'), wmm = Math.abs(len(t, 'w')), hmm = t.p.prop === 'no' ? Math.abs(len(t, 'h')) : wmm * a.h / a.w;
+        const x0 = Math.max(x, cb.x), y0 = Math.max(y, cb.y), x1 = Math.min(x + wmm, cb.x + cb.w), y1 = Math.min(y + hmm, cb.y + cb.h);
+        if (x1 - x0 < 0.2 || y1 - y0 < 0.2) { empty.push(t.name); continue; }
+        applyImageCrop(t, a, Wc, { x: (x0 - x) / wmm * Wc.w, y: (y0 - y) / hmm * Wc.h, w: (x1 - x0) / wmm * Wc.w, h: (y1 - y0) / hmm * Wc.h });
+        made.push(t);
+        continue;
+      }
+      if (r.items.some(it => (it.images || []).length)) { skipped.push(t.name); continue; }
+      const pieces = [];
+      for (const it of r.items) {
+        const cl = it.polys.filter(p => p.closed && p.pts.length >= 3);
+        if (!cl.length) continue;
+        const part = fromC(clipEO(CL.ClipType.ctIntersection, toC(cl), clipPaths)).filter(p => Math.abs(polyArea(p.pts)) > 0.01);
+        if (part.length) for (const grp of splitPieces(part)) pieces.push(grp.map(p => ({ ...p, op: it.op })));
+      }
+      if (!pieces.length) { empty.push(t.name); continue; }
+      const list = listOf(t.id), at = list.indexOf(t);
+      const objs = pieces.map((pl, i) => { const o = importObject(pieces.length > 1 ? `${t.name} · parte ${i + 1}` : t.name, pl, []); o.op = t.op; return o; });
+      list.splice(at, 1, ...objs);
+      made.push(...objs);
+    }
+    if (!made.length) { msg(empty.length ? 'Ninguna figura toca la de encima: colócala sobre lo que quieres conservar.' : `No se pudo recortar: ${skipped.join(', ')}.`); return; }
+    const li = listOf(cutter.id), lx = li.indexOf(cutter); if (lx >= 0) li.splice(lx, 1);
+    sel = new Set(made.map(o => o.id));
+    checkpoint(); fullRender();
+    msg(`Recortado: ${made.length} figura(s).` + (empty.length ? ` Quedaron fuera: ${empty.join(', ')}.` : '') + (skipped.length ? ` No se pudo recortar: ${skipped.join(', ')}.` : ''));
+  }
+
   function openBatch() {
     evaluateParams(); evaluateAll();
     if (!doc.shapes.length) { msg('Primero crea o abre un arte y escribe {{nombre}} en el texto que deseas personalizar.'); return; }
@@ -4614,6 +4778,7 @@
   }
   function deleteSel() {
     if (!sel.size) return;
+    if ([...sel].some(id => (byId(id) || {}).locked)) { msg('Hay figuras bloqueadas: desbloquéalas (candado) para borrarlas.'); return; }
     dropMeasuresOf(new Set(sel));
     for (const id of sel) {
       const list = listOf(id), s = byId(id);
@@ -4741,7 +4906,7 @@
     checkpoint(); fullRender();
   }
   function nudge(dx, dy) {
-    for (const id of sel) { const s = byId(id); if (s) moveShape(s, { ...s.p }, dx, dy); }
+    for (const id of sel) { const s = byId(id); if (s && !s.locked) moveShape(s, { ...s.p }, dx, dy); }
     checkpoint(); liveRender(); buildInspector();
   }
   function reorder(dir) {
@@ -4811,8 +4976,8 @@
   // Todas las piezas finales, listas para exportar
   function exportItems() {
     evaluateParams(); evaluateAll();
-    const items = [...evalCache.values()].flatMap(r => r.items);
-    const bad = doc.shapes.length - evalCache.size;
+    const items = doc.shapes.filter(s => !s.hidden).flatMap(s => (evalCache.get(s.id) || { items: [] }).items);
+    const bad = doc.shapes.filter(s => !s.hidden).length - doc.shapes.filter(s => !s.hidden && evalCache.has(s.id)).length;
     return { items, bad, bbox: bboxOfItems(items) };
   }
 

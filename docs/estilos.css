@@ -360,3 +360,12 @@ button.wide { width: 100%; margin-top: 10px; }
 .swatch { display: inline-block; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; }
 .swatch-row { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 760px) { .imgtool { grid-template-columns: 1fr; } }
+
+.layer-ctrls { display: inline-flex; gap: 2px; margin-left: 6px; }
+.layer-btn { border: none; background: transparent; padding: 2px 3px; border-radius: 4px; cursor: pointer; color: var(--muted); display: inline-flex; }
+.layer-btn svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.layer-btn:hover { background: var(--accent-soft); color: var(--text); }
+.layer-btn.on { color: var(--accent); }
+#objects li.is-hidden { opacity: .5; }
+#objects li.is-locked .type::after { content: ' · bloqueado'; }
+.layer-btns { display: inline-flex; gap: 6px; }
