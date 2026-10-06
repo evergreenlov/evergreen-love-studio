@@ -3213,6 +3213,12 @@
     }
   }
 
+  function cutOrderSection() {
+    const sel2 = selectEl({ auto: 'Agujeros primero, pieza por pieza (recomendado)', lista: 'Como están en el diseño' }, doc.cutOrder || 'auto', 'Orden de corte', v => { doc.cutOrder = v; checkpoint(); });
+    return h('div', { class: 'cut-order-box' }, h('div', { class: 'insp-sub' }, 'Corte del láser'), propRow('Orden de corte', sel2),
+      h('p', { class: 'tip' }, 'Al exportar, el grabado va primero y el corte al final; en el corte, lo de adentro (agujeros, bisagras) antes que el contorno de cada pieza, para que nada se mueva.'),
+      h('button', { class: 'wide', onclick: () => withFonts(openSimulation) }, 'Simular el corte (orden y tiempo)'));
+  }
   // Resumen del último acomodo y exportación por hoja
   function nestSection() {
     const n = doc.nest;
@@ -3295,6 +3301,7 @@
         propRow(`Área alto (${u})`, numInput(fmt(doc.sheet.h / unitMM, 3), v => { doc.sheet.h = v * unitMM; })),
         propRow(`Paso imán (${u})`, numInput(doc.grid, v => { doc.grid = v; })),
         guidesSection(),
+        cutOrderSection(),
         nestSection(),
         materialSection(),
         h('p', { class: 'tip' }, 'En cualquier medida puedes escribir fórmulas, por ejemplo ', h('code', {}, 'ancho - 2*grosor'),
@@ -5034,6 +5041,124 @@
     if (lost) msg('Se desagrupó. La rotación, el contorno o la repetición del grupo no se pasan a cada objeto.');
   }
 
+  /* ================= Orden de corte y simulación del láser ================= */
+  const shoelace = pts => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return Math.abs(a / 2); };
+  const ptsBox = pts => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return { x0, y0, x1, y1 }; };
+  // Contornos en el orden en que conviene cortarlos: primero lo de adentro (líneas, agujeros), después el contorno de cada pieza; pieza por pieza, de izquierda a derecha y de arriba abajo
+  function orderContours(group) {
+    const cs = group.flatMap(it => it.polys.filter(p => p.pts.length >= 2).map(p => ({ p, b: ptsBox(p.pts), area: p.closed ? shoelace(p.pts) : 0, kids: [], parent: null })));
+    const closed = cs.filter(c => c.p.closed && c.p.pts.length >= 3);
+    const place = c => ({ row: Math.round(c.b.y0 / 25), x: c.b.x0 });
+    const byPos = (a, b) => { const A = place(a), B = place(b); return A.row - B.row || A.x - B.x; };
+    if (closed.length > 800) return cs.sort((a, b) => a.area - b.area).map(c => c.p); // demasiados contornos: de los chicos a los grandes
+    for (const c of cs) {
+      let best = null;
+      for (const d of closed) {
+        if (d === c || d.b.x0 > c.b.x0 || d.b.y0 > c.b.y0 || d.b.x1 < c.b.x1 || d.b.y1 < c.b.y1) continue;
+        if (c.p.closed && d.area <= c.area) continue;
+        if (!inPoly(c.p.pts[0], d.p.pts)) continue;
+        if (!best || d.area < best.area) best = d;
+      }
+      if (best) { c.parent = best; best.kids.push(c); }
+    }
+    const out = [], visit = c => { for (const k of c.kids.sort(byPos)) visit(k); out.push(c.p); };
+    for (const r of cs.filter(c => !c.parent).sort(byPos)) visit(r);
+    return out;
+  }
+  // Todo lo que hace el láser, en orden: grabado, marcado y corte
+  function laserSequence() {
+    const { items } = exportItems(), seq = [];
+    for (const op of ['grabado', 'marcado', 'corte']) {
+      const group = items.filter(it => it.op === op);
+      if (!group.length) continue;
+      if (op === 'grabado') {
+        const sorted = group.slice().sort((a, b) => { const A = bboxOfItems([a]) || { x: 0, y: 0 }, B = bboxOfItems([b]) || { x: 0, y: 0 }; return Math.round(A.y / 25) - Math.round(B.y / 25) || A.x - B.x; });
+        for (const it of sorted) for (const p of it.polys) seq.push({ op, pts: p.pts, closed: p.closed });
+      } else for (const p of (doc.cutOrder === 'lista' ? group.flatMap(it => it.polys) : orderContours(group))) seq.push({ op, pts: p.pts, closed: p.closed });
+    }
+    return seq;
+  }
+  function openSimulation() {
+    evaluateParams(); evaluateAll();
+    const seq = laserSequence();
+    if (!seq.length) { msg('No hay nada que cortar o grabar todavía.'); return; }
+    const dialog = h('dialog', { class: 'batch-dialog imgtool-dialog', 'aria-label': 'Simulación del láser' });
+    const close = () => { running = false; cancelAnimationFrame(raf); dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const all = seq.flatMap(s => s.pts), b = ptsBox(all), pad = 6;
+    const W = 900, sc = Math.min(W / (b.x1 - b.x0 + 2 * pad), 560 / (b.y1 - b.y0 + 2 * pad)), CW = Math.round((b.x1 - b.x0 + 2 * pad) * sc), CH = Math.round((b.y1 - b.y0 + 2 * pad) * sc);
+    const cv = h('canvas', { class: 'imgtool-canvas', width: String(CW), height: String(CH) });
+    const tx = x => (x - b.x0 + pad) * sc, ty = y => (y - b.y0 + pad) * sc;
+    // longitudes
+    const lens = seq.map(s => { let L = 0; for (let i = 1; i < s.pts.length; i++) L += Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]); if (s.closed) L += Math.hypot(s.pts[0][0] - s.pts[s.pts.length - 1][0], s.pts[0][1] - s.pts[s.pts.length - 1][1]); return L; });
+    const cutLen = lens.reduce((a, l, i) => a + (seq[i].op === 'corte' ? l : 0), 0), markLen = lens.reduce((a, l, i) => a + (seq[i].op === 'marcado' ? l : 0), 0);
+    const engArea = seq.reduce((a, s) => a + (s.op === 'grabado' && s.closed ? shoelace(s.pts) : 0), 0);
+    const inp = (v, min) => h('input', { type: 'number', min: String(min), step: 'any', value: String(v) });
+    const vCut = inp(10, 0.1), vEng = inp(150, 1), vMove = inp(300, 10), dens = inp(0.1, 0.02);
+    const timeEl = h('p', { class: 'tip' }), progEl = h('p', { role: 'status', 'aria-live': 'polite' });
+    const estimate = () => {
+      const travel = seq.reduce((a, s, i) => i ? a + Math.hypot(s.pts[0][0] - seq[i - 1].pts[seq[i - 1].pts.length - 1][0], s.pts[0][1] - seq[i - 1].pts[seq[i - 1].pts.length - 1][1]) : a, 0);
+      const secs = cutLen / +vCut.value + markLen / +vCut.value + (engArea / +dens.value) / +vEng.value + travel / +vMove.value;
+      timeEl.textContent = `Corte: ${fmt(cutLen / unitMM, isInch() ? 1 : 0)} ${unitLabel()} · ${seq.length} trazo(s) · tiempo aproximado ${secs >= 90 ? fmt(secs / 60, 1) + ' min' : Math.round(secs) + ' s'} (cambia las velocidades para tu madera).`;
+    };
+    for (const e of [vCut, vEng, vMove, dens]) e.oninput = estimate;
+    estimate();
+    let idx = 0, along = 0, running = false, raf = 0, speed = 60, showNum = false;
+    const drawAll = () => {
+      const c = cv.getContext('2d');
+      c.clearRect(0, 0, CW, CH);
+      c.strokeStyle = '#999'; c.setLineDash([6, 4]); c.strokeRect(tx(0), ty(0), doc.sheet.w * sc, doc.sheet.h * sc); c.setLineDash([]);
+      const trace = (s, upto) => {
+        c.beginPath();
+        let rem = upto;
+        s.pts.forEach(([x, y], i) => {
+          if (!i) { c.moveTo(tx(x), ty(y)); return; }
+          const px = s.pts[i - 1][0], py = s.pts[i - 1][1], d = Math.hypot(x - px, y - py);
+          if (rem >= d) { c.lineTo(tx(x), ty(y)); rem -= d; } else if (rem > 0) { const t = rem / d; c.lineTo(tx(px + (x - px) * t), ty(py + (y - py) * t)); rem = 0; }
+        });
+        if (s.closed && rem > 0) c.closePath();
+        c.stroke();
+      };
+      seq.forEach((s, i) => {
+        if (i > idx) { c.globalAlpha = 0.18; c.strokeStyle = s.op === 'corte' ? '#e0301e' : s.op === 'grabado' ? '#222' : '#2c7be5'; c.lineWidth = 1; trace(s, Infinity); c.globalAlpha = 1; return; }
+        c.strokeStyle = s.op === 'corte' ? '#e0301e' : s.op === 'grabado' ? '#111' : '#2c7be5'; c.lineWidth = s.op === 'grabado' ? 1.4 : 1.8;
+        trace(s, i < idx ? Infinity : along);
+      });
+      if (showNum) { c.fillStyle = '#1a6b3c'; c.font = '11px sans-serif'; seq.forEach((s, i) => c.fillText(String(i + 1), tx(s.pts[0][0]) + 2, ty(s.pts[0][1]) - 2)); }
+      // posición del láser
+      const s = seq[Math.min(idx, seq.length - 1)];
+      let rem = along, px = s.pts[0][0], py = s.pts[0][1];
+      for (let i = 1; i < s.pts.length; i++) { const d = Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]); if (rem <= d) { const t = d ? rem / d : 0; px = s.pts[i - 1][0] + (s.pts[i][0] - s.pts[i - 1][0]) * t; py = s.pts[i - 1][1] + (s.pts[i][1] - s.pts[i - 1][1]) * t; rem = -1; break; } rem -= d; px = s.pts[i][0]; py = s.pts[i][1]; }
+      c.fillStyle = '#ff2d55'; c.beginPath(); c.arc(tx(px), ty(py), 5, 0, 7); c.fill();
+      progEl.textContent = `Trazo ${Math.min(idx + 1, seq.length)} de ${seq.length} · ${seq[Math.min(idx, seq.length - 1)].op === 'corte' ? 'corte' : seq[Math.min(idx, seq.length - 1)].op}`;
+    };
+    const frame = () => {
+      if (!running) return;
+      along += speed * 0.4 / sc * 8;
+      while (idx < seq.length && along >= lens[idx]) { along -= lens[idx]; idx++; }
+      if (idx >= seq.length) { idx = seq.length - 1; along = lens[idx]; running = false; playBtn.textContent = 'Reproducir otra vez'; drawAll(); return; }
+      drawAll(); raf = requestAnimationFrame(frame);
+    };
+    const playBtn = h('button', { class: 'primary' }, 'Reproducir');
+    playBtn.onclick = () => {
+      if (running) { running = false; playBtn.textContent = 'Continuar'; return; }
+      if (idx >= seq.length - 1 && along >= lens[seq.length - 1]) { idx = 0; along = 0; }
+      running = true; playBtn.textContent = 'Pausa'; raf = requestAnimationFrame(frame);
+    };
+    const resetBtn = h('button', { onclick: () => { running = false; idx = 0; along = 0; playBtn.textContent = 'Reproducir'; drawAll(); } }, 'Reiniciar');
+    const sp = sliderRow('Velocidad de la animación', 1, 300, 1, speed, v => { speed = v; });
+    const num2 = h('input', { type: 'checkbox' }); num2.onchange = () => { showNum = num2.checked; drawAll(); };
+    const orderSel = h('select', { 'aria-label': 'Orden de corte' }, h('option', { value: 'auto' }, 'Agujeros primero, pieza por pieza (recomendado)'), h('option', { value: 'lista' }, 'Como están en el diseño'));
+    orderSel.value = doc.cutOrder || 'auto';
+    orderSel.onchange = () => { doc.cutOrder = orderSel.value; checkpoint(); close(); openSimulation(); };
+    const side = h('div', { class: 'imgtool-side' }, progEl, h('label', {}, 'Orden de corte', orderSel), sp.el, h('label', { class: 'check' }, num2, ' Mostrar el número de cada trazo'),
+      h('div', { class: 'insp-sub' }, 'Tiempo aproximado'), h('label', {}, `Velocidad de corte (${isInch() ? 'in/s' : 'mm/s'} aprox.)`, vCut), h('label', {}, 'Velocidad de grabado (mm/s)', vEng), h('label', {}, 'Separación de líneas del grabado (mm)', dens), h('label', {}, 'Velocidad de desplazamiento (mm/s)', vMove), timeEl);
+    dialog.append(h('h2', {}, 'Simulación del láser'), h('p', { class: 'tip' }, 'Así recorrerá el láser tu diseño: primero el grabado, después el marcado y al final el corte (lo de adentro antes que el contorno de cada pieza).'),
+      h('div', { class: 'imgtool' }, h('div', { class: 'imgtool-view' }, cv), side), h('div', { class: 'dialog-actions' }, resetBtn, playBtn, h('button', { onclick: close }, 'Cerrar')));
+    document.body.append(dialog); dialog.showModal();
+    drawAll();
+  }
+
   /* ================= Archivos ================= */
   function download(filename, text, type) {
     const blob = new Blob([text], { type });
@@ -5068,7 +5193,8 @@
       // Copia del diseño editable: al abrir este SVG en Evergreen Love Studio se recupera todo (los programas de corte la ignoran)
       `<metadata id="evergreen-love-studio">${designPayload()}</metadata>`,
     ];
-    for (const op of Object.keys(OPS)) {
+    const autoOrder = doc.cutOrder !== 'lista';
+    for (const op of autoOrder ? ['grabado', 'marcado', 'corte'] : Object.keys(OPS)) {
       const group = items.filter(it => it.op === op);
       if (!group.length) continue;
       out.push(`<g id="${op}">`);
@@ -5078,7 +5204,7 @@
         if (op === 'grabado') {
           if (closed.length) out.push(`<path d="${pathD(closed)}" fill="#000000" fill-rule="evenodd" stroke="none"/>`);
           if (open.length) out.push(`<path d="${pathD(open)}" ${line}/>`);
-        } else if (it.polys.length) {
+        } else if (it.polys.length && !autoOrder) {
           out.push(`<path d="${pathD(it.polys)}" ${line}/>`);
         }
         for (const t of it.texts) {
@@ -5092,6 +5218,7 @@
           out.push(`<image x="${r4(g.x)}" y="${r4(g.y)}" width="${r4(g.w)}" height="${r4(g.h)}" preserveAspectRatio="none" href="${g.href}" xlink:href="${g.href}"${tr}/>`);
         }
       }
+      if (autoOrder && op !== 'grabado') for (const c of orderContours(group)) out.push(`<path d="${pathD([c])}" fill="none" stroke="${STROKE[op]}" stroke-width="0.1"/>`);
       out.push('</g>');
     }
     out.push('</svg>');
@@ -5129,19 +5256,22 @@
     g(0, 'ENDTAB');
     g(0, 'ENDSEC');
     g(0, 'SECTION'); g(2, 'ENTITIES');
-    for (const it of items) {
+    const autoOrder = doc.cutOrder !== 'lista', rank = { grabado: 0, marcado: 1, corte: 2 };
+    const emitPoly = (layer, p) => {
+      g(0, 'POLYLINE'); g(8, layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, p.closed ? 1 : 0);
+      for (const [x, y] of p.pts) { g(0, 'VERTEX'); g(8, layer); g(10, r4(x - dx0)); g(20, r4(-y)); g(30, 0); }
+      g(0, 'SEQEND'); g(8, layer);
+    };
+    for (const it of autoOrder ? items.slice().sort((a, c) => rank[a.op] - rank[c.op]) : items) {
       const layer = LAYERS[it.op][0];
-      for (const p of it.polys) {
-        g(0, 'POLYLINE'); g(8, layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, p.closed ? 1 : 0);
-        for (const [x, y] of p.pts) { g(0, 'VERTEX'); g(8, layer); g(10, r4(x - dx0)); g(20, r4(-y)); g(30, 0); }
-        g(0, 'SEQEND'); g(8, layer);
-      }
+      if (!autoOrder || it.op === 'grabado') for (const p of it.polys) emitPoly(layer, p);
       for (const t of it.texts) {
         g(0, 'TEXT'); g(8, layer); g(10, r4(t.x - dx0)); g(20, r4(-t.y)); g(30, 0); g(40, r4(t.size * 0.7)); g(1, dxfStr(t.str)); g(50, r4(-t.rot));
         if (t.anchor === 'middle') { g(72, 1); g(11, r4(t.x - dx0)); g(21, r4(-t.y)); g(31, 0); }
       }
       skippedImages += (it.images || []).length;
     }
+    if (autoOrder) for (const op of ['marcado', 'corte']) for (const c of orderContours(items.filter(i => i.op === op))) emitPoly(LAYERS[op][0], c);
     g(0, 'ENDSEC'); g(0, 'EOF');
     download(safeName() + (sh ? `-hoja-${opts.sheet + 1}` : '') + '.dxf', out.join('\r\n') + '\r\n', 'application/dxf');
     msg(`DXF exportado en mm: ${fmt(b.w, 1)} × ${fmt(b.h, 1)} mm` + (bad ? ` (${bad} objeto(s) con error omitidos)` : '')
