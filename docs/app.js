@@ -6458,7 +6458,18 @@
     return d;
   }
 
+  // Caja de regalo para madera de 6 mm (1/4"): 5.72 x 5.19 x 5.63 in por fuera, sin tapa
+  function giftBoxQuarterTemplate(units, sheet) {
+    const d = boxTemplate('dedos', units, sheet, 'no');
+    const inch = units === 'in', q = mm => inch ? fmt(Math.round(mm / 25.4 * 1000) / 1000) : fmt(mm);
+    d.name = 'Caja de regalo 1/4"';
+    d.params = [['ancho', q(145.4)], ['profundo', q(131.9)], ['alto', q(143.1)], ['grosor', q(6.35)], ['dedo', q(15)], ['kerf', inch ? '0.004' : '0.1'], ['sep', q(5)]].map(([name, expr]) => ({ name, expr }));
+    d.shapes[0].name = 'Caja de regalo';
+    return d;
+  }
+
   const TEMPLATES = {
+    'box-gift-quarter': giftBoxQuarterTemplate,
     'box-dedos': (u, s) => boxTemplate('dedos', u, s),
     'box-planas': (u, s) => boxTemplate('planas', u, s),
     'box-slide': (u, s) => boxTemplate('dedos', u, s, 'deslizante'),
