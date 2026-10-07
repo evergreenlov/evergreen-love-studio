@@ -6884,10 +6884,11 @@
   const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', none: 'No usar' };
   function suggestFaces(pcs) {
     const near = (a, b) => Math.abs(a - b) <= Math.max(1.5, 0.02 * Math.max(a, b));
+    const same = (a, b) => Math.abs(a - b) <= Math.max(0.6, 0.004 * Math.max(a, b)); // piezas gemelas: casi idénticas
     const groups = [];
     for (const p of pcs) {
       const lo = Math.min(p.w, p.h), hi = Math.max(p.w, p.h);
-      let g = groups.find(q => near(q.lo, lo) && near(q.hi, hi));
+      let g = groups.find(q => same(q.lo, lo) && same(q.hi, hi));
       if (!g) { g = { lo, hi, items: [] }; groups.push(g); }
       g.items.push(p);
     }
@@ -6915,32 +6916,40 @@
     const closed = polys.filter(p => p.closed && p.pts.length >= 3);
     const outer = closed.length ? closed.reduce((a, c) => shoelace(c.pts) > shoelace(a.pts) ? c : a) : polys[0];
     if (!outer) return { polys, texts, at: null };
-    const ob = ptsBox(outer.pts), lo = A ? ob.y0 : ob.x0, hi = A ? ob.y1 : ob.x1, L = hi - lo;
-    const bx = p => { const b = ptsBox(p.pts); return A ? [b.y0, b.y1, b.x1 - b.x0, b.y1 - b.y0] : [b.x0, b.x1, b.x1 - b.x0, b.y1 - b.y0]; };
-    // lo que no debe estirarse: ranuras y agujeros chicos
-    const rigid = polys.filter(p => p !== outer && p.closed).map(bx).filter(b => Math.max(b[2], b[3]) <= 15).map(b => [b[0] - 1.5, b[1] + 1.5]);
-    // bordes cortos del contorno (los dedos): su posición tampoco se toca
-    const pts = outer.pts, n = pts.length, tabs = [];
+    const ob = ptsBox(outer.pts), lo = A ? ob.y0 : ob.x0, hi = A ? ob.y1 : ob.x1, L = hi - lo, m = Math.min(12, L * 0.15);
+    const ext = p => { const b = ptsBox(p.pts); return A ? [b.y0, b.y1, b.x1 - b.x0, b.y1 - b.y0] : [b.x0, b.x1, b.x1 - b.x0, b.y1 - b.y0]; };
+    // Los dedos del contorno (bordes rectos y cortos) no se estiran: su posición se conserva
+    const pts = outer.pts, n = pts.length, prot = [];
     for (let i = 0; i < n; i++) {
       const a = pts[i], b = pts[(i + 1) % n], d = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      // solo los bordes rectos y cortos (los lados de un dedo), no los tramos de una curva
       const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]), straight = Math.min(dx, dy) < 0.02 * Math.max(dx, dy, 1e-9);
-      if (d < 12 && d > 0.8 && straight) tabs.push([Math.min(a[A], b[A]) - 2, Math.max(a[A], b[A]) + 2]);
+      if (d < 12 && d > 0.8 && straight) prot.push([Math.min(a[A], b[A]) - 2, Math.max(a[A], b[A]) + 2]);
     }
-    const mid = (lo + hi) / 2, others = polys.filter(p => p !== outer).map(bx);
-    let best = null;
-    for (let c = lo + L * 0.08; c <= hi - L * 0.08; c += 0.5) {
-      if (rigid.some(r => c >= r[0] && c <= r[1]) || tabs.some(r => c >= r[0] && c <= r[1])) continue;
-      const cross = others.filter(b => b[0] < c && b[1] > c).length, score = cross * 1000 + Math.abs(c - mid);
-      if (!best || score < best.score) best = { c, score };
-    }
-    if (!best) return { polys, texts, at: null };
-    const c = best.c, mv = q => q[A] > c ? (A ? [q[0], q[1] + delta] : [q[0] + delta, q[1]]) : q;
-    return {
-      polys: polys.map(p => ({ ...p, pts: p.pts.map(mv) })),
-      texts: texts.map(t => { const [x, y] = mv([t.x, t.y]); return { ...t, x, y }; }),
-      at: c,
+    prot.sort((p, q) => p[0] - q[0]);
+    const merged = [];
+    for (const r of prot) { const l = merged[merged.length - 1]; if (l && r[0] <= l[1]) l[1] = Math.max(l[1], r[1]); else merged.push([Math.max(lo, r[0]), Math.min(hi, r[1])]); }
+    const prLen = merged.reduce((t, r) => t + Math.max(0, r[1] - r[0]), 0), Lu = L - prLen;
+    if (!(Lu > L * 0.25)) return { polys, texts, at: null };
+    const k = 1 + delta / Lu;
+    // contorno y líneas largas: el estiramiento se reparte parejo en todo lo que no son dedos
+    const fOut = x => {
+      let free = Math.max(0, Math.min(x, hi) - lo);
+      for (const r of merged) free -= Math.max(0, Math.min(x, r[1]) - Math.max(lo, r[0]));
+      return x + (k - 1) * Math.max(0, free);
     };
+    // adorno interior: se escala parejo desde las orillas (donde están los dedos y las ranuras)
+    const kk = (L - 2 * m + delta) / (L - 2 * m);
+    const fIn = x => x <= lo + m ? x : x >= hi - m ? x + delta : lo + m + (x - (lo + m)) * kk;
+    const mv = (q, f) => A ? [q[0], f(q[1])] : [f(q[0]), q[1]];
+    const out = polys.map(p => {
+      if (p === outer) return { ...p, pts: p.pts.map(q => mv(q, fOut)) };
+      const [c0, c1, w, h] = ext(p), mid = (c0 + c1) / 2;
+      if (Math.max(w, h) <= 15) { const sh = (mid < lo + m ? mid : mid > hi - m ? mid + delta : fIn(mid)) - mid; return { ...p, pts: p.pts.map(q => A ? [q[0], q[1] + sh] : [q[0] + sh, q[1]]) }; } // ranuras y agujeros chicos: solo se mueven
+      if (c0 >= lo + m - 0.5 && c1 <= hi - m + 0.5) return { ...p, pts: p.pts.map(q => mv(q, fIn)) };
+      return { ...p, pts: p.pts.map(q => mv(q, fOut)) };
+    });
+    const txt = texts.map(t => { const v = A ? t.y : t.x, sh = (v < lo + m ? v : v > hi - m ? v + delta : fIn(v)) - v; return A ? { ...t, y: t.y + sh } : { ...t, x: t.x + sh }; });
+    return { polys: out, texts: txt, at: (lo + hi) / 2 };
   }
   // Reemplaza una pieza importada por la misma pieza estirada (A: 0 = ancho, 1 = alto) en delta mm; devuelve la nueva figura
   function stretchShape(s, A, delta) {
@@ -6971,7 +6980,7 @@
       evaluateParams(); evaluateAll();
       if (parseFloat(dy.value) > 0) cur = stretchShape(cur, 1, parseFloat(dy.value) * unitMM);
       sel = new Set([cur.id]); close(); checkpoint(); fullRender();
-      msg(cur === s ? 'No se encontró un lugar donde estirar la pieza sin tocar los dedos o las ranuras.' : 'Pieza agrandada: se estiró por el centro, sin cambiar dedos ni ranuras.');
+      msg(cur === s ? 'No se encontró un lugar donde estirar la pieza sin tocar los dedos o las ranuras.' : 'Pieza agrandada de forma pareja por los dos lados, sin cambiar dedos ni ranuras.');
     };
     dialog.append(h('h2', {}, 'Agrandar la pieza'), h('p', { class: 'tip' }, 'Suma esta medida al ancho o al alto. La app busca una línea en el centro, donde no haya dedos ni ranuras, y separa la pieza por ahí: los dedos y las ranuras no cambian de tamaño, solo el centro se alarga.'),
       h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, dx), h('label', {}, `Sumar al alto (${unitLabel()})`, dy)),
@@ -7133,7 +7142,7 @@
       espRow,
       h('div', { class: 'asm-list' }, ...rows.map(r => r.el)),
       h('div', { class: 'insp-sub' }, 'Agrandar la caja (opcional)'),
-      h('p', { class: 'tip' }, 'Suma una medida a cada cara de la caja. Los dedos y las ranuras no cambian de tamaño: el centro de cada pieza se alarga.'),
+      h('p', { class: 'tip' }, 'Suma una medida a cada cara de la caja. Los dedos y las ranuras no cambian de tamaño; el contorno y el adorno crecen parejo por los dos lados.'),
       h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, iW), h('label', {}, `Sumar al fondo (${unitLabel()})`, iD), h('label', {}, `Sumar al alto (${unitLabel()})`, iH)),
       status,
       h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), grow, go));
