@@ -377,3 +377,7 @@ button.wide { width: 100%; margin-top: 10px; }
 .arc-guide { fill: none; stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 4 4; opacity: .55; pointer-events: none; }
 .arc-handle circle { fill: #fff; stroke: var(--accent); stroke-width: 2px; cursor: ns-resize; }
 .arc-arrow { fill: var(--accent); pointer-events: none; }
+
+.asm-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; margin: 10px 0; }
+.asm-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 190px auto; gap: 10px; align-items: center; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; }
+.asm-thumb { background: var(--canvas); border-radius: 6px; }

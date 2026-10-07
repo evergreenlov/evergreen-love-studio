@@ -3540,6 +3540,7 @@
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
           : []),
+        ...(shapes.length >= 4 ? [h('button', { class: 'wide', title: 'Elige qué cara es cada pieza y míralas montadas en 3D', onclick: () => openAssembleDialog(shapes) }, 'Armar como caja en 3D…')] : []),
         ...alignmentSection(shapes),
         ...scaleSection(shapes),
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
@@ -3574,9 +3575,9 @@
     if (nodeShow.has(s.id) && importFrame(s) && !importFrame(s).rotated) box.append(...nodeToolsSection());
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },
-        h('p', {}, `Esta pieza viene de «${s.from.name}», que se desagrupó. Aquí abajo puedes cambiar los dedos; para otras medidas hay que volver a la caja. También puedes verlas armadas en 3D.`),
-        originFingerEditor(s.from.gid),
-        h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`),
+        h('p', {}, (doc.origins[s.from.gid] && doc.origins[s.from.gid].shape === null) ? `Esta pieza es parte de la caja «${s.from.name}» armada desde un archivo. Puedes verlas montadas en 3D.` : `Esta pieza viene de «${s.from.name}», que se desagrupó. Aquí abajo puedes cambiar los dedos; para otras medidas hay que volver a la caja. También puedes verlas armadas en 3D.`),
+        (doc.origins[s.from.gid] && doc.origins[s.from.gid].shape === null) ? null : originFingerEditor(s.from.gid),
+        (doc.origins[s.from.gid] && doc.origins[s.from.gid].shape === null) ? null : h('button', { class: 'primary wide', onclick: () => restoreOrigin(s.from.gid) }, `Volver a «${s.from.name}» con parámetros`),
         s.asm ? h('button', { class: 'wide', title: 'Arma las piezas sueltas en 3D; si las agrandas o achicas, el 3D las sigue', onclick: () => open3D(s.from.gid) }, 'Ver las piezas armadas en 3D') : null));
     }
     const isPlainGroup = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
@@ -3762,6 +3763,9 @@
           + (a.kind === 'vector' ? ' Puedes combinarlo con otras figuras (Unir/Restar), darle contorno o repetirlo.' : '')));
         if (a.kind === 'vector' && pieces > 1) {
           box.append(h('button', { class: 'wide', onclick: () => explodeImport(s) }, `Separar en ${pieces} piezas (cada una con sus agujeros)`));
+        }
+        if (a.kind === 'vector' && pieces >= 4 && pieces <= 40) {
+          box.append(h('button', { class: 'primary wide', title: 'Separa el archivo en piezas y te deja elegir qué cara es cada una para verlas montadas', onclick: () => openAssembleDialog([s]) }, 'Armar como caja en 3D…'));
         }
         if (a.kind === 'vector' && a.polys.length > 1 && a.polys.length <= 300) {
           box.append(h('button', { class: 'wide', onclick: () => explodeImport(s, true) }, `Separar cada trazo (${a.polys.length})`));
@@ -6875,6 +6879,114 @@
     v3.renderer.render(v3.scene, v3.camera);
     v3.raf = requestAnimationFrame(loop3D);
   }
+  /* ================= Armar en 3D las piezas planas de un archivo (caja con dedos o pegada) ================= */
+  const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', none: 'No usar' };
+  function suggestFaces(pcs) {
+    const near = (a, b) => Math.abs(a - b) <= Math.max(1.5, 0.02 * Math.max(a, b));
+    const groups = [];
+    for (const p of pcs) {
+      const lo = Math.min(p.w, p.h), hi = Math.max(p.w, p.h);
+      let g = groups.find(q => near(q.lo, lo) && near(q.hi, hi));
+      if (!g) { g = { lo, hi, items: [] }; groups.push(g); }
+      g.items.push(p);
+    }
+    groups.sort((a, b) => b.lo * b.hi - a.lo * a.hi);
+    const out = new Map(pcs.map(p => [p.i, { face: 'none', rot: false }]));
+    const pairs = groups.filter(g => g.items.length >= 2), singles = groups.filter(g => g.items.length === 1);
+    let base = null, lid = null, walls = [];
+    if (pairs.length >= 3) { base = pairs[0].items[0]; lid = pairs[0].items[1]; walls = [pairs[1], pairs[2]]; }
+    else if (pairs.length === 2 && singles.length) { base = singles[0].items[0]; walls = pairs; }
+    else if (pairs.length === 2) { walls = pairs; }
+    if (!walls.length) return out;
+    const bw = base ? Math.max(base.w, base.h) : Math.max(walls[0].hi, walls[1].hi), bd = base ? Math.min(base.w, base.h) : Math.min(walls[0].lo, walls[1].lo);
+    if (base) out.set(base.i, { face: 'bottom', rot: base.w < base.h });
+    if (lid) out.set(lid.i, { face: 'top', rot: lid.w < lid.h });
+    // Frente y atrás comparten el ancho mayor de la base; los lados, el menor
+    const frontG = walls.find(g => near(g.hi, bw) || near(g.lo, bw)) || walls[0], sideG = walls.find(g => g !== frontG) || walls[1];
+    const place = (g, a, b, faceA, faceB, dim) => g.items.slice(0, 2).forEach((p, k) => out.set(p.i, { face: k ? faceB : faceA, rot: !near(p.w, dim) }));
+    place(frontG, 0, 0, 'front', 'back', bw);
+    if (sideG) place(sideG, 0, 0, 'left', 'right', bd);
+    return out;
+  }
+  async function openAssembleDialog(shapesIn) {
+    evaluateParams(); evaluateAll();
+    // Un solo archivo con varias piezas: se separa primero
+    let shapes = shapesIn.filter(Boolean);
+    if (shapes.length === 1 && shapes[0].type === 'import') {
+      const a = doc.assets[shapes[0].p.asset];
+      if (a && a.kind === 'vector' && splitPieces(a.polys).length > 1) {
+        const created = splitImport(shapes[0], false);
+        if (created) { shapes = created; sel = new Set(created.map(c => c.id)); checkpoint(); fullRender(); evaluateParams(); evaluateAll(); }
+      }
+    }
+    // Las figuras sencillas pasan a ser dibujos editables
+    shapes = shapes.map(s => (s.type !== 'import' && CONVERTIBLE.has(s.type)) ? (convertToEditable(s) || s) : s).filter(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector');
+    if (shapes.length < 4) { msg('Elige al menos 4 piezas planas (por ejemplo todo el archivo con Cmd+A) para armarlas como caja.'); return; }
+    evaluateParams(); evaluateAll();
+    const pcs = shapes.map((s, i) => { const r = evalCache.get(s.id), b = r && r.bbox; return b ? { i, s, w: b.w, h: b.h, items: r.items } : null; }).filter(Boolean);
+    const sug = suggestFaces(pcs);
+    const tDef = vars.grosor !== undefined && vars.grosor * unitMM > 0 ? vars.grosor * unitMM : 3;
+    const dialog = h('dialog', { class: 'batch-dialog imgtool-dialog', 'aria-label': 'Armar en 3D' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const status = h('p', { class: 'tip', role: 'status' });
+    const tIn = h('input', { type: 'number', step: 'any', min: '0.1', value: fmt(tDef / unitMM, isInch() ? 4 : 2) });
+    const styleSel = h('select', { 'aria-label': 'Tipo de unión' }, h('option', { value: 'dedos' }, 'Con dedos (las piezas miden lo mismo que la caja)'), h('option', { value: 'pegada' }, 'Para pegar (las paredes van entre la base y la tapa)'));
+    const rows = pcs.map(p => {
+      const cv = h('canvas', { width: '90', height: '70', class: 'asm-thumb' });
+      const c = cv.getContext('2d'), k = Math.min(80 / Math.max(p.w, 1), 60 / Math.max(p.h, 1));
+      const b = evalCache.get(p.s.id).bbox;
+      c.strokeStyle = '#2f7d4f'; c.lineWidth = 1; c.beginPath();
+      for (const it of p.items) for (const pl of it.polys.filter(q => q.pts.length > 2 && q.closed)) { pl.pts.forEach(([x, y], i) => { const X = 5 + (x - b.x) * k, Y = 5 + (y - b.y) * k; i ? c.lineTo(X, Y) : c.moveTo(X, Y); }); c.closePath(); }
+      c.stroke();
+      const face = h('select', { 'aria-label': 'Cara' }, ...Object.entries(FACES).map(([k2, l]) => h('option', { value: k2 }, l)));
+      face.value = sug.get(p.i).face;
+      const rot = h('input', { type: 'checkbox' }); rot.checked = sug.get(p.i).rot;
+      return { p, face, rot, el: h('div', { class: 'asm-row' }, cv, h('div', {}, h('strong', {}, p.s.name), h('div', { class: 'tip' }, `${fmt(p.w / unitMM, isInch() ? 2 : 1)} × ${fmt(p.h / unitMM, isInch() ? 2 : 1)} ${unitLabel()}`)), face, h('label', { class: 'check' }, rot, ' girar 90°')) };
+    });
+    const go = h('button', { class: 'primary' }, 'Armar en 3D');
+    go.onclick = () => {
+      const t = parseFloat(tIn.value) * unitMM;
+      if (!(t > 0)) { status.textContent = 'Escribe el grosor de la madera.'; return; }
+      const used = rows.filter(r => r.face.value !== 'none');
+      const pick = f => used.filter(r => r.face.value === f);
+      const dims = r => r.rot.checked ? [r.p.h, r.p.w] : [r.p.w, r.p.h];
+      const fr = pick('front')[0] || pick('back')[0], sd = pick('left')[0] || pick('right')[0], bs = pick('bottom')[0];
+      if (!fr || !sd || !bs) { status.textContent = 'Hace falta al menos un frente, un lado y una base.'; return; }
+      const glued = styleSel.value === 'pegada', hasTop = pick('top').length > 0;
+      const W = glued ? dims(bs)[0] : dims(fr)[0], Dd = glued ? dims(bs)[1] : dims(sd)[0], Hh = glued ? dims(fr)[1] + t + (hasTop ? t : 0) : dims(fr)[1];
+      const m = { W, D: Dd, H: Hh, t, fingers: !glued, wall: false };
+      // Las piezas que hay que girar se vuelven a crear ya giradas
+      const gid = 'o' + uid();
+      const names = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa' };
+      for (const r of used) {
+        let s = r.p.s;
+        if (r.rot.checked) {
+          const b = evalCache.get(s.id).bbox, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+          const polys = r.p.items.flatMap(it => it.polys.map(pl => ({ closed: pl.closed, op: it.op, pts: pl.pts.map(([x, y]) => [cx - (y - cy), cy + (x - cx)]) })));
+          const o = importObject(s.name, polys, []); o.op = s.op;
+          const list = listOf(s.id), at = list.indexOf(s); list.splice(at, 1, o); s = o;
+        }
+        const f = r.face.value, [pw, ph] = dims(r), q = { name: names[f], place: f, h: ph, w: pw };
+        const ax = axesOf(m, q);
+        s.from = { gid, name: doc.name || 'Caja' };
+        s.asm = { name: names[f], ax: JSON.parse(JSON.stringify(ax)) };
+        s.name = names[f] + (pick(f).length > 1 ? ' ' + (pick(f).indexOf(r) + 1) : '');
+      }
+      doc.origins = doc.origins || {};
+      doc.origins[gid] = { shape: null, asm: { name: doc.name || 'Caja', t, W, H: Hh, D: Dd, wall: false } };
+      close(); checkpoint(); fullRender();
+      open3D(gid);
+      msg(`Caja armada: ${fmt(W / unitMM, isInch() ? 2 : 1)} × ${fmt(Dd / unitMM, isInch() ? 2 : 1)} × ${fmt(Hh / unitMM, isInch() ? 2 : 1)} ${unitLabel()}.`);
+    };
+    dialog.append(h('h2', {}, 'Armar la caja en 3D'),
+      h('p', { class: 'tip' }, 'La app propone qué cara es cada pieza según su tamaño. Corrige las que no coincidan y, si una pieza está acostada, marca «girar 90°». Funciona con cajas rectas (con tapa o sin ella).'),
+      h('div', { class: 'nest-grid' }, h('label', {}, `Grosor de la madera (${unitLabel()})`, tIn), h('label', {}, 'Tipo de unión', styleSel)),
+      h('div', { class: 'asm-list' }, ...rows.map(r => r.el)), status,
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+  }
+
   function open3D(id) {
     let gid = null;
     if (id && id.startsWith('o')) { gid = id; id = null; } // se pidió una caja desagrupada
