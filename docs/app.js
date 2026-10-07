@@ -3764,6 +3764,7 @@
         if (a.kind === 'vector' && pieces > 1) {
           box.append(h('button', { class: 'wide', onclick: () => explodeImport(s) }, `Separar en ${pieces} piezas (cada una con sus agujeros)`));
         }
+        if (a.kind === 'vector' && pieces === 1) box.append(h('button', { class: 'wide', title: 'Suma una medida al ancho o al alto sin deformar dedos ni ranuras', onclick: () => openStretchDialog(s) }, 'Agrandar sumando una medida…'));
         if (a.kind === 'vector' && pieces >= 4 && pieces <= 40) {
           box.append(h('button', { class: 'primary wide', title: 'Separa el archivo en piezas y te deja elegir qué cara es cada una para verlas montadas', onclick: () => openAssembleDialog([s]) }, 'Armar como caja en 3D…'));
         }
@@ -6903,9 +6904,106 @@
     if (lid) out.set(lid.i, { face: 'top', rot: lid.w < lid.h });
     // Frente y atrás comparten el ancho mayor de la base; los lados, el menor
     const frontG = walls.find(g => near(g.hi, bw) || near(g.lo, bw)) || walls[0], sideG = walls.find(g => g !== frontG) || walls[1];
-    const place = (g, a, b, faceA, faceB, dim) => g.items.slice(0, 2).forEach((p, k) => out.set(p.i, { face: k ? faceB : faceA, rot: !near(p.w, dim) }));
+    const place = (g, a, b, faceA, faceB, dim) => g.items.slice(0, 2).forEach((p, k) => out.set(p.i, { face: k ? faceB : faceA, rot: !near(p.w, dim) && !near(p.w, p.h) }));
     place(frontG, 0, 0, 'front', 'back', bw);
     if (sideG) place(sideG, 0, 0, 'left', 'right', bd);
+    return out;
+  }
+  /* ================= Agrandar una pieza plana sumando una medida (sin deformar dedos ni ranuras) ================= */
+  // Se busca una línea (en el centro, donde no haya dedos ni ranuras) y se separa todo lo que queda a un lado de ella.
+  function stretchPolys(polys, texts, A, delta) {
+    const closed = polys.filter(p => p.closed && p.pts.length >= 3);
+    const outer = closed.length ? closed.reduce((a, c) => shoelace(c.pts) > shoelace(a.pts) ? c : a) : polys[0];
+    if (!outer) return { polys, texts, at: null };
+    const ob = ptsBox(outer.pts), lo = A ? ob.y0 : ob.x0, hi = A ? ob.y1 : ob.x1, L = hi - lo;
+    const bx = p => { const b = ptsBox(p.pts); return A ? [b.y0, b.y1, b.x1 - b.x0, b.y1 - b.y0] : [b.x0, b.x1, b.x1 - b.x0, b.y1 - b.y0]; };
+    // lo que no debe estirarse: ranuras y agujeros chicos
+    const rigid = polys.filter(p => p !== outer && p.closed).map(bx).filter(b => Math.max(b[2], b[3]) <= 15).map(b => [b[0] - 1.5, b[1] + 1.5]);
+    // bordes cortos del contorno (los dedos): su posición tampoco se toca
+    const pts = outer.pts, n = pts.length, tabs = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % n], d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      // solo los bordes rectos y cortos (los lados de un dedo), no los tramos de una curva
+      const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]), straight = Math.min(dx, dy) < 0.02 * Math.max(dx, dy, 1e-9);
+      if (d < 12 && d > 0.8 && straight) tabs.push([Math.min(a[A], b[A]) - 2, Math.max(a[A], b[A]) + 2]);
+    }
+    const mid = (lo + hi) / 2, others = polys.filter(p => p !== outer).map(bx);
+    let best = null;
+    for (let c = lo + L * 0.08; c <= hi - L * 0.08; c += 0.5) {
+      if (rigid.some(r => c >= r[0] && c <= r[1]) || tabs.some(r => c >= r[0] && c <= r[1])) continue;
+      const cross = others.filter(b => b[0] < c && b[1] > c).length, score = cross * 1000 + Math.abs(c - mid);
+      if (!best || score < best.score) best = { c, score };
+    }
+    if (!best) return { polys, texts, at: null };
+    const c = best.c, mv = q => q[A] > c ? (A ? [q[0], q[1] + delta] : [q[0] + delta, q[1]]) : q;
+    return {
+      polys: polys.map(p => ({ ...p, pts: p.pts.map(mv) })),
+      texts: texts.map(t => { const [x, y] = mv([t.x, t.y]); return { ...t, x, y }; }),
+      at: c,
+    };
+  }
+  // Reemplaza una pieza importada por la misma pieza estirada (A: 0 = ancho, 1 = alto) en delta mm; devuelve la nueva figura
+  function stretchShape(s, A, delta) {
+    const r = evalCache.get(s.id);
+    if (!r || !(delta > 0)) return s;
+    const polys = r.items.flatMap(it => it.polys.map(p => ({ closed: p.closed, op: it.op, pts: p.pts.map(q => [q[0], q[1]]) })));
+    const texts = r.items.flatMap(it => it.texts.map(t => ({ ...t, op: it.op })));
+    if (r.items.some(it => (it.images || []).length) || !polys.length) return s;
+    const res = stretchPolys(polys, texts, A, delta);
+    if (res.at === null) return s;
+    const o = importObject(s.name, res.polys, res.texts);
+    o.op = s.op;
+    if (s.from) o.from = s.from;
+    const list = listOf(s.id), i = list.indexOf(s);
+    list.splice(i, 1, o);
+    return o;
+  }
+  function openStretchDialog(s) {
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const dx = h('input', { type: 'number', step: 'any', min: '0', value: '0' }), dy = h('input', { type: 'number', step: 'any', min: '0', value: '0' });
+    const go = h('button', { class: 'primary' }, 'Agrandar');
+    go.onclick = () => {
+      evaluateParams(); evaluateAll();
+      let cur = s;
+      if (parseFloat(dx.value) > 0) cur = stretchShape(cur, 0, parseFloat(dx.value) * unitMM);
+      evaluateParams(); evaluateAll();
+      if (parseFloat(dy.value) > 0) cur = stretchShape(cur, 1, parseFloat(dy.value) * unitMM);
+      sel = new Set([cur.id]); close(); checkpoint(); fullRender();
+      msg(cur === s ? 'No se encontró un lugar donde estirar la pieza sin tocar los dedos o las ranuras.' : 'Pieza agrandada: se estiró por el centro, sin cambiar dedos ni ranuras.');
+    };
+    dialog.append(h('h2', {}, 'Agrandar la pieza'), h('p', { class: 'tip' }, 'Suma esta medida al ancho o al alto. La app busca una línea en el centro, donde no haya dedos ni ranuras, y separa la pieza por ahí: los dedos y las ranuras no cambian de tamaño, solo el centro se alarga.'),
+      h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, dx), h('label', {}, `Sumar al alto (${unitLabel()})`, dy)),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+  }
+
+  // Las piezas que quedan dentro de otra (trozos de un calado, agujeros) se juntan con ella: así cada cara es una sola pieza
+  function mergeNestedPieces(shapes) {
+    evaluateParams(); evaluateAll();
+    const info = shapes.map(s => { const r = evalCache.get(s.id); return r && r.bbox ? { s, b: r.bbox, area: r.bbox.w * r.bbox.h, items: r.items, kids: [] } : null; }).filter(Boolean);
+    info.sort((a, c) => c.area - a.area);
+    const inside = (k, p) => k.b.x >= p.b.x - 0.5 && k.b.y >= p.b.y - 0.5 && k.b.x + k.b.w <= p.b.x + p.b.w + 0.5 && k.b.y + k.b.h <= p.b.y + p.b.h + 0.5;
+    const parentOf2 = new Map();
+    for (const k of info) {
+      let best = null;
+      for (const p of info) if (p !== k && p.area > k.area * 1.0001 && inside(k, p) && (!best || p.area < best.area)) best = p;
+      if (best) { let top = best; while (parentOf2.get(top)) top = parentOf2.get(top); parentOf2.set(k, top); }
+    }
+    const out = [];
+    for (const p of info) {
+      if (parentOf2.get(p)) continue;
+      const kids = info.filter(k => parentOf2.get(k) === p);
+      if (!kids.length) { out.push(p.s); continue; }
+      const polys = [p, ...kids].flatMap(q => q.items.flatMap(it => it.polys.map(pl => ({ closed: pl.closed, op: it.op, pts: pl.pts.map(z => [z[0], z[1]]) }))));
+      const o = importObject(p.s.name, polys, []);
+      o.op = new Set(polys.map(pl => pl.op)).size === 1 ? polys[0].op : 'archivo';
+      const list = listOf(p.s.id), i = list.indexOf(p.s);
+      list.splice(i, 1, o);
+      for (const k of kids) { const l2 = listOf(k.s.id), j = l2.indexOf(k.s); if (j >= 0) l2.splice(j, 1); }
+      out.push(o);
+    }
     return out;
   }
   async function openAssembleDialog(shapesIn) {
@@ -6921,6 +7019,8 @@
     }
     // Las figuras sencillas pasan a ser dibujos editables
     shapes = shapes.map(s => (s.type !== 'import' && CONVERTIBLE.has(s.type)) ? (convertToEditable(s) || s) : s).filter(s => s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector');
+    shapes = mergeNestedPieces(shapes);
+    if (sel.size) { sel = new Set(shapes.map(x => x.id)); }
     if (shapes.length < 4) { msg('Elige al menos 4 piezas planas (por ejemplo todo el archivo con Cmd+A) para armarlas como caja.'); return; }
     evaluateParams(); evaluateAll();
     const pcs = shapes.map((s, i) => { const r = evalCache.get(s.id), b = r && r.bbox; return b ? { i, s, w: b.w, h: b.h, items: r.items } : null; }).filter(Boolean);
@@ -6931,7 +7031,7 @@
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
     const status = h('p', { class: 'tip', role: 'status' });
     const tIn = h('input', { type: 'number', step: 'any', min: '0.1', value: fmt(tDef / unitMM, isInch() ? 4 : 2) });
-    const styleSel = h('select', { 'aria-label': 'Tipo de unión' }, h('option', { value: 'dedos' }, 'Con dedos (las piezas miden lo mismo que la caja)'), h('option', { value: 'pegada' }, 'Para pegar (las paredes van entre la base y la tapa)'));
+    const styleSel = h('select', { 'aria-label': 'Tipo de unión' }, h('option', { value: 'dedos' }, 'Con dedos (las piezas miden lo mismo que la caja)'), h('option', { value: 'pegada' }, 'Para pegar (las paredes van entre la base y la tapa)'), h('option', { value: 'espigas' }, 'Con espigas y ranuras (los lados y la base entran por ranuras del frente y el atrás)'));
     const rows = pcs.map(p => {
       const cv = h('canvas', { width: '90', height: '70', class: 'asm-thumb' });
       const c = cv.getContext('2d'), k = Math.min(80 / Math.max(p.w, 1), 60 / Math.max(p.h, 1));
@@ -6944,6 +7044,41 @@
       const rot = h('input', { type: 'checkbox' }); rot.checked = sug.get(p.i).rot;
       return { p, face, rot, el: h('div', { class: 'asm-row' }, cv, h('div', {}, h('strong', {}, p.s.name), h('div', { class: 'tip' }, `${fmt(p.w / unitMM, isInch() ? 2 : 1)} × ${fmt(p.h / unitMM, isInch() ? 2 : 1)} ${unitLabel()}`)), face, h('label', { class: 'check' }, rot, ' girar 90°')) };
     });
+    // Para la unión con espigas: dónde quedan los lados y la base, leído de las ranuras chicas del frente
+    const frontRow0 = rows.find(r => r.face.value === 'front');
+    const detect = () => {
+      const r = frontRow0 && evalCache.get(frontRow0.p.s.id);
+      if (!r) return { inset: 3, baseY: 3 };
+      const b = r.bbox, sm = r.items.flatMap(it => it.polys).filter(p => p.closed && p.pts.length >= 3).map(p => ptsBox(p.pts)).filter(q => q.x1 - q.x0 <= 8 && q.y1 - q.y0 <= 8);
+      const left = sm.filter(q => q.x0 - b.x <= 15).map(q => q.x0 - b.x), bottom = sm.filter(q => b.y + b.h - q.y1 <= 15).map(q => b.y + b.h - q.y1);
+      return { inset: left.length ? Math.min(...left) : 3, baseY: bottom.length ? Math.min(...bottom) : 3 };
+    };
+    const det0 = detect();
+    const insetIn = h('input', { type: 'number', step: 'any', min: '0', value: fmt(det0.inset / unitMM, isInch() ? 3 : 1) }), baseYIn = h('input', { type: 'number', step: 'any', min: '0', value: fmt(det0.baseY / unitMM, isInch() ? 3 : 1) });
+    const espRow = h('div', { class: 'nest-grid', hidden: '' }, h('label', {}, `Distancia de los lados al borde (${unitLabel()})`, insetIn), h('label', {}, `Altura de la base sobre el borde de abajo (${unitLabel()})`, baseYIn));
+    styleSel.addEventListener('change', () => { espRow.hidden = styleSel.value !== 'espigas'; });
+    const incIn = () => h('input', { type: 'number', step: 'any', min: '0', value: '0' });
+    const iW = incIn(), iD = incIn(), iH = incIn();
+    const grow = h('button', { title: 'Alarga cada pieza según su cara, sin cambiar los dedos ni las ranuras' }, 'Agrandar las piezas');
+    grow.onclick = () => {
+      const dW = parseFloat(iW.value) * unitMM || 0, dD = parseFloat(iD.value) * unitMM || 0, dH = parseFloat(iH.value) * unitMM || 0;
+      if (!(dW > 0 || dD > 0 || dH > 0)) { status.textContent = 'Escribe cuánto sumar al ancho, al fondo o al alto.'; return; }
+      evaluateParams(); evaluateAll();
+      const roles = { front: [dW, dH], back: [dW, dH], left: [dD, dH], right: [dD, dH], bottom: [dW, dD], top: [dW, dD] };
+      let done = 0, failed = [];
+      const targets = rows.filter(r => r.face.value !== 'none').map(r => ({ r, s: r.p.s, rot: r.rot.checked, f: r.face.value }));
+      // las piezas que van giradas se estiran por el otro eje
+      const plan = targets.map(t => { const [a, b] = roles[t.f]; return { ...t, dx: t.rot ? b : a, dy: t.rot ? a : b }; });
+      for (const pl of plan) {
+        let cur = pl.s;
+        evaluateParams(); evaluateAll();
+        if (pl.dx > 0) { const n = stretchShape(cur, 0, pl.dx); if (n === cur) failed.push(cur.name); else { cur = n; done++; } }
+        evaluateParams(); evaluateAll();
+        if (pl.dy > 0) { const n = stretchShape(cur, 1, pl.dy); if (n === cur) failed.push(cur.name + ' (alto)'); else { cur = n; done++; } }
+      }
+      close(); checkpoint(); fullRender();
+      msg(`${done} estiramiento(s) hecho(s).` + (failed.length ? ` No se pudo en: ${[...new Set(failed)].join(', ')}.` : '') + ' Vuelve a pulsar «Armar como caja en 3D…» para verla.');
+    };
     const go = h('button', { class: 'primary' }, 'Armar en 3D');
     go.onclick = () => {
       const t = parseFloat(tIn.value) * unitMM;
@@ -6953,9 +7088,10 @@
       const dims = r => r.rot.checked ? [r.p.h, r.p.w] : [r.p.w, r.p.h];
       const fr = pick('front')[0] || pick('back')[0], sd = pick('left')[0] || pick('right')[0], bs = pick('bottom')[0];
       if (!fr || !sd || !bs) { status.textContent = 'Hace falta al menos un frente, un lado y una base.'; return; }
-      const glued = styleSel.value === 'pegada', hasTop = pick('top').length > 0;
+      const style = styleSel.value, glued = style === 'pegada', tslot = style === 'espigas', hasTop = pick('top').length > 0;
       const W = glued ? dims(bs)[0] : dims(fr)[0], Dd = glued ? dims(bs)[1] : dims(sd)[0], Hh = glued ? dims(fr)[1] + t + (hasTop ? t : 0) : dims(fr)[1];
       const m = { W, D: Dd, H: Hh, t, fingers: !glued, wall: false };
+      const inset = (parseFloat(insetIn.value) || 0) * unitMM, baseY = (parseFloat(baseYIn.value) || 0) * unitMM;
       // Las piezas que hay que girar se vuelven a crear ya giradas
       const gid = 'o' + uid();
       const names = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa' };
@@ -6968,7 +7104,19 @@
           const list = listOf(s.id), at = list.indexOf(s); list.splice(at, 1, o); s = o;
         }
         const f = r.face.value, [pw, ph] = dims(r), q = { name: names[f], place: f, h: ph, w: pw };
-        const ax = axesOf(m, q);
+        let ax = axesOf(m, q);
+        if (tslot) {
+          const bw = dims(bs)[0], bd = dims(bs)[1];
+          const A = {
+            front: { eu: [1, 0, 0], ev: [0, -1, 0], ew: [0, 0, 1], o: [0, Hh, 0], out: [0, 0, -1] },
+            back: { eu: [-1, 0, 0], ev: [0, -1, 0], ew: [0, 0, -1], o: [W, Hh, Dd], out: [0, 0, 1] },
+            left: { eu: [0, 0, 1], ev: [0, -1, 0], ew: [1, 0, 0], o: [inset, ph + baseY * 0, 0], out: [-1, 0, 0] },
+            right: { eu: [0, 0, -1], ev: [0, -1, 0], ew: [-1, 0, 0], o: [W - inset, ph, Dd], out: [1, 0, 0] },
+            bottom: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [(W - bw) / 2, baseY, (Dd - bd) / 2], out: [0, -1, 0] },
+            top: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, -1, 0], o: [(W - bw) / 2, Hh, (Dd - bd) / 2], out: [0, 1, 0] },
+          }[f];
+          if (A) ax = A;
+        }
         s.from = { gid, name: doc.name || 'Caja' };
         s.asm = { name: names[f], ax: JSON.parse(JSON.stringify(ax)) };
         s.name = names[f] + (pick(f).length > 1 ? ' ' + (pick(f).indexOf(r) + 1) : '');
@@ -6982,8 +7130,13 @@
     dialog.append(h('h2', {}, 'Armar la caja en 3D'),
       h('p', { class: 'tip' }, 'La app propone qué cara es cada pieza según su tamaño. Corrige las que no coincidan y, si una pieza está acostada, marca «girar 90°». Funciona con cajas rectas (con tapa o sin ella).'),
       h('div', { class: 'nest-grid' }, h('label', {}, `Grosor de la madera (${unitLabel()})`, tIn), h('label', {}, 'Tipo de unión', styleSel)),
-      h('div', { class: 'asm-list' }, ...rows.map(r => r.el)), status,
-      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+      espRow,
+      h('div', { class: 'asm-list' }, ...rows.map(r => r.el)),
+      h('div', { class: 'insp-sub' }, 'Agrandar la caja (opcional)'),
+      h('p', { class: 'tip' }, 'Suma una medida a cada cara de la caja. Los dedos y las ranuras no cambian de tamaño: el centro de cada pieza se alarga.'),
+      h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, iW), h('label', {}, `Sumar al fondo (${unitLabel()})`, iD), h('label', {}, `Sumar al alto (${unitLabel()})`, iH)),
+      status,
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), grow, go));
     document.body.append(dialog); dialog.showModal();
   }
 
