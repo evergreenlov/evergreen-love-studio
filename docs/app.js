@@ -6581,7 +6581,74 @@
     applyExplode();
   }
 
+  // Vista 3D de un arte cualquiera (SVG importado, figuras dibujadas…): cada pieza cortada se extruye con el grosor de la madera
+  function build3DArt() {
+    const T = window.THREE;
+    const { items } = exportItems();
+    const cuts = items.filter(it => it.op === 'corte'), marks = items.filter(it => it.op !== 'corte');
+    const tMM = vars.grosor !== undefined && vars.grosor * unitMM > 0 ? vars.grosor * unitMM : 3;
+    const closed = cuts.flatMap(it => it.polys.filter(p => p.closed && p.pts.length >= 3));
+    const allPts = items.flatMap(it => it.polys.flatMap(p => p.pts));
+    for (const c of [...v3.group.children]) {
+      c.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+      v3.group.remove(c);
+    }
+    const msgEl = $('#view3dMsg');
+    if (!allPts.length) { msgEl.hidden = false; msgEl.textContent = 'No hay dibujo para mostrar en 3D todavía.'; return; }
+    const b = ptsBox(allPts), cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2;
+    const groups = splitPieces(closed).slice(0, 400);
+    const wood = /walnut|nogal/i.test(doc.wood || '') ? 0x6b4a2f : /mahogany|caoba/i.test(doc.wood || '') ? 0x7a3b25 : /acr/i.test(doc.wood || '') ? 0xbfe3f0 : 0xe0bf8a;
+    let n = 0;
+    for (const grp of groups) {
+      const outer = grp.reduce((a, c) => shoelace(c.pts) > shoelace(a.pts) ? c : a);
+      const shape = new T.Shape(outer.pts.map(([x, y]) => new T.Vector2(x, -y)));
+      for (const hl of grp) if (hl !== outer) shape.holes.push(new T.Path(hl.pts.map(([x, y]) => new T.Vector2(x, -y))));
+      const geo = new T.ExtrudeGeometry(shape, { depth: tMM, bevelEnabled: false, curveSegments: 1 });
+      geo.rotateX(-Math.PI / 2);
+      const holder = new T.Group();
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: wood, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const edges = new T.LineSegments(new T.EdgesGeometry(geo, 30), new T.LineBasicMaterial({ color: 0x6b4a2b }));
+      holder.add(mesh, edges);
+      holder.userData.out = [0, 0, 0];
+      v3.group.add(holder); n++;
+    }
+    // Grabado, marcado y líneas de corte abiertas (bisagras): se dibujan sobre las piezas
+    const W = b.x1 - b.x0 + 2, H = b.y1 - b.y0 + 2, sc = Math.min(8, 2048 / Math.max(W, H));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(2, Math.round(W * sc)); cv.height = Math.max(2, Math.round(H * sc));
+    const c = cv.getContext('2d');
+    const X = x => (x - b.x0 + 1) * sc, Y = y => (y - b.y0 + 1) * sc;
+    const trace = list => { c.beginPath(); for (const p of list) { p.pts.forEach(([x, y], i) => i ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y))); if (p.closed) c.closePath(); } };
+    let drawn = 0;
+    for (const it of marks) {
+      const col = it.op === 'marcado' ? 'rgba(40,70,140,0.9)' : 'rgba(58,32,14,0.88)';
+      c.fillStyle = c.strokeStyle = col; c.lineWidth = Math.max(1, 0.25 * sc);
+      const cl = it.polys.filter(p => p.closed), op = it.polys.filter(p => !p.closed);
+      if (cl.length) { trace(cl); if (it.op === 'grabado') c.fill('evenodd'); else c.stroke(); drawn++; }
+      if (op.length) { trace(op); c.stroke(); drawn++; }
+      for (const t of it.texts) { c.font = `${t.size * sc}px Arial, sans-serif`; c.textAlign = t.anchor === 'middle' ? 'center' : 'left'; c.save(); c.translate(X(t.x), Y(t.y)); c.rotate((t.rot || 0) * DEG); c.fillText(t.str, 0, 0); c.restore(); drawn++; }
+    }
+    c.strokeStyle = 'rgba(58,32,14,0.7)'; c.lineWidth = Math.max(1, 0.2 * sc);
+    for (const it of cuts) { const op = it.polys.filter(p => !p.closed); if (op.length) { trace(op); c.stroke(); drawn++; } }
+    if (drawn) {
+      const tex = new T.CanvasTexture(cv);
+      tex.anisotropy = v3.renderer.capabilities.getMaxAnisotropy();
+      const geo = new T.PlaneGeometry(W, H); geo.rotateX(-Math.PI / 2);
+      const plane = new T.Mesh(geo, new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
+      plane.position.set((b.x0 + b.x1) / 2, tMM + 0.05, (b.y0 + b.y1) / 2);
+      const holder = new T.Group(); holder.add(plane); holder.userData.out = [0, 0, 0];
+      v3.group.add(holder);
+    }
+    v3.group.position.set(-cx, -tMM / 2, -cz);
+    v3.pivot.rotation.x = 0;
+    v3.model = { W: b.x1 - b.x0, H: tMM, D: b.y1 - b.y0, t: tMM, wall: false };
+    msgEl.hidden = n > 0 || drawn > 0;
+    if (!n && !drawn) msgEl.textContent = 'No hay nada para mostrar.';
+    $('#view3dTitle').textContent = `${doc.name || 'Diseño'} · vista 3D · ${n} pieza(s) de ${fmt(tMM / unitMM, isInch() ? 3 : 1)} ${unitLabel()} de grosor` + (groups.length >= 400 ? ' (se muestran las primeras 400)' : '');
+  }
+
   function build3D() {
+    if (v3.art) { build3DArt(); return; }
     if (v3.gid) { build3DPieces(); return; }
     const T = window.THREE, s = byId(v3.id);
     const m = modelOf(s, true);
@@ -6797,7 +6864,7 @@
     const m = v3.model;
     if (!m) return;
     const R = Math.hypot(m.W, m.H, m.D);
-    v3.camera.position.set(R * 0.95, R * 0.8, -R * 1.45);
+    if (v3.art) v3.camera.position.set(0, R * 1.25, R * 1.0); else v3.camera.position.set(R * 0.95, R * 0.8, -R * 1.45);
     v3.controls.target.set(0, 0, 0);
     v3.controls.update();
     v3.lastR = R;
@@ -6821,9 +6888,16 @@
         if (pc) gid = pc.from.gid;
       }
     }
-    if (!id && !gid) { msg('La vista 3D muestra cajas, canastas, conos y bandejas. Crea una con Plantillas o con la herramienta Caja (K).'); return; }
+    let art = false;
+    if (!id && !gid) {
+      evaluateParams(); evaluateAll();
+      art = allShapes().some(x => !x.hidden && evalCache.has(x.id) && (evalCache.get(x.id).items || []).length);
+      if (!art) { msg('La vista 3D muestra tu diseño con el grosor de la madera. Dibuja algo, importa un SVG o crea una caja con Plantillas.'); return; }
+    }
+    // Con una figura elegida que no es caja (un SVG, un dibujo), se ve el arte en 3D aunque haya cajas en el diseño
+    if (!gid && id && [...sel].length && ![...sel].map(byId).some(x => x && ['box', 'basket', 'taper', 'cone', 'planter'].includes(x.type)) && [...sel].map(byId).some(x => x && x.type === 'import')) { id = null; art = true; }
     if (!init3D()) return;
-    v3.id = id; v3.gid = gid; v3.open = true; v3.lastR = null;
+    v3.id = id; v3.gid = gid; v3.art = art; v3.open = true; v3.lastR = null;
     $('#view3d').hidden = false;
     resize3D();
     evaluateParams();
@@ -6858,7 +6932,7 @@
     $('#unitSelect').value = doc.units;
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
-    if (v3.open) { if (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id)) build3D(); else close3D(); }
+    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) build3D(); else close3D(); }
   }
   function updateButtons() {
     $('#btnUndo').disabled = !undoStack.length && JSON.stringify(doc) === savedState;
