@@ -407,3 +407,4 @@ button.wide { width: 100%; margin-top: 10px; }
   .stage-controls input[type=checkbox] { width: 22px; height: 22px; }
   .btn-grid button, .wide { min-height: 44px; }
 }
+.stage, #canvas { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }

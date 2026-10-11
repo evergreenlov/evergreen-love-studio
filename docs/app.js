@@ -2958,6 +2958,10 @@
   const sh = e => !!(e.shiftKey || addMode);
   const setHitK = e => { hitK = e.pointerType === 'touch' ? 2.4 : e.pointerType === 'pen' ? 1.5 : 1; };
 
+  // iPad/Safari: que el lienzo no haga zoom de página, desplazamiento ni menú al tocar
+  for (const t of ['touchstart', 'touchmove']) stage.addEventListener(t, e => { if (e.cancelable && e.target.closest && !e.target.closest('.stage-controls, .measure-bar')) e.preventDefault(); }, { passive: false });
+  for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, e => e.preventDefault(), { passive: false });
+
   /* ----- Tableta: pellizcar con dos dedos para acercar, alejar y mover el área de trabajo ----- */
   const touches = new Map();
   let pinch = null;
@@ -3003,7 +3007,7 @@
   /* ----- Puntero ----- */
   svg.addEventListener('pointerdown', e => {
     setHitK(e);
-    svg.setPointerCapture(e.pointerId);
+    try { svg.setPointerCapture(e.pointerId); } catch (err) { /* el navegador no lo permite: se sigue sin agarre */ }
     const p = toWorld(e);
     if (e.button === 1 || spaceDown || tool === 'hand') {
       drag = { mode: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
@@ -3192,7 +3196,9 @@
   svg.addEventListener('pointerup', endDrag);
   svg.addEventListener('pointercancel', endDrag);
   window.addEventListener('pointerup', endDrag);
-  svg.addEventListener('lostpointercapture', endDrag);
+  // Con el dedo, el navegador da el "agarre" al elemento tocado (un punto, una pieza); al pasárselo al lienzo avisa
+  // con lostpointercapture desde ese elemento. Eso NO debe terminar el arrastre: solo cuando lo suelta el lienzo.
+  svg.addEventListener('lostpointercapture', e => { if (e.target === svg) endDrag(); });
 
   // dx, dy en mm
   function moveShape(s, orig, dxMM, dyMM) {
