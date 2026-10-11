@@ -3593,7 +3593,7 @@
     const bar = $('#selBar');
     if (!bar) return;
     const shapes = [...sel].map(byId).filter(Boolean);
-    const can = shapes.length >= 2 && shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
+    const can = shapes.length >= 2;
     const canUn = shapes.some(s => s.type === 'group' || SEPARABLE.has(s.type));
     bar.hidden = !shapes.length || tool === 'pen' || tool === 'measure';
     $('#btnSelGroup').hidden = !can;
@@ -3640,7 +3640,7 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
-        ...(sameList ? [h('button', { class: 'primary wide', title: 'Agrupa sin combinar (Ctrl+G): se mueven y escalan juntos', onclick: () => groupSel('grupo') }, 'Agrupar')] : []),
+        h('button', { class: 'primary wide', title: 'Agrupa sin combinar (Ctrl+G): se mueven y escalan juntos', onclick: () => groupSel('grupo') }, 'Agrupar'),
         ...(() => { const f = shapes.find(x => x.from && doc.origins && doc.origins[x.from.gid]); return f ? [h('button', { class: 'wide', onclick: () => restoreOrigin(f.from.gid) }, `Volver a «${f.from.name}» con parámetros`)] : []; })(),
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
@@ -4259,7 +4259,7 @@
           class: (sel.has(s.id) ? 'selected' : '') + (depth ? ' child' : '') + (s.hidden ? ' is-hidden' : '') + (s.locked ? ' is-locked' : ''),
           style: depth ? `padding-left:${8 + depth * 14}px` : null,
           onclick: e => {
-            if (e.shiftKey) { sel.has(s.id) ? sel.delete(s.id) : sel.add(s.id); }
+            if (sh(e) || e.metaKey || e.ctrlKey) { sel.has(s.id) ? sel.delete(s.id) : sel.add(s.id); }
             else sel = new Set([s.id]);
             buildInspector(); buildObjects(); drawCanvas();
           },
@@ -5638,17 +5638,31 @@
     const shapes = [...sel].map(byId).filter(Boolean);
     if (shapes.length < 2 && mode !== 'grupo') { msg('Selecciona al menos dos figuras.'); return; }
     if (!shapes.length) return;
-    const list = listOf(shapes[0].id);
-    const members = list.filter(s => sel.has(s.id)); // en el orden de la lista (el de abajo primero)
-    if (members.length !== shapes.length) { msg('Para combinar, los objetos deben estar en el mismo nivel.'); return; }
+    let list = listOf(shapes[0].id);
+    let members = list.filter(s => sel.has(s.id)); // en el orden de la lista (el de abajo primero)
+    let moved = false;
+    if (members.length !== shapes.length) {
+      if (mode !== 'grupo') { msg('Para combinar (unir, restar…), los objetos deben estar en el mismo nivel.'); return; }
+      // Agrupar figuras de distintos niveles: las que están dentro de otra elegida se quedan con ella; el resto sale de su grupo
+      const inSel = s => { let p = parentOf(s.id); while (p) { if (sel.has(p.id)) return true; p = parentOf(p.id); } return false; };
+      const top = shapes.filter(s => !inSel(s));
+      const depth = s => { let d = 0, p = parentOf(s.id); while (p) { d++; p = parentOf(p.id); } return d; };
+      const shallow = top.reduce((m, s) => depth(s) < depth(m) ? s : m, top[0]);   // el grupo nuevo queda en el nivel más cercano a la raíz
+      list = listOf(shallow.id);
+      members = [...top.filter(s => listOf(s.id) === list).sort((x, y) => list.indexOf(x) - list.indexOf(y)), ...top.filter(s => listOf(s.id) !== list)];
+      moved = members.some(m => listOf(m.id) !== list);
+      const leaving = members.filter(m => listOf(m.id) !== list).map(m => parentOf(m.id)).filter(p => p && p.type === 'group' && (p.p.mode || 'grupo') !== 'grupo');
+      if (leaving.length && !confirm(`«${leaving[0].name}» combina figuras (${leaving[0].p.mode}). Al agrupar, las figuras elegidas salen de esa combinación y la forma puede cambiar (Deshacer lo repone). ¿Continuar?`)) return;
+    }
     if (mode !== 'grupo' && members.every(s => TYPES[s.type].open)) { msg('Unir y restar funcionan con figuras cerradas (no líneas ni texto).'); return; }
-    const at = list.indexOf(members[0]);
+    const at = Math.min(...members.map(m => list.indexOf(m)).filter(i => i >= 0));
     const label = { grupo: 'Grupo', unir: 'Unión', restar: 'Resta', intersectar: 'Intersección', excluir: 'Exclusión' }[mode];
     const g = { id: uid(), type: 'group', name: nextName(label), op: OPS[members[0].op] ? members[0].op : 'corte', p: { mode, x: '0', y: '0', rot: '0' }, children: members };
-    for (const m of members) list.splice(list.indexOf(m), 1);
-    list.splice(at, 0, g);
+    for (const m of members) { const l = listOf(m.id); l.splice(l.indexOf(m), 1); }
+    list.splice(Math.min(at, list.length), 0, g);
     sel = new Set([g.id]);
     checkpoint(); fullRender();
+    if (moved) msg('Se agruparon figuras que estaban en distintos niveles: las que estaban dentro de otro grupo salieron de él.');
     if (mode === 'restar') msg(`"${members[0].name}" es la pieza; las demás figuras se recortan de ella.`);
   }
   function ungroupSel() {
