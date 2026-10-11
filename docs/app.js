@@ -2949,6 +2949,43 @@
     fullRender();
   }
 
+  /* ----- Tableta: pellizcar con dos dedos para acercar, alejar y mover el área de trabajo ----- */
+  const touches = new Map();
+  let pinch = null;
+  const touchMid = () => { const [a, b] = [...touches.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; };
+  svg.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      if (drag) {
+        if (drag.mode === 'move' && drag.moved && drag.orig) for (const o of drag.orig) Object.assign(o.s.p, o.p);
+        drag = null; stage.classList.remove('panning'); snapLines = null;
+      }
+      const m = touchMid(), r = svg.getBoundingClientRect();
+      pinch = { d0: m.d, s0: view.s, wx: view.x + (m.x - r.left) / view.s, wy: view.y + (m.y - r.top) / view.s };
+      fullRender();
+      e.stopImmediatePropagation();
+    } else if (touches.size > 2 || pinch) e.stopImmediatePropagation();
+  }, { capture: true });
+  svg.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch || touches.size < 2) return;
+    const m = touchMid(), r = svg.getBoundingClientRect();
+    view.s = Math.max(0.2, Math.min(80, pinch.s0 * m.d / pinch.d0));
+    view.x = pinch.wx - (m.x - r.left) / view.s;
+    view.y = pinch.wy - (m.y - r.top) / view.s;
+    drawCanvas();
+    e.stopImmediatePropagation();
+  }, { capture: true });
+  const touchUp = e => {
+    if (e.pointerType !== 'touch') return;
+    touches.delete(e.pointerId);
+    if (pinch) { if (touches.size < 2) pinch = null; e.stopImmediatePropagation(); }
+  };
+  svg.addEventListener('pointerup', touchUp, { capture: true });
+  svg.addEventListener('pointercancel', touchUp, { capture: true });
+
   /* ----- Puntero ----- */
   svg.addEventListener('pointerdown', e => {
     svg.setPointerCapture(e.pointerId);

@@ -392,3 +392,7 @@ button.wide { width: 100%; margin-top: 10px; }
 .fit-main { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .fit-big { font-size: 28px; font-weight: 700; line-height: 1.1; }
 .batch-dialog [hidden] { display: none !important; }
+@media (pointer: coarse) {
+  .stage-controls button, .stage-controls select { min-height: 44px; min-width: 44px; font-size: 16px; }
+  .stage-controls .icon-btn { font-size: 22px; }
+}
