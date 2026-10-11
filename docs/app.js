@@ -1977,7 +1977,7 @@
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       for (const q of hiddenSelectedNodes(id)) {
-        const h2 = hs * 0.6;
+        const h2 = hs * (COARSE ? 0.8 : 0.6);
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt edit on', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
@@ -2563,6 +2563,13 @@
   function nodeToolsSection() {
     return [h('div', { class: 'insp-sub' }, 'Puntos y curvas'),
       h('p', { class: 'tip' }, 'Elige uno o varios puntos: toca, arrastra un recuadro sobre ellos (aunque empieces encima de la figura; el recuadro también toma los puntos de las curvas que no se ven, útil para alargar un mango), o pulsa «Elegir todos». Al arrastrar un punto elegido se mueven todos juntos. «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
+      h('div', { class: 'nudge-pad', role: 'group', 'aria-label': 'Mover los puntos elegidos poco a poco' },
+        h('span', { class: 'nudge-label' }, 'Mover los elegidos'),
+        ...[['←', -1, 0], ['↑', 0, -1], ['↓', 0, 1], ['→', 1, 0]].map(([t, dx, dy]) => h('button', { class: 'nudge-btn', title: 'Mueve los puntos elegidos un paso (un toque largo no repite)', onclick: () => {
+          if (!nodeSel.size) { msg('Elige primero los puntos que quieres mover.'); return; }
+          const step = isInch() ? 0.0625 * 25.4 : 1;
+          nudgeNodes(dx * step, dy * step);
+        } }, t))),
       h('label', { class: 'check' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = nodeBoxMode; c.addEventListener('change', () => { nodeBoxMode = c.checked; msg(nodeBoxMode ? 'Arrastrar sobre la figura hace un recuadro de puntos.' : 'Arrastrar sobre la figura la mueve entera; el recuadro empieza fuera de ella.'); }); return c; })(), ' Recuadro de puntos aunque empiece sobre la figura'),
       h('div', { class: 'btn-grid' },
         h('button', { class: 'primary', onclick: selectAllNodes, title: 'Elige todos los puntos de la figura (Cmd+A): al arrastrar uno se mueven todos juntos sin deformarla' }, 'Elegir todos los puntos'),
