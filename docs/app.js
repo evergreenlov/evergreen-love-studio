@@ -2170,6 +2170,17 @@
     checkpoint(); fullRender();
   }
   // Selecciona los puntos que caen dentro de un recuadro
+  let nodeBoxMode = true;           // con los puntos visibles, arrastrar sobre la figura hace un recuadro de puntos
+  function selectAllNodes() {
+    nodeSel.clear();
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      for (const q of nodeList(id)) if (q.edit) nodeSel.add(q.key);
+    }
+    if (nodeSel.size) msg(`${nodeSel.size} puntos elegidos: arrastra uno para mover todos juntos, sin deformar la figura.`);
+    else msg('Esta figura aún no tiene puntos editables: arrastra uno de sus puntos para convertirla en dibujo editable.');
+    buildInspector(); drawCanvas();
+  }
   function selectNodesIn(b, add) {
     if (!add) nodeSel.clear();
     for (const id of sel) {
@@ -2494,8 +2505,11 @@
   // Herramientas de curvas en el panel de la figura (cuando se ven sus puntos)
   function nodeToolsSection() {
     return [h('div', { class: 'insp-sub' }, 'Puntos y curvas'),
-      h('p', { class: 'tip' }, 'Elige uno o varios puntos (clic, Shift o recuadro). «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
+      h('p', { class: 'tip' }, 'Elige uno o varios puntos: toca, arrastra un recuadro sobre ellos (aunque empieces encima de la figura), o pulsa «Elegir todos». Al arrastrar un punto elegido se mueven todos juntos. «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
+      h('label', { class: 'check' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = nodeBoxMode; c.addEventListener('change', () => { nodeBoxMode = c.checked; msg(nodeBoxMode ? 'Arrastrar sobre la figura hace un recuadro de puntos.' : 'Arrastrar sobre la figura la mueve entera; el recuadro empieza fuera de ella.'); }); return c; })(), ' Recuadro de puntos aunque empiece sobre la figura'),
       h('div', { class: 'btn-grid' },
+        h('button', { class: 'primary', onclick: selectAllNodes, title: 'Elige todos los puntos de la figura (Cmd+A): al arrastrar uno se mueven todos juntos sin deformarla' }, 'Elegir todos los puntos'),
+        h('button', { onclick: () => { nodeSel.clear(); buildInspector(); drawCanvas(); }, title: 'Deja de tener puntos elegidos' }, 'Quitar elección'),
         h('button', { class: 'primary', onclick: () => smoothSelected(true), title: 'Convierte los puntos elegidos en curva suave' }, 'Suavizar'),
         h('button', { onclick: () => smoothSelected(false), title: 'Quita las manijas: el punto vuelve a ser una esquina' }, 'Punta'),
         h('button', { onclick: () => { if (nodeSel.size) deleteNodes(); else msg('Elige primero los puntos que quieres borrar.'); } }, 'Borrar punto'),
@@ -3029,7 +3043,7 @@
         if (d) { d.start = p; drag = d; }
         return;
       }
-      if (anyEditable() && !(e.target.closest && e.target.closest('[data-id]'))) {
+      if (anyEditable() && (nodeBoxMode || !(e.target.closest && e.target.closest('[data-id]')))) {
         drag = { mode: 'nmarq', start: p, cur: p, add: sh(e), had: nodeSel.size > 0 };
         return;
       }
@@ -7646,6 +7660,7 @@
     if (mod && k === 'c') { e.preventDefault(); copySel(false); return; }
     if (mod && k === 'x') { e.preventDefault(); copySel(true); return; }
     if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel('grupo'); return; }
+    if (mod && k === 'a' && anyEditable()) { e.preventDefault(); selectAllNodes(); return; }
     if (mod && k === 'a') { e.preventDefault(); sel = new Set(doc.shapes.map(s => s.id)); buildInspector(); buildObjects(); drawCanvas(); return; }
     if (mod) return;
     if (tool === 'pen') {
