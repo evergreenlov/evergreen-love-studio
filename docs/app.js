@@ -4663,7 +4663,9 @@
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'fitTitle' });
     const close = () => { dialog.close(); dialog.remove(); };
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
-    const num = (v, o = {}) => h('input', { type: 'number', min: '0', step: 'any', value: String(v), ...o });
+    evaluateParams();
+    const pv = el => { try { const v = evalExpr(String(el.value).replace(',', '.'), vars); return typeof v === 'number' ? v : NaN; } catch (e) { return NaN; } };
+    const num = (v, o = {}) => h('input', { type: o.step === '1' ? 'number' : 'text', inputmode: 'decimal', value: String(v), ...(o.step === '1' ? { min: o.min || '1', step: '1' } : {}) });
     const dec = mm => fmt(mm / unitMM, 3);
     const mode = h('select', { 'aria-label': 'De dónde salen las piezas' },
       h('option', { value: 'manual' }, 'Escribir las medidas de las piezas'),
@@ -4681,6 +4683,12 @@
     const tIn = num(dec(6.35));
     const gapIn = num(dec(3)), marIn = num(dec(5)), qtyIn = num('10', { step: '1', min: '1' });
     const rot = h('input', { type: 'checkbox', checked: '' });
+    const plist = doc.params.filter(p => Number.isFinite(vars[p.name]));
+    const tParam = plist.find(p => /^(grosor|espesor|thickness|t)$/i.test(p.name));
+    if (tParam) {
+      const mm = vars[tParam.name] * unitMM, near = FIT_THICK.find(t => Math.abs(t[1] - mm) < 0.3);
+      if (near) thickSel.value = String(near[1]); else { thickSel.value = 'custom'; tIn.value = tParam.name; }
+    }
     const out = h('div', { class: 'fit-out' });
     const manualBox = h('div', {});
     const areaTxt = mm2 => isInch() ? `${fmt(mm2 / 645.16, 0)} in² (${fmt(mm2 / 645.16 / 144, 2)} ft²)` : `${fmt(mm2 / 100, 0)} cm² (${fmt(mm2 / 1e6, 2)} m²)`;
@@ -4694,12 +4702,12 @@
     };
     const getUnits = () => {
       if (mode.value === 'design') return designUnits;
-      const w = parseFloat(pw.value) * unitMM, hh = parseFloat(ph.value) * unitMM, n = Math.floor(+pn.value);
+      const w = pv(pw) * unitMM, hh = pv(ph) * unitMM, n = Math.floor(+pn.value);
       if (!(w > 0 && hh > 0 && n >= 1)) return null;
       const u = [];
       for (let i = 0; i < n; i++) u.push({ w, h: hh, area: w * hh, label: 'Pieza' });
       if (cov.checked) {
-        const w2 = parseFloat(cw.value) * unitMM, h2 = parseFloat(ch.value) * unitMM, n2 = Math.floor(+cn.value);
+        const w2 = pv(cw) * unitMM, h2 = pv(ch) * unitMM, n2 = Math.floor(+cn.value);
         if (!(w2 > 0 && h2 > 0 && n2 >= 1)) return null;
         for (let i = 0; i < n2; i++) u.push({ w: w2, h: h2, area: w2 * h2, label: 'Cobertura' });
       }
@@ -4707,15 +4715,15 @@
     };
     const calc = () => {
       syncVis();
-      const gap = parseFloat(gapIn.value) * unitMM, mar = parseFloat(marIn.value) * unitMM, qty = Math.floor(+qtyIn.value);
+      const gap = pv(gapIn) * unitMM, mar = pv(marIn) * unitMM, qty = Math.floor(+qtyIn.value);
       const units = getUnits();
-      if (!units) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa las medidas y las cantidades de las piezas: deben ser mayores que cero.')); return; }
+      if (!units) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa las medidas y las cantidades de las piezas: deben ser números (o nombres de Parámetros) mayores que cero.')); return; }
       if (![gap, mar].every(Number.isFinite) || gap < 0 || mar < 0 || !(qty >= 1)) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa la separación, el margen y la cantidad de cajas.')); return; }
-      const thick = thickSel.value === 'custom' ? parseFloat(tIn.value) * unitMM : parseFloat(thickSel.value);
+      const thick = thickSel.value === 'custom' ? pv(tIn) * unitMM : pv(thickSel);
       const thickName = thickSel.value === 'custom' ? L(thick) : FIT_THICK.find(t => String(t[1]) === thickSel.value)[0];
       const tot = units.reduce((a, u) => a + u.area, 0);
       const mach = ['Área de la máquina (la actual)', doc.sheet.w, doc.sheet.h];
-      const chosen = sheetSel.value === 'custom' ? [`Mi plancha ${L(parseFloat(sw.value) * unitMM)} × ${L(parseFloat(sh.value) * unitMM)}`, parseFloat(sw.value) * unitMM, parseFloat(sh.value) * unitMM]
+      const chosen = sheetSel.value === 'custom' ? [`Mi plancha ${L(pv(sw) * unitMM)} × ${L(pv(sh) * unitMM)}`, pv(sw) * unitMM, pv(sh) * unitMM]
         : sheetSel.value === 'mach' ? mach : FIT_SHEETS[+sheetSel.value];
       if (!(chosen[1] > 0 && chosen[2] > 0)) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa el tamaño de la plancha.')); return; }
       const compute = ([name, w, hh]) => {
@@ -4727,18 +4735,24 @@
       };
       const typeCounts = ([, w, hh]) => {
         const one = (ww, h2, name) => `${fitPieces([{ w: ww, h: h2 }], w, hh, gap, mar, rot.checked)} ${name} de ${fmt(ww / unitMM, 2)} × ${fmt(h2 / unitMM, 2)} ${unitLabel()}`;
-        const parts = [one(parseFloat(pw.value) * unitMM, parseFloat(ph.value) * unitMM, 'piezas')];
-        if (cov.checked) parts.push(one(parseFloat(cw.value) * unitMM, parseFloat(ch.value) * unitMM, 'coberturas'));
+        const parts = [one(pv(pw) * unitMM, pv(ph) * unitMM, 'piezas')];
+        if (cov.checked) parts.push(one(pv(cw) * unitMM, pv(ch) * unitMM, 'coberturas'));
         return 'si cortas solo un tipo: ' + parts.join(' o ');
       };
       const mine = compute(chosen);
       const others = [...FIT_SHEETS, mach].filter(s => s[0] !== chosen[0]).map(compute);
       const piecesPerBox = units.length;
+      let listTxt = '';
+      if (mode.value === 'design') {
+        const g = {};
+        for (const u of units) { const k = `${fmt(Math.max(u.w, u.h) / unitMM, 2)} × ${fmt(Math.min(u.w, u.h) / unitMM, 2)}`; g[k] = (g[k] || 0) + 1; }
+        listTxt = `Piezas de tu diseño (con los Parámetros de ahora): ${Object.entries(g).map(([k, v]) => `${v} de ${k} ${unitLabel()}`).join(', ')}. `;
+      }
       const head = mine.err
         ? h('p', { class: 'tip err-tip' }, `${mine.name}: ${mine.err}.`)
         : h('div', { class: 'fit-main' },
           h('div', { class: 'fit-big' }, `${mine.n} plancha${mine.n > 1 ? 's' : ''}`),
-          h('p', { class: 'tip' }, `Para ${qty} caja${qty > 1 ? 's' : ''} (${piecesPerBox} pieza${piecesPerBox > 1 ? 's' : ''} cada una, ${qty * piecesPerBox} en total) en madera de ${thickName}. Plancha: ${mine.name.replace('Madera ', '')}. `
+          h('p', { class: 'tip' }, listTxt + `Para ${qty} caja${qty > 1 ? 's' : ''} (${piecesPerBox} pieza${piecesPerBox > 1 ? 's' : ''} cada una, ${qty * piecesPerBox} en total) en madera de ${thickName}. Plancha: ${mine.name.replace('Madera ', '')}. `
             + `Compras ${areaTxt(mine.bought)} y se corta ${areaTxt(mine.used)}; sobra el ${fmt((1 - mine.used / mine.bought) * 100, 0)} %. `
             + `En cada plancha caben ${mine.p} pieza${mine.p > 1 ? 's' : ''}`
             + (mode.value === 'manual' ? ` (${typeCounts(chosen)})` : '') + '. '
@@ -4782,7 +4796,9 @@
       h('div', { class: 'nest-grid' }, row(`Ancho de la cobertura (${unitLabel()})`, cw), row(`Alto de la cobertura (${unitLabel()})`, ch), row('Coberturas por caja', cn)));
     dialog.append(h('h2', { id: 'fitTitle' }, '¿Cuánta madera necesito?'),
       h('p', {}, 'Dime las piezas, cuántas cajas quieres, la plancha y el grosor, y calculo cuántas planchas necesitas. No mueve nada de tu diseño.'),
-      row('Piezas', mode), manualBox,
+      row('Piezas', mode),
+      plist.length ? h('p', { class: 'tip' }, 'Medidas de Parámetros que puedes usar en los cuadros (escribe el nombre o una cuenta, como ancho o alto*2): ' + plist.map(p => `${p.name} = ${fmt(vars[p.name], 3)} ${unitLabel()}`).join(' · ')) : null,
+      manualBox,
       h('div', { class: 'nest-grid' }, row('¿Cuántas cajas quieres hacer?', qtyIn), row('Grosor de la madera', thickSel), row('Tamaño de la plancha', sheetSel), row(`Grosor (${unitLabel()})`, tIn),
         row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn)),
       h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
