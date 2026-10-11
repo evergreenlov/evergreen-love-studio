@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-puntos-4">
+<link rel="stylesheet" href="estilos.css?v=20261019-agrupar-1">
 </head>
 <body>
 <header class="topbar">
@@ -103,6 +103,12 @@
       <p class="view3d-help">Arrastra para girar · rueda para acercar · clic derecho para desplazar · Esc para cerrar</p>
       <p class="view3d-msg" id="view3dMsg" hidden></p>
     </div>
+    <div class="measure-bar" id="selBar" hidden>
+      <button id="btnSelGroup" class="active" title="Agrupa lo elegido sin combinar (Ctrl+G)">Agrupar</button>
+      <button id="btnSelUngroup" title="Separa el grupo o la caja en piezas (Ctrl+Shift+G)">Desagrupar</button>
+      <button id="btnSelDup" title="Duplicar">Duplicar</button>
+      <button id="btnSelDel" title="Eliminar lo elegido">Eliminar</button>
+    </div>
     <div class="measure-bar" id="penBar" hidden>
       <button id="btnPenDone" class="active" title="Termina el trazo (como doble clic o Enter)">Terminar</button>
       <button id="btnPenClose" title="Une el último punto con el primero">Cerrar forma</button>
@@ -156,6 +162,6 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-puntos-4"></script>
+<script src="app.js?v=20261019-agrupar-1"></script>
 </body>
 </html>

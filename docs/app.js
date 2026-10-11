@@ -3266,6 +3266,7 @@
     stage.classList.toggle('tool-draw', !['select', 'hand'].includes(t));
     stage.classList.toggle('tool-hand', t === 'hand');
     $('#measureBar').hidden = t !== 'measure';
+    if (typeof updateSelBar === 'function' && doc) updateSelBar();
     if (t !== 'pen') penCancel();
     meas.a = null; meas.hover = null; meas.cur = null;
     if (t === 'measure') msg('Medir: haz clic en dos puntos (se pegan a esquinas, centros y bordes) o cambia a "Ranura o contorno".');
@@ -3566,6 +3567,18 @@
   function buildInspector() {
     buildInspectorFields();
     refreshHints();
+    updateSelBar();
+  }
+  // Barra flotante sobre el lienzo con las acciones de siempre para lo elegido (sin teclado ni panel)
+  function updateSelBar() {
+    const bar = $('#selBar');
+    if (!bar) return;
+    const shapes = [...sel].map(byId).filter(Boolean);
+    const can = shapes.length >= 2 && shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
+    const canUn = shapes.some(s => s.type === 'group' || SEPARABLE.has(s.type));
+    bar.hidden = !shapes.length || tool === 'pen' || tool === 'measure';
+    $('#btnSelGroup').hidden = !can;
+    $('#btnSelUngroup').hidden = !canUn;
   }
   function buildInspectorFields() {
     const box = $('#inspector');
@@ -3608,6 +3621,7 @@
       const sameList = shapes.every(s => listOf(s.id) === listOf(shapes[0].id));
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
+        ...(sameList ? [h('button', { class: 'primary wide', title: 'Agrupa sin combinar (Ctrl+G): se mueven y escalan juntos', onclick: () => groupSel('grupo') }, 'Agrupar')] : []),
         ...(() => { const f = shapes.find(x => x.from && doc.origins && doc.origins[x.from.gid]); return f ? [h('button', { class: 'wide', onclick: () => restoreOrigin(f.from.gid) }, `Volver a «${f.from.name}» con parámetros`)] : []; })(),
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
@@ -7547,6 +7561,10 @@
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
   $('#unitSelect').onchange = e => setUnits(e.target.value);
+  $('#btnSelGroup').onclick = () => groupSel('grupo');
+  $('#btnSelUngroup').onclick = ungroupSel;
+  $('#btnSelDup').onclick = duplicateSel;
+  $('#btnSelDel').onclick = deleteSel;
   $('#chkAdd').onchange = e => { addMode = e.target.checked; };
   $('#btnPenDone').onclick = () => { penFinish(false); };
   $('#btnPenClose').onclick = () => { if (pen.nodes.length >= 3) penFinish(true); else msg('Para cerrar la forma hacen falta al menos 3 puntos.'); };

@@ -408,3 +408,5 @@ button.wide { width: 100%; margin-top: 10px; }
   .btn-grid button, .wide { min-height: 44px; }
 }
 .stage, #canvas { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+#selBar { top: auto; bottom: 64px; }
+#selBar button:last-child { color: var(--danger, #b3261e); }
