@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-unidades-1">
+<link rel="stylesheet" href="estilos.css?v=20261019-puntos-1">
 </head>
 <body>
 <header class="topbar">
@@ -103,6 +103,11 @@
       <p class="view3d-help">Arrastra para girar · rueda para acercar · clic derecho para desplazar · Esc para cerrar</p>
       <p class="view3d-msg" id="view3dMsg" hidden></p>
     </div>
+    <div class="measure-bar" id="penBar" hidden>
+      <button id="btnPenDone" class="active" title="Termina el trazo (como doble clic o Enter)">Terminar</button>
+      <button id="btnPenClose" title="Une el último punto con el primero">Cerrar forma</button>
+      <button id="btnPenCancel" title="Borra el trazo que llevas (Esc)">Cancelar</button>
+    </div>
     <div class="measure-bar" id="measureBar" hidden>
       <button id="btnMeasTwo" class="active" title="Haz clic en dos puntos">Entre dos puntos</button>
       <button id="btnMeasShape" title="Un clic dentro de una ranura, agujero o pieza mide su ancho y largo">Ranura o contorno</button>
@@ -113,6 +118,7 @@
       <span id="zoomLabel">100%</span>
       <button id="btnZoomIn" class="icon-btn" title="Acercar" aria-label="Acercar">+</button>
       <button id="btnFit" title="Ver todo (0)">Ver todo</button>
+      <label class="check" title="Para elegir varias piezas o puntos con el dedo, sin Shift"><input type="checkbox" id="chkAdd"> Sumar</label>
       <label class="check"><input type="checkbox" id="chkSnap" checked> Imán</label>
       <select id="unitSelect" aria-label="Unidades" title="Unidades de medida">
         <option value="mm">mm</option>
@@ -150,6 +156,6 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-unidades-1"></script>
+<script src="app.js?v=20261019-puntos-1"></script>
 </body>
 </html>

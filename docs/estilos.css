@@ -401,3 +401,9 @@ button.wide { width: 100%; margin-top: 10px; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
 @media (pointer: coarse) { .seg button { min-height: 44px; padding: 8px 16px; font-size: 16px; } }
+@media (pointer: coarse) {
+  .measure-bar button { min-height: 44px; padding: 8px 14px; font-size: 16px; }
+  .stage-controls .check { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; }
+  .stage-controls input[type=checkbox] { width: 22px; height: 22px; }
+  .btn-grid button, .wide { min-height: 44px; }
+}

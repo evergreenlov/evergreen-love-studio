@@ -1964,7 +1964,7 @@
   }
   const anyEditable = () => [...sel].some(id => nodeShow.has(id) && importFrame(byId(id)) && !importFrame(byId(id)).rotated);
   function drawNodes() {
-    const px = 1 / view.s, hs = 7 * px;
+    const px = 1 / view.s, hs = 7 * px * (COARSE ? 1.9 : 1);
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       const pts = nodeList(id), step = Math.max(1, Math.ceil(pts.length / 2500));
@@ -1997,7 +1997,7 @@
     buildInspector(); buildObjects(); drawCanvas();
   }
   function nodeNear(p) {
-    let best = null, bd = 10 / view.s;
+    let best = null, bd = 10 * hitK / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       for (const q of nodeList(id)) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id, kind: 'node' }; } }
@@ -2006,7 +2006,7 @@
   }
   // Punto más cercano sobre un borde de un dibujo editable (para añadir un punto)
   function segNear(p) {
-    let best = null, bd = 8 / view.s;
+    let best = null, bd = 8 * hitK / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       const fr = importFrame(byId(id));
@@ -2405,12 +2405,12 @@
       if (!nodeShow.has(id)) continue;
       for (const hd of bezHandlesOf(id)) {
         svgEl('path', { d: `M${r4(hd.bx)} ${r4(hd.by)}L${r4(hd.x)} ${r4(hd.y)}`, class: 'bez-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
-        svgEl('circle', { cx: r4(hd.x), cy: r4(hd.y), r: r4(4.5 * px), class: 'bez-handle', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+        svgEl('circle', { cx: r4(hd.x), cy: r4(hd.y), r: r4(4.5 * px * (COARSE ? 1.9 : 1)), class: 'bez-handle', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
   }
   function bezHandleNear(p) {
-    let best = null, bd = 9 / view.s;
+    let best = null, bd = 9 * hitK / view.s;
     for (const id of sel) if (nodeShow.has(id)) for (const hd of bezHandlesOf(id)) { const d = Math.hypot(hd.x - p.x, hd.y - p.y); if (d < bd) { bd = d; best = hd; } }
     return best;
   }
@@ -2431,7 +2431,7 @@
   }
   // Punto más cercano sobre un tramo curvo (para añadir un punto sin cambiar la forma)
   function csegNear(p) {
-    let best = null, bd = 8 / view.s;
+    let best = null, bd = 8 * hitK / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       const fr = importFrame(byId(id));
@@ -2559,6 +2559,7 @@
 
   function drawOverlay() {
     layerOverlay.replaceChildren();
+    { const pb = $('#penBar'); if (pb) pb.hidden = !(tool === 'pen' && pen.nodes.length); }
     drawGuides();
     const pad = 3 / view.s;
     for (const id of sel) {
@@ -2950,6 +2951,13 @@
     fullRender();
   }
 
+  /* ----- Tableta y lápiz: toques más generosos y "Sumar" en vez de Shift ----- */
+  const COARSE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  let hitK = 1;                 // multiplicador del área de toque (dedo 2.4, lápiz 1.5, ratón 1)
+  let addMode = false;          // "Sumar": equivale a mantener Shift
+  const sh = e => !!(e.shiftKey || addMode);
+  const setHitK = e => { hitK = e.pointerType === 'touch' ? 2.4 : e.pointerType === 'pen' ? 1.5 : 1; };
+
   /* ----- Tableta: pellizcar con dos dedos para acercar, alejar y mover el área de trabajo ----- */
   const touches = new Map();
   let pinch = null;
@@ -2989,6 +2997,7 @@
 
   /* ----- Puntero ----- */
   svg.addEventListener('pointerdown', e => {
+    setHitK(e);
     svg.setPointerCapture(e.pointerId);
     const p = toWorld(e);
     if (e.button === 1 || spaceDown || tool === 'hand') {
@@ -3007,12 +3016,12 @@
       if (hit) {
         let d = null;
         if (hit.kind === 'seg' || hit.kind === 'cseg') d = startNodeDrag(insertNode(hit), false);
-        else d = startNodeDrag(hit, e.shiftKey);
+        else d = startNodeDrag(hit, sh(e));
         if (d) { d.start = p; drag = d; }
         return;
       }
       if (anyEditable() && !(e.target.closest && e.target.closest('[data-id]'))) {
-        drag = { mode: 'nmarq', start: p, cur: p, add: e.shiftKey, had: nodeSel.size > 0 };
+        drag = { mode: 'nmarq', start: p, cur: p, add: sh(e), had: nodeSel.size > 0 };
         return;
       }
     }
@@ -3034,20 +3043,20 @@
       if (id) {
         // Si hay un hijo de este grupo seleccionado (desde la lista o con doble clic), se mueve el hijo.
         const insideSel = [...sel].some(sid => sid !== id && topOf(sid) && topOf(sid).id === id);
-        if (e.shiftKey) { sel.has(id) ? sel.delete(id) : sel.add(id); }
+        if (sh(e)) { sel.has(id) ? sel.delete(id) : sel.add(id); }
         else if (!sel.has(id) && !insideSel) sel = new Set([id]);
         drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(s => s && !s.locked).map(s => ({ s, p: { ...s.p } })) };
         buildInspector(); buildObjects(); drawCanvas();
       } else {
-        drag = { mode: 'marquee', start: p, cur: p, base: e.shiftKey ? new Set(sel) : new Set() };
-        if (!e.shiftKey && sel.size) { sel.clear(); buildInspector(); buildObjects(); drawCanvas(); }
+        drag = { mode: 'marquee', start: p, cur: p, base: sh(e) ? new Set(sel) : new Set() };
+        if (!sh(e) && sel.size) { sel.clear(); buildInspector(); buildObjects(); drawCanvas(); }
       }
     } else if (tool === 'pen') {
       e.preventDefault();
       const now = performance.now();
-      if (pen.last && now - pen.last.t < 350 && Math.hypot(e.clientX - pen.last.x, e.clientY - pen.last.y) < 6 && pen.nodes.length >= 2) { penFinish(false); return; }
+      if (pen.last && now - pen.last.t < (e.pointerType === 'touch' ? 550 : 350) && Math.hypot(e.clientX - pen.last.x, e.clientY - pen.last.y) < (e.pointerType === 'touch' ? 30 : 6) && pen.nodes.length >= 2) { penFinish(false); return; }
       pen.last = { t: now, x: e.clientX, y: e.clientY };
-      if (pen.nodes.length >= 3 && Math.hypot(pen.nodes[0].p[0] - p.x, pen.nodes[0].p[1] - p.y) * view.s < 9) { penFinish(true); return; }
+      if (pen.nodes.length >= 3 && Math.hypot(pen.nodes[0].p[0] - p.x, pen.nodes[0].p[1] - p.y) * view.s < 9 * hitK) { penFinish(true); return; }
       const q = snapPt(p, e);
       pen.nodes.push({ p: [q.x, q.y], i: null, o: null, s: false });
       drag = { mode: 'pen', start: p };
@@ -3076,7 +3085,7 @@
   let lastDown = { t: 0, x: 0, y: 0, id: null };
   function isDoubleClick(e, id) {
     const now = performance.now();
-    const dbl = id && id === lastDown.id && now - lastDown.t < 400 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6;
+    const dbl = id && id === lastDown.id && now - lastDown.t < (e.pointerType === 'touch' ? 550 : 400) && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < (e.pointerType === 'touch' ? 30 : 6);
     lastDown = dbl ? { t: 0, x: 0, y: 0, id: null } : { t: now, x: e.clientX, y: e.clientY, id };
     return dbl;
   }
@@ -3610,6 +3619,7 @@
       h('div', { class: 'insp-title' }, h('span', { class: 'type' }, TYPES[s.type].label + (parent ? ` · dentro de "${parent.name}"` : ''))),
       propRow('Nombre', name),
     );
+    if (!['group', 'text'].includes(s.type)) box.append(h('button', { class: 'wide', title: 'Muestra los puntos de la figura para moverlos (también doble clic o doble toque)', onclick: () => toggleNodes(s.id) }, nodeShow.has(s.id) ? 'Ocultar puntos' : 'Ver y editar puntos'));
     if (nodeShow.has(s.id) && importFrame(s) && !importFrame(s).rotated) box.append(...nodeToolsSection());
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },
@@ -7512,6 +7522,10 @@
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
   $('#unitSelect').onchange = e => setUnits(e.target.value);
+  $('#chkAdd').onchange = e => { addMode = e.target.checked; };
+  $('#btnPenDone').onclick = () => { penFinish(false); };
+  $('#btnPenClose').onclick = () => { if (pen.nodes.length >= 3) penFinish(true); else msg('Para cerrar la forma hacen falta al menos 3 puntos.'); };
+  $('#btnPenCancel').onclick = () => { penCancel(); drawOverlay(); };
   $('#unitSeg').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) setUnits(b.dataset.u); });
   $('#chkSnap').onchange = e => { snap = e.target.checked; };
   $('#docName').addEventListener('input', e => { doc.name = e.target.value; });
