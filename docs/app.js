@@ -1973,6 +1973,14 @@
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt' + (q.edit ? ' edit' : '') + (on ? ' on' : '') + (hov ? ' hov' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
+    // puntos intermedios elegidos (no se ven normalmente): pequeños, para saber qué se va a mover
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      for (const q of hiddenSelectedNodes(id)) {
+        const h2 = hs * 0.6;
+        svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt edit on', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      }
+    }
     drawBezHandles();
     if (nodeHover && (nodeHover.kind === 'seg' || nodeHover.kind === 'cseg')) { // "+" para añadir un punto sobre el borde
       const [x, y] = nodeHover.pt, r = 6 * px;
@@ -1996,11 +2004,27 @@
     }
     buildInspector(); buildObjects(); drawCanvas();
   }
+  // Puntos intermedios (no dibujados normalmente) que están elegidos: se pueden agarrar para moverlos juntos
+  function hiddenSelectedNodes(id) {
+    const out = [], fr = importFrame(byId(id));
+    if (!fr || fr.rotated || !nodeSel.size) return out;
+    const vis = new Set(nodeList(id).map(q => q.key));
+    for (const k of nodeSel) {
+      if (out.length > 3000) break;
+      const { id: kid, pi, vi } = nodeParts(k);
+      if (kid !== id || vis.has(k)) continue;
+      const pl = fr.a.polys[pi], pt = pl && pl.pts[vi];
+      if (!pt) continue;
+      const [x, y] = frameWorld(fr, pt);
+      out.push({ x, y, pi, vi, edit: true, key: k });
+    }
+    return out;
+  }
   function nodeNear(p) {
     let best = null, bd = 10 * hitK / view.s;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
-      for (const q of nodeList(id)) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id, kind: 'node' }; } }
+      for (const q of [...nodeList(id), ...hiddenSelectedNodes(id)]) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = { ...q, id, kind: 'node' }; } }
     }
     return best;
   }
@@ -2052,7 +2076,12 @@
   // intermedios de las curvas, que no se ven): así la figura se desplaza sin deformarse.
   function wholePolyItems(items) {
     const cnt = new Map(), tot = new Map(), done = new Set(), out = [];
-    for (const k of nodeSel) { const { id, pi } = nodeParts(k), kk = id + '|' + pi; cnt.set(kk, (cnt.get(kk) || 0) + 1); }
+    const visKeys = new Map();
+    for (const k of nodeSel) {
+      const { id, pi } = nodeParts(k), kk = id + '|' + pi;
+      if (!visKeys.has(id)) visKeys.set(id, new Set(nodeList(id).filter(q => q.edit).map(q => q.key)));
+      if (visKeys.get(id).has(k)) cnt.set(kk, (cnt.get(kk) || 0) + 1);
+    }
     for (const it of items) {
       if (it.curve || it.all) { out.push(it); continue; }
       const kk = it.id + '|' + it.pi;
@@ -2202,9 +2231,18 @@
   }
   function selectNodesIn(b, add) {
     if (!add) nodeSel.clear();
+    const inBox = (x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
-      for (const q of nodeList(id)) if (q.edit && q.x >= b.x && q.x <= b.x + b.w && q.y >= b.y && q.y <= b.y + b.h) nodeSel.add(q.key);
+      for (const q of nodeList(id)) if (q.edit && inBox(q.x, q.y)) nodeSel.add(q.key);
+      // También los puntos intermedios de las curvas que no se dibujan: así un recuadro sobre la punta de un mango la estira entera
+      const fr = importFrame(byId(id));
+      if (!fr || fr.rotated) continue;
+      fr.a.polys.forEach((pl, pi) => {
+        if (fr.a.curves && fr.a.curves[pi]) return;
+        const vis = new Set(vertexIdx(pl));
+        pl.pts.forEach((p, vi) => { if (vis.has(vi)) return; const [x, y] = frameWorld(fr, p); if (inBox(x, y)) nodeSel.add(nkey(id, pi, vi)); });
+      });
     }
   }
   function updateNodeHover(p) {
@@ -2524,7 +2562,7 @@
   // Herramientas de curvas en el panel de la figura (cuando se ven sus puntos)
   function nodeToolsSection() {
     return [h('div', { class: 'insp-sub' }, 'Puntos y curvas'),
-      h('p', { class: 'tip' }, 'Elige uno o varios puntos: toca, arrastra un recuadro sobre ellos (aunque empieces encima de la figura), o pulsa «Elegir todos». Al arrastrar un punto elegido se mueven todos juntos. «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
+      h('p', { class: 'tip' }, 'Elige uno o varios puntos: toca, arrastra un recuadro sobre ellos (aunque empieces encima de la figura; el recuadro también toma los puntos de las curvas que no se ven, útil para alargar un mango), o pulsa «Elegir todos». Al arrastrar un punto elegido se mueven todos juntos. «Suavizar» crea manijas para curvar; arrástralas. Alt mientras arrastras una manija rompe la curva en punta.'),
       h('label', { class: 'check' }, (() => { const c = h('input', { type: 'checkbox' }); c.checked = nodeBoxMode; c.addEventListener('change', () => { nodeBoxMode = c.checked; msg(nodeBoxMode ? 'Arrastrar sobre la figura hace un recuadro de puntos.' : 'Arrastrar sobre la figura la mueve entera; el recuadro empieza fuera de ella.'); }); return c; })(), ' Recuadro de puntos aunque empiece sobre la figura'),
       h('div', { class: 'btn-grid' },
         h('button', { class: 'primary', onclick: selectAllNodes, title: 'Elige todos los puntos de la figura (Cmd+A): al arrastrar uno se mueven todos juntos sin deformarla' }, 'Elegir todos los puntos'),
