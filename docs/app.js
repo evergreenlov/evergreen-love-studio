@@ -2423,6 +2423,126 @@
     a.curves[pi] = { closed: !!pl.closed, n: pts.map(p => ({ p, i: null, o: null, s: false })) };
     return a.curves[pi];
   }
+
+  /* ----- Simplificar: cambia los muchos puntos de una curva por pocos nodos con manijas (como xTool) ----- */
+  // Ajuste de curvas Bézier por tramos (algoritmo de Schneider), en mm
+  function fitBezierRun(P, tol) {
+    const n = P.length;
+    if (n < 2) return [];
+    if (n === 2) return [[P[0], P[0], P[1], P[1]]];
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1]], add = (a, b) => [a[0] + b[0], a[1] + b[1]], mul = (a, s) => [a[0] * s, a[1] * s];
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1], len = a => Math.hypot(a[0], a[1]);
+    const norm = a => { const l = len(a) || 1; return [a[0] / l, a[1] / l]; };
+    const tan = (i, j) => norm(sub(P[j], P[i]));
+    const bez = (c, t) => { const m = 1 - t; return [m * m * m * c[0][0] + 3 * m * m * t * c[1][0] + 3 * m * t * t * c[2][0] + t * t * t * c[3][0], m * m * m * c[0][1] + 3 * m * m * t * c[1][1] + 3 * m * t * t * c[2][1] + t * t * t * c[3][1]]; };
+    const d1 = (c, t) => { const m = 1 - t; return [3 * m * m * (c[1][0] - c[0][0]) + 6 * m * t * (c[2][0] - c[1][0]) + 3 * t * t * (c[3][0] - c[2][0]), 3 * m * m * (c[1][1] - c[0][1]) + 6 * m * t * (c[2][1] - c[1][1]) + 3 * t * t * (c[3][1] - c[2][1])]; };
+    const d2 = (c, t) => { const m = 1 - t; return [6 * m * (c[2][0] - 2 * c[1][0] + c[0][0]) + 6 * t * (c[3][0] - 2 * c[2][0] + c[1][0]), 6 * m * (c[2][1] - 2 * c[1][1] + c[0][1]) + 6 * t * (c[3][1] - 2 * c[2][1] + c[1][1])]; };
+    const out = [];
+    function chord(i, j) { const u = [0]; for (let k = i + 1; k <= j; k++) u.push(u[u.length - 1] + len(sub(P[k], P[k - 1]))); const L = u[u.length - 1] || 1; return u.map(v => v / L); }
+    function gen(i, j, u, t1, t2) {
+      const p0 = P[i], p3 = P[j], m = j - i + 1;
+      let C00 = 0, C01 = 0, C11 = 0, X0 = 0, X1 = 0;
+      for (let k = 0; k < m; k++) {
+        const t = u[k], b = 1 - t, b0 = b * b * b, b1 = 3 * b * b * t, b2 = 3 * b * t * t, b3 = t * t * t;
+        const A1 = mul(t1, b1), A2 = mul(t2, b2);
+        C00 += dot(A1, A1); C01 += dot(A1, A2); C11 += dot(A2, A2);
+        const tmp = sub(P[i + k], add(mul(p0, b0 + b1), mul(p3, b2 + b3)));
+        X0 += dot(A1, tmp); X1 += dot(A2, tmp);
+      }
+      const det = C00 * C11 - C01 * C01, seg = len(sub(p3, p0));
+      let al1 = 0, al2 = 0;
+      if (Math.abs(det) > 1e-12) { al1 = (X0 * C11 - X1 * C01) / det; al2 = (C00 * X1 - C01 * X0) / det; }
+      const eps = 1e-6 * seg;
+      if (al1 < eps || al2 < eps || !isFinite(al1 + al2)) { al1 = al2 = seg / 3; }
+      return [p0, add(p0, mul(t1, al1)), add(p3, mul(t2, al2)), p3];
+    }
+    function maxErr(i, j, c, u) { let me = 0, sp = Math.floor((j - i + 1) / 2); for (let k = i + 1; k < j; k++) { const e = len(sub(bez(c, u[k - i]), P[k])); if (e >= me) { me = e; sp = k; } } return [me, sp]; }
+    function reparam(i, j, c, u) {
+      return u.map((t, k) => {
+        const q = sub(bez(c, t), P[i + k]), q1 = d1(c, t), q2 = d2(c, t), num = dot(q, q1), den = dot(q1, q1) + dot(q, q2);
+        return Math.abs(den) < 1e-12 ? t : Math.max(0, Math.min(1, t - num / den));
+      });
+    }
+    function rec(i, j, t1, t2) {
+      if (j - i === 1) { const dd = len(sub(P[j], P[i])) / 3; out.push([P[i], add(P[i], mul(t1, dd)), add(P[j], mul(t2, dd)), P[j]]); return; }
+      let u = chord(i, j), c = gen(i, j, u, t1, t2), [e, sp] = maxErr(i, j, c, u);
+      if (e < tol) { out.push(c); return; }
+      if (e < tol * 16) for (let it = 0; it < 6; it++) { u = reparam(i, j, c, u); c = gen(i, j, u, t1, t2); [e, sp] = maxErr(i, j, c, u); if (e < tol) { out.push(c); return; } }
+      sp = Math.max(i + 1, Math.min(j - 1, sp));
+      const tc = norm(sub(P[sp - 1], P[sp + 1 > j ? j : sp + 1]));
+      rec(i, sp, t1, tc); rec(sp, j, mul(tc, -1), t2);
+    }
+    rec(0, n - 1, tan(0, 1), tan(n - 1, n - 2));
+    return out;
+  }
+  // Devuelve cuántos nodos quedan (o 0 si no cambió)
+  function simplifyPoly(a, pi, fr, tolMM) {
+    const pl = a.polys[pi];
+    if (!pl || a.curves && a.curves[pi]) return 0;
+    let q = pl.pts.map(p => [p[0] * fr.w, p[1] * fr.sy]);
+    const closed = !!pl.closed;
+    if (closed && q.length > 2 && Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]) < 1e-6) q.pop();
+    // quita puntos repetidos seguidos
+    q = q.filter((p, i) => i === 0 || Math.hypot(p[0] - q[i - 1][0], p[1] - q[i - 1][1]) > 1e-6);
+    const n = q.length;
+    if (n < 4) return 0;
+    const turn = i => {
+      const A = q[(i + n - 1) % n], B = q[i], C = q[(i + 1) % n];
+      let d = Math.abs(Math.atan2(C[1] - B[1], C[0] - B[0]) - Math.atan2(B[1] - A[1], B[0] - A[0])); if (d > Math.PI) d = 2 * Math.PI - d; return d;
+    };
+    let corners = [];
+    for (let i = 0; i < n; i++) { if (!closed && (i === 0 || i === n - 1)) { corners.push(i); continue; } if (turn(i) > 0.5) corners.push(i); }
+    let allSmooth = false;
+    if (closed && corners.length < 1) { corners = [0, Math.floor(n / 2)]; allSmooth = true; }
+    if (closed && corners.length === 1) corners.push((corners[0] + Math.floor(n / 2)) % n);
+    corners.sort((x, y) => x - y);
+    const runs = [];
+    const R = corners.length;
+    for (let k = 0; k < (closed ? R : R - 1); k++) {
+      const s = corners[k], e = corners[(k + 1) % R], run = [];
+      for (let i = s; ; i = (i + 1) % n) { run.push(q[i]); if (i === e && run.length > 1) break; if (run.length > n + 1) break; }
+      runs.push(run);
+    }
+    const segs = [], smoothJoin = [];
+    for (const run of runs) {
+      const f = fitBezierRun(run, tolMM);
+      f.forEach((c, j) => { segs.push(c); smoothJoin.push(j > 0 || allSmooth); });
+    }
+    if (segs.length >= n - 1 && !closed) return 0;
+    // nodos: el inicio de cada tramo; la entrada (i) viene del tramo anterior
+    const nodes = segs.map((c, k) => ({ P: c[0], o: c[1], i: null, s: smoothJoin[k] }));
+    segs.forEach((c, k) => { const nx = closed ? (k + 1) % segs.length : k + 1; if (nx < nodes.length) nodes[nx].i = c[2]; else nodes.push({ P: c[3], o: null, i: c[2], s: false }); });
+    const lineEps = tolMM * 0.2;
+    const cv = nodes.map(nd => {
+      const rel = (h) => h && Math.hypot(h[0] - nd.P[0], h[1] - nd.P[1]) > lineEps ? [(h[0] - nd.P[0]) / fr.w, (h[1] - nd.P[1]) / fr.sy] : null;
+      return { p: [nd.P[0] / fr.w, nd.P[1] / fr.sy], i: rel(nd.i), o: rel(nd.o), s: !!nd.s && (rel(nd.i) || rel(nd.o)) ? true : false };
+    });
+    a.curves = a.curves || {};
+    a.curves[pi] = { closed, n: cv };
+    reflat(a, pi);
+    return cv.length;
+  }
+  function simplifySelected() {
+    let done = 0, before = 0, after = 0;
+    const targets = new Map();   // id -> Set(pi)
+    if (nodeSel.size) for (const k of nodeSel) { const { id, pi } = nodeParts(k); if (!targets.has(id)) targets.set(id, new Set()); targets.get(id).add(pi); }
+    else for (const id of sel) if (nodeShow.has(id) && importFrame(byId(id))) { const fr = importFrame(byId(id)); targets.set(id, new Set(fr.a.polys.map((_, i) => i))); }
+    if (!targets.size) { msg('Muestra los puntos de una figura importada (Ver y editar puntos) para simplificarla.'); return; }
+    for (const [id, pis] of targets) {
+      const sh = byId(id); if (!sh) continue;
+      ownAsset(sh);
+      const fr = importFrame(sh); if (!fr || fr.rotated) continue;
+      for (const pi of pis) {
+        const pl = fr.a.polys[pi]; if (!pl) continue;
+        const b = pl.pts.length, nn = simplifyPoly(fr.a, pi, fr, 0.08 * (isInch() ? 1 : 1));
+        if (nn) { done++; before += b; after += nn; }
+      }
+    }
+    nodeSel.clear(); nodeHover = null;
+    if (done) { checkpoint(); fullRender(); msg(`Simplificado: ${before} puntos pasaron a ${after} nodos con manijas. Arrastra los nodos o sus manijas para editar la curva.`); }
+    else msg('No hubo nada que simplificar (ya son curvas o tienen pocos puntos).');
+  }
+
   // Suavizar o volver esquina los puntos elegidos
   function smoothSelected(smooth) {
     if (!nodeSel.size) { msg('Elige primero uno o más puntos (clic, o un recuadro).'); return; }
@@ -2574,6 +2694,7 @@
       h('div', { class: 'btn-grid' },
         h('button', { class: 'primary', onclick: selectAllNodes, title: 'Elige todos los puntos de la figura (Cmd+A): al arrastrar uno se mueven todos juntos sin deformarla' }, 'Elegir todos los puntos'),
         h('button', { onclick: () => { nodeSel.clear(); buildInspector(); drawCanvas(); }, title: 'Deja de tener puntos elegidos' }, 'Quitar elección'),
+        h('button', { class: 'primary', onclick: simplifySelected, title: 'Cambia los muchos puntitos de las curvas por pocos nodos con manijas, como en xTool (de lo elegido, o de toda la figura)' }, 'Simplificar'),
         h('button', { class: 'primary', onclick: () => smoothSelected(true), title: 'Convierte los puntos elegidos en curva suave' }, 'Suavizar'),
         h('button', { onclick: () => smoothSelected(false), title: 'Quita las manijas: el punto vuelve a ser una esquina' }, 'Punta'),
         h('button', { onclick: () => { if (nodeSel.size) deleteNodes(); else msg('Elige primero los puntos que quieres borrar.'); } }, 'Borrar punto'),
