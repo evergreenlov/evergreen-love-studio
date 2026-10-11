@@ -2048,6 +2048,24 @@
     }
   }
   const nodeParts = k => { const [id, pi, vi] = k.split('|'); return { id, pi: +pi, vi: +vi }; };
+  // Si están elegidos TODOS los puntos visibles de un contorno, se mueve el contorno entero (también los puntos
+  // intermedios de las curvas, que no se ven): así la figura se desplaza sin deformarse.
+  function wholePolyItems(items) {
+    const cnt = new Map(), tot = new Map(), done = new Set(), out = [];
+    for (const k of nodeSel) { const { id, pi } = nodeParts(k), kk = id + '|' + pi; cnt.set(kk, (cnt.get(kk) || 0) + 1); }
+    for (const it of items) {
+      if (it.curve || it.all) { out.push(it); continue; }
+      const kk = it.id + '|' + it.pi;
+      if (!tot.has(kk)) tot.set(kk, nodeList(it.id).filter(q => q.pi === it.pi && q.edit).length);
+      if ((cnt.get(kk) || 0) >= tot.get(kk) && tot.get(kk) > 0) {
+        if (done.has(kk)) continue;
+        done.add(kk);
+        const fr = importFrame(byId(it.id)), pl = fr && fr.a.polys[it.pi];
+        if (pl) out.push({ id: it.id, pi: it.pi, all: true, p0: pl.pts.map(q => q.slice()) }); else out.push(it);
+      } else out.push(it);
+    }
+    return out;
+  }
   // Prepara el arrastre de los puntos elegidos (si el punto tocado no estaba elegido, queda como único elegido)
   function startNodeDrag(hit, shift) {
     let s = byId(hit.id);
@@ -2086,7 +2104,7 @@
       const same = pl.pts.map((q, i) => i).filter(i => Math.abs(pl.pts[i][0] - p0[0]) < 1e-9 && Math.abs(pl.pts[i][1] - p0[1]) < 1e-9);
       items.push({ id, pi, same, u: p0[0], v: p0[1] });
     }
-    return { mode: 'node', items, anchor: { x: hit.x, y: hit.y }, start: null, moved: false };
+    return { mode: 'node', items: wholePolyItems(items), anchor: { x: hit.x, y: hit.y }, start: null, moved: false };
   }
   function moveNodeItems(items, du, dv) {
     const redo = new Map();
@@ -2095,6 +2113,7 @@
       if (!fr) continue;
       if (it.curve) { fr.a.curves[it.pi].n[it.vi].p = [it.u + du, it.v + dv]; redo.set(it.id + '|' + it.pi, [fr.a, it.pi]); continue; }
       const pl = fr.a.polys[it.pi];
+      if (it.all) { it.p0.forEach((q, i) => { if (pl.pts[i]) pl.pts[i] = [q[0] + du, q[1] + dv, ...(q[2] ? [1] : [])]; }); continue; }
       for (const i of it.same) pl.pts[i] = [it.u + du, it.v + dv, ...(pl.pts[i][2] ? [1] : [])];
     }
     for (const [a, pi] of redo.values()) reflat(a, pi);
@@ -2166,7 +2185,7 @@
     }
     if (!items.length) return;
     const fr = importFrame(byId(items[0].id));
-    moveNodeItems(items, dx / fr.w, dy / fr.sy);
+    moveNodeItems(wholePolyItems(items), dx / fr.w, dy / fr.sy);
     checkpoint(); fullRender();
   }
   // Selecciona los puntos que caen dentro de un recuadro
