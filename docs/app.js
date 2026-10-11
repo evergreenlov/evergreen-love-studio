@@ -4628,6 +4628,17 @@
     }
     return k;
   }
+  // Cuántas piezas de una lista caben en UNA plancha (repitiendo la lista hasta llenarla)
+  function fitPieces(units, sw, sh, gap, margin, rot) {
+    const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap;
+    if (W <= 0 || H <= 0 || !units.length) return 0;
+    const need = Math.min(400, Math.ceil(W * H / units.reduce((a, u) => a + (u.w + gap) * (u.h + gap), 0)) + 1);
+    const items = [];
+    for (let c = 0; c < need; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot });
+    items.sort((a, b) => b.w * b.h - a.w * a.h);
+    const { bins } = maxRectsPack(items, W, H, rot);
+    return bins.length ? bins[0].placed.length : 0;
+  }
   function fitSheets(units, n, sw, sh, gap, margin, rot) {
     const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap, items = [];
     for (let c = 0; c < n; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot });
@@ -4701,7 +4712,13 @@
         if (!fits) return { name, err: 'Alguna pieza es más grande que la plancha' };
         const k = fitCopies(units, w, hh, gap, mar, rot.checked), n = fitSheets(units, qty, w, hh, gap, mar, rot.checked);
         if (n === null) return { name, err: 'No se pudo acomodar' };
-        return { name, k, n, bought: n * w * hh, used: qty * tot };
+        return { name, k, n, p: fitPieces(units, w, hh, gap, mar, rot.checked), bought: n * w * hh, used: qty * tot };
+      };
+      const typeCounts = ([, w, hh]) => {
+        const one = (ww, h2, name) => `${fitPieces([{ w: ww, h: h2 }], w, hh, gap, mar, rot.checked)} ${name} de ${fmt(ww / unitMM, 2)} × ${fmt(h2 / unitMM, 2)} ${unitLabel()}`;
+        const parts = [one(parseFloat(pw.value) * unitMM, parseFloat(ph.value) * unitMM, 'piezas')];
+        if (cov.checked) parts.push(one(parseFloat(cw.value) * unitMM, parseFloat(ch.value) * unitMM, 'coberturas'));
+        return 'si cortas solo un tipo: ' + parts.join(' o ');
       };
       const mine = compute(chosen);
       const others = [...FIT_SHEETS, mach].filter(s => s[0] !== chosen[0]).map(compute);
@@ -4712,12 +4729,14 @@
           h('div', { class: 'fit-big' }, `${mine.n} plancha${mine.n > 1 ? 's' : ''}`),
           h('p', { class: 'tip' }, `Para ${qty} caja${qty > 1 ? 's' : ''} (${piecesPerBox} pieza${piecesPerBox > 1 ? 's' : ''} cada una, ${qty * piecesPerBox} en total) en madera de ${thickName}. Plancha: ${mine.name.replace('Madera ', '')}. `
             + `Compras ${areaTxt(mine.bought)} y se corta ${areaTxt(mine.used)}; sobra el ${fmt((1 - mine.used / mine.bought) * 100, 0)} %. `
-            + (mine.k ? `En cada plancha caben ${mine.k} caja${mine.k > 1 ? 's' : ''} completa${mine.k > 1 ? 's' : ''}.` : 'Una caja no cabe completa en una plancha, así que sus piezas se reparten.')));
-      const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: '5' }, r.err))
-        : h('tr', {}, h('td', {}, r.name), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
+            + `En cada plancha caben ${mine.p} pieza${mine.p > 1 ? 's' : ''}`
+            + (mode.value === 'manual' ? ` (${typeCounts(chosen)})` : '') + '. '
+            + (mine.k ? `Eso son ${mine.k} caja${mine.k > 1 ? 's' : ''} completa${mine.k > 1 ? 's' : ''} por plancha.` : 'Una caja no cabe completa en una plancha, así que sus piezas se reparten.')));
+      const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: '6' }, r.err))
+        : h('tr', {}, h('td', {}, r.name), h('td', { class: 'n' }, String(r.p)), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
           h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'));
       out.replaceChildren(head, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
-        h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), tr(mine), ...others.map(tr))));
+        h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Piezas por plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), tr(mine), ...others.map(tr))));
     };
     [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
     manualBox.append(
