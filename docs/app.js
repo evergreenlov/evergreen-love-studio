@@ -4639,6 +4639,17 @@
     const { bins } = maxRectsPack(items, W, H, rot);
     return bins.length ? bins[0].placed.length : 0;
   }
+  // Acomodo de UNA plancha llena: posiciones de cada pieza (en mm, dentro de la plancha)
+  function fitLayout(units, sw, sh, gap, margin, rot) {
+    const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap;
+    if (W <= 0 || H <= 0 || !units.length) return [];
+    const need = Math.min(400, Math.ceil(W * H / units.reduce((a, u) => a + (u.w + gap) * (u.h + gap), 0)) + 1);
+    const items = [];
+    for (let c = 0; c < need; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot, label: u.label || 'Pieza' });
+    items.sort((a, b) => b.w * b.h - a.w * a.h);
+    const { bins } = maxRectsPack(items, W, H, rot);
+    return bins.length ? bins[0].placed.map(p => ({ x: margin + p.x, y: margin + p.y, w: p.w - gap, h: p.h - gap, label: p.it.label })) : [];
+  }
   function fitSheets(units, n, sw, sh, gap, margin, rot) {
     const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap, items = [];
     for (let c = 0; c < n; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot });
@@ -4686,11 +4697,11 @@
       const w = parseFloat(pw.value) * unitMM, hh = parseFloat(ph.value) * unitMM, n = Math.floor(+pn.value);
       if (!(w > 0 && hh > 0 && n >= 1)) return null;
       const u = [];
-      for (let i = 0; i < n; i++) u.push({ w, h: hh, area: w * hh });
+      for (let i = 0; i < n; i++) u.push({ w, h: hh, area: w * hh, label: 'Pieza' });
       if (cov.checked) {
         const w2 = parseFloat(cw.value) * unitMM, h2 = parseFloat(ch.value) * unitMM, n2 = Math.floor(+cn.value);
         if (!(w2 > 0 && h2 > 0 && n2 >= 1)) return null;
-        for (let i = 0; i < n2; i++) u.push({ w: w2, h: h2, area: w2 * h2 });
+        for (let i = 0; i < n2; i++) u.push({ w: w2, h: h2, area: w2 * h2, label: 'Cobertura' });
       }
       return u;
     };
@@ -4735,7 +4746,33 @@
       const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: '6' }, r.err))
         : h('tr', {}, h('td', {}, r.name), h('td', { class: 'n' }, String(r.p)), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
           h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'));
-      out.replaceChildren(head, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
+      const preview = h('div', {});
+      const layout = mine.err ? [] : fitLayout(units, chosen[1], chosen[2], gap, mar, rot.checked);
+      if (layout.length) {
+        const f = v => fmt(v, 2);
+        const cnt = {};
+        const rects = layout.map(p => { cnt[p.label] = (cnt[p.label] || 0) + 1; return `<rect x="${f(p.x)}" y="${f(p.y)}" width="${f(p.w)}" height="${f(p.h)}" fill="${p.label === 'Cobertura' ? '#d9b88f' : '#c9d9c4'}" stroke="#2f6b4a" stroke-width="${f(Math.max(chosen[1], chosen[2]) / 400)}"/>`; }).join('');
+        preview.innerHTML = `<svg viewBox="-3 -3 ${f(chosen[1] + 6)} ${f(chosen[2] + 6)}" style="width:100%;max-height:260px;background:#fff;border:1px solid var(--border);border-radius:8px" role="img" aria-label="Plancha con las piezas acomodadas"><rect x="0" y="0" width="${f(chosen[1])}" height="${f(chosen[2])}" fill="#faf7ef" stroke="#8a7a5a" stroke-dasharray="${f(chosen[1] / 80)}"/>${rects}</svg>`;
+        const place = h('button', { class: 'wide' }, `Poner estas ${layout.length} piezas en el lienzo`);
+        place.onclick = () => {
+          if (doc.shapes.length && !confirm(`Se agregan ${layout.length} piezas al diseño actual, sobre una plancha de ${L(chosen[1])} × ${L(chosen[2])}. ¿Continuar?`)) return;
+          checkpoint();
+          const cn = {};
+          const made = layout.map(p => {
+            cn[p.label] = (cn[p.label] || 0) + 1;
+            return node('rect', `${p.label} ${cn[p.label]}`, 'corte', { x: fmt(p.x / unitMM, 3), y: fmt(p.y / unitMM, 3), w: fmt(p.w / unitMM, 3), h: fmt(p.h / unitMM, 3), r: '0', rot: '0' });
+          });
+          doc.shapes.push(...made);
+          doc.sheet = { w: chosen[1], h: chosen[2] };
+          sel = new Set(made.map(s => s.id));
+          checkpoint(); fullRender(); fitView();
+          close();
+          msg(`${made.length} piezas puestas en el lienzo, en una plancha de ${L(chosen[1])} × ${L(chosen[2])}.`);
+        };
+        preview.append(h('p', { class: 'tip' }, `Así quedan en una plancha: ${Object.entries(cnt).map(([k, v]) => `${v} ${k.toLowerCase()}${v > 1 ? 's' : ''}`).join(' y ')}.`));
+        if (mode.value === 'manual') preview.append(place);
+      }
+      out.replaceChildren(head, preview, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
         h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Piezas por plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), tr(mine), ...others.map(tr))));
     };
     [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
