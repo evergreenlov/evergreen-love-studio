@@ -8,6 +8,7 @@
   const NS = 'http://www.w3.org/2000/svg';
   const $ = (s, r = document) => r.querySelector(s);
   const STORE_KEY = 'creaciones-evergreen:doc';
+  const UNITS_KEY = 'creaciones-evergreen:units';
   const CL = window.ClipperLib; // lib/clipper.js (uniones, restas y contornos)
 
   /* ================= Expresiones ================= */
@@ -4143,6 +4144,7 @@
     }
     doc.units = u;
     doc.grid = u === 'in' ? 0.125 : 1;
+    try { localStorage.setItem(UNITS_KEY, u); } catch (e) { /* sin almacenamiento */ }
     checkpoint(); fullRender();
     msg(`Medidas convertidas a ${u === 'in' ? 'pulgadas' : 'milímetros'}.` + (formulas ? ' Revisa las fórmulas que suman números sueltos.' : ''));
   }
@@ -7478,6 +7480,7 @@
     evaluateParams();
     $('#docName').value = doc.name;
     $('#unitSelect').value = doc.units;
+    for (const b of document.querySelectorAll('#unitSeg button')) { const on = b.dataset.u === doc.units; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
     if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) build3D(); else close3D(); }
@@ -7509,6 +7512,7 @@
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
   $('#unitSelect').onchange = e => setUnits(e.target.value);
+  $('#unitSeg').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) setUnits(b.dataset.u); });
   $('#chkSnap').onchange = e => { snap = e.target.checked; };
   $('#docName').addEventListener('input', e => { doc.name = e.target.value; });
   $('#docName').addEventListener('change', checkpoint);
@@ -7672,7 +7676,7 @@
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) { loadDoc(JSON.parse(raw)); restored = true; }
   } catch (e) { /* sin datos guardados */ }
-  if (!restored) doc = boxTemplate('dedos');
+  if (!restored) { let pu = 'mm'; try { pu = localStorage.getItem(UNITS_KEY) === 'in' ? 'in' : 'mm'; } catch (e) { /* mm */ } doc = boxTemplate('dedos', pu); }
   if (!CL) setTimeout(() => msg('Aviso: falta lib/clipper.js; unir, restar y contorno no estarán disponibles.'), 500);
   savedState = JSON.stringify(doc);
   setTool('select');

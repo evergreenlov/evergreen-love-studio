@@ -396,3 +396,8 @@ button.wide { width: 100%; margin-top: 10px; }
   .stage-controls button, .stage-controls select { min-height: 44px; min-width: 44px; font-size: 16px; }
   .stage-controls .icon-btn { font-size: 22px; }
 }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
+.seg button { border: 0; border-radius: 0; background: var(--panel); padding: 6px 12px; font: inherit; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
+@media (pointer: coarse) { .seg button { min-height: 44px; padding: 8px 16px; font-size: 16px; } }
