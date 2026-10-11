@@ -4669,7 +4669,7 @@
     const dec = mm => fmt(mm / unitMM, 3);
     const mode = h('select', { 'aria-label': 'De dónde salen las piezas' },
       h('option', { value: 'manual' }, 'Escribir las medidas de las piezas'),
-      ...(designUnits.length ? [h('option', { value: 'design' }, `Usar mi diseño (${designUnits.length} pieza${designUnits.length > 1 ? 's' : ''})`)] : []));
+      ...(designUnits.length ? [h('option', { value: 'design' }, `${selectedRoots().length ? 'Usar lo que tengo seleccionado' : 'Usar todo mi diseño'} (${designUnits.length} pieza${designUnits.length > 1 ? 's' : ''})`)] : []));
     if (designUnits.length) mode.value = 'design';
     const pw = num(fmt(127 / unitMM, 3)), ph = num(fmt(127 / unitMM, 3)), pn = num('5', { step: '1', min: '1' });
     const cov = h('input', { type: 'checkbox' }), cw = num(fmt(127 / unitMM, 3)), ch = num(fmt(127 / unitMM, 3)), cn = num('1', { step: '1', min: '1' });
