@@ -2841,7 +2841,7 @@
       k = Math.max(0.02, k);
       if (!e.altKey) k = Math.round(k * 100) / 100; // pasos de 1 %
       rewriteScale(d.orig.map(o => o.s), null, d.A.x / unitMM, d.A.y / unitMM, k);
-      syncParamInputs();
+      syncParamInputs(); syncPropInputs();
       $('#stCoords').textContent = `Escala ${fmt(k * 100, 0)} %`;
     } else {
       let deg = (Math.atan2(p.y - d.C.y, p.x - d.C.x) - d.a0) / DEG;
@@ -2861,7 +2861,7 @@
       $('#stCoords').textContent = `Giro ${fmt(deg, 1)}°` + (e.shiftKey ? '' : ' (Shift: de 15° en 15°)');
     }
     d.changed = true;
-    evaluateParams(); drawCanvas();
+    evaluateParams(); drawCanvas(); refreshHints();
   }
 
   function toWorld(e) {
@@ -3957,6 +3957,17 @@
       for (const [k, v] of Object.entries(sh.p)) if (uses(v) && !(keys.has(k) && String(v).trim() === name)) return false;
     }
     return true;
+  }
+  // Pone en los cuadros de Propiedades los valores nuevos mientras se estira la pieza
+  function syncPropInputs() {
+    const objs = [...sel].map(byId).filter(Boolean);
+    if (objs.length !== 1) return;
+    const s = objs[0];
+    for (const inp of document.querySelectorAll('#inspector input[data-key]')) {
+      if (document.activeElement === inp) continue;
+      const v = s.p[inp.dataset.key];
+      if (v !== undefined && inp.value !== String(v)) inp.value = String(v);
+    }
   }
   function syncParamInputs() {
     const rows = document.querySelectorAll('#params .pexpr');
