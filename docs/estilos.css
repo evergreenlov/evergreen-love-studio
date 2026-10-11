@@ -413,3 +413,4 @@ button.wide { width: 100%; margin-top: 10px; }
 .nudge-pad { display: flex; align-items: center; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
 .nudge-label { font-size: 12px; opacity: .75; margin-right: 4px; }
 .nudge-btn { min-width: 44px; min-height: 40px; font-size: 18px; }
+.build-tag { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
