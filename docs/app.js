@@ -4594,6 +4594,85 @@
     document.body.append(dialog);
     dialog.showModal();
   }
+  /* ----- ¿Cuántos caben? Cuenta copias del diseño por hoja, sin mover nada ----- */
+  const FIT_SHEETS = [['Madera 12 × 12 in', 304.8, 304.8], ['Madera 12 × 18 in', 457.2, 304.8], ['Madera 12 × 24 in', 609.6, 304.8], ['Madera 24 × 24 in', 609.6, 609.6]];
+  function fitUnits() {
+    evaluateParams(); evaluateAll();
+    let roots = selectedRoots();
+    if (!roots.length) roots = doc.shapes;
+    roots = roots.filter(s => !s.hidden && !s.locked);
+    const cut = [];
+    for (const s of roots) {
+      const r = evalCache.get(s.id);
+      if (!r) continue;
+      for (const it of r.items) if (it.op !== 'grabado') for (const pl of it.polys) if (pl.closed && pl.pts.length > 2) cut.push(pl);
+    }
+    const groups = (cut.length ? splitPieces(cut) : []).map(g => ({ g, b: bboxOfItems([{ polys: g, texts: [] }]) }));
+    // lo que queda dentro de otra pieza (letras grabadas, contornos de guía) no es una pieza aparte
+    const inner = (a, o) => a !== o && a.b.x >= o.b.x - 1e-6 && a.b.y >= o.b.y - 1e-6 && a.b.x + a.b.w <= o.b.x + o.b.w + 1e-6 && a.b.y + a.b.h <= o.b.y + o.b.h + 1e-6;
+    return groups.filter(a => !groups.some(o => inner(a, o))).map(({ g, b }) => ({ w: b.w, h: b.h, area: pieceArea([{ polys: g }]) }));
+  }
+  // Cuántas copias completas del diseño caben en una hoja
+  function fitCopies(units, sw, sh, gap, margin, rot) {
+    const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap;
+    if (W <= 0 || H <= 0) return 0;
+    const bound = Math.max(1, Math.floor(W * H / units.reduce((a, u) => a + (u.w + gap) * (u.h + gap), 0)) + 1);
+    let k = 0;
+    while (k < Math.min(bound, 300)) {
+      const items = [];
+      for (let c = 0; c <= k; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot });
+      items.sort((a, b) => b.w * b.h - a.w * a.h);
+      const { bins, failed } = maxRectsPack(items, W, H, rot);
+      if (failed.length || bins.length !== 1) break;
+      k++;
+    }
+    return k;
+  }
+  function fitSheets(units, n, sw, sh, gap, margin, rot) {
+    const W = sw - 2 * margin + gap, H = sh - 2 * margin + gap, items = [];
+    for (let c = 0; c < n; c++) for (const u of units) items.push({ w: u.w + gap, h: u.h + gap, canRot: rot });
+    items.sort((a, b) => b.w * b.h - a.w * a.h);
+    const { bins, failed } = maxRectsPack(items, W, H, rot);
+    return failed.length ? null : bins.length;
+  }
+  function openFit() {
+    const units = fitUnits();
+    if (!units.length) { msg('Primero crea o abre un diseño con piezas para contar.'); return; }
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'fitTitle' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const gapIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(3 / unitMM, 3) });
+    const marIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(5 / unitMM, 3) });
+    const qtyIn = h('input', { type: 'number', min: '1', step: '1', value: '10' });
+    const rot = h('input', { type: 'checkbox', checked: '' });
+    const out = h('div', { class: 'tw' });
+    const tot = units.reduce((a, u) => a + u.area, 0);
+    const sheets = [...FIT_SHEETS, ['Área de la máquina (la actual)', doc.sheet.w, doc.sheet.h]];
+    const calc = () => {
+      const gap = parseFloat(gapIn.value) * unitMM, mar = parseFloat(marIn.value) * unitMM, qty = Math.max(1, Math.floor(+qtyIn.value || 1));
+      if (![gap, mar].every(Number.isFinite) || gap < 0 || mar < 0) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa la separación y el margen: no pueden ser negativos.')); return; }
+      const rows = sheets.map(([name, sw, sh]) => {
+        const fits = units.every(u => (u.w <= sw - 2 * mar && u.h <= sh - 2 * mar) || (rot.checked && u.h <= sw - 2 * mar && u.w <= sh - 2 * mar));
+        if (!fits) return h('tr', {}, h('td', {}, name), h('td', { colspan: '3' }, 'Alguna pieza es más grande que la hoja'));
+        const k = fitCopies(units, sw, sh, gap, mar, rot.checked);
+        const n = fitSheets(units, qty, sw, sh, gap, mar, rot.checked);
+        return h('tr', {}, h('td', {}, name), h('td', { class: 'n' }, k ? String(k) : 'no cabe completo'),
+          h('td', {}, k ? fmt(k * tot / (sw * sh) * 100, 0) + ' %' : '—'), h('td', {}, n === null ? '—' : String(n)));
+      });
+      out.replaceChildren(h('table', {}, h('tr', {}, h('th', {}, 'Hoja'), h('th', {}, 'Copias por hoja'), h('th', {}, 'Madera usada'), h('th', {}, `Hojas para ${qty}`)), ...rows));
+    };
+    [gapIn, marIn, qtyIn, rot].forEach(el => el.addEventListener('input', calc));
+    const row = (l, el) => h('label', {}, l, el);
+    dialog.append(h('h2', { id: 'fitTitle' }, '¿Cuántos caben en una hoja?'),
+      h('p', {}, `Cuenta cuántas copias completas del diseño (${units.length} pieza${units.length > 1 ? 's' : ''}) entran en cada hoja. No mueve nada.`),
+      h('div', { class: 'nest-grid' }, row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('Copias que quiero hacer', qtyIn)),
+      h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
+      out,
+      h('div', { class: 'dialog-actions' }, h('button', { class: 'primary', onclick: close }, 'Cerrar')));
+    document.body.append(dialog);
+    dialog.showModal();
+    calc();
+  }
   // Una hoja del acomodo: las piezas cuyo centro cae dentro de ella
   function sheetItems(k) {
     const { items } = exportItems(), n = doc.nest, x0 = k * (n.w + n.gap);
@@ -5145,6 +5224,7 @@
   }
   $('#btnBatch').onclick = openBatch;
   $('#btnNest').onclick = openNest;
+  $('#btnCount').onclick = openFit;
 
   /* ================= Acciones ================= */
   // Al borrar figuras se borran también las medidas tomadas sobre ellas
