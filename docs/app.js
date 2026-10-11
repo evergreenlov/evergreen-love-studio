@@ -4204,7 +4204,7 @@
     if (doc.params.some(o => o !== q && uses(o.expr))) return false;
     for (const sh of allShapes()) {
       const keys = new Set(shapes.includes(sh) ? SCALE_BOX_SIZE[sh.type] || [] : []);
-      for (const [k, v] of Object.entries(sh.p)) if (uses(v) && !(keys.has(k) && String(v).trim() === name)) return false;
+      for (const [k, v] of Object.entries(sh.p)) { if (NON_EXPR.has(k)) continue; if (uses(v) && !(keys.has(k) && String(v).trim() === name)) return false; }
     }
     return true;
   }
