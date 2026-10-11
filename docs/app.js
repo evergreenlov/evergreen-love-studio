@@ -4635,44 +4635,100 @@
     const { bins, failed } = maxRectsPack(items, W, H, rot);
     return failed.length ? null : bins.length;
   }
+  const FIT_THICK = [['1/16″ (1.5 mm)', 1.5], ['1/8″ (3 mm)', 3], ['3/16″ (4.8 mm)', 4.8], ['1/4″ (6 mm)', 6.35], ['3/8″ (9.5 mm)', 9.5], ['1/2″ (12.7 mm)', 12.7]];
   function openFit() {
-    const units = fitUnits();
-    if (!units.length) { msg('Primero crea o abre un diseño con piezas para contar.'); return; }
+    const designUnits = fitUnits();
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'fitTitle' });
     const close = () => { dialog.close(); dialog.remove(); };
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
-    const gapIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(3 / unitMM, 3) });
-    const marIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(5 / unitMM, 3) });
-    const qtyIn = h('input', { type: 'number', min: '1', step: '1', value: '10' });
+    const num = (v, o = {}) => h('input', { type: 'number', min: '0', step: 'any', value: String(v), ...o });
+    const dec = mm => fmt(mm / unitMM, 3);
+    const mode = h('select', { 'aria-label': 'De dónde salen las piezas' },
+      h('option', { value: 'manual' }, 'Escribir las medidas de las piezas'),
+      ...(designUnits.length ? [h('option', { value: 'design' }, `Usar mi diseño (${designUnits.length} pieza${designUnits.length > 1 ? 's' : ''})`)] : []));
+    if (designUnits.length) mode.value = 'design';
+    const pw = num(fmt(127 / unitMM, 3)), ph = num(fmt(127 / unitMM, 3)), pn = num('5', { step: '1', min: '1' });
+    const cov = h('input', { type: 'checkbox' }), cw = num(fmt(127 / unitMM, 3)), ch = num(fmt(127 / unitMM, 3)), cn = num('1', { step: '1', min: '1' });
+    const sheetSel = h('select', { 'aria-label': 'Tamaño de la plancha' },
+      ...FIT_SHEETS.map(([l], i) => h('option', { value: String(i) }, l)),
+      h('option', { value: 'mach' }, 'Área de la máquina (la actual)'), h('option', { value: 'custom' }, 'Otra medida…'));
+    sheetSel.value = '2';
+    const sw = num(dec(609.6)), sh = num(dec(304.8));
+    const thickSel = h('select', { 'aria-label': 'Grosor de la madera' }, ...FIT_THICK.map(([l, v]) => h('option', { value: String(v) }, l)), h('option', { value: 'custom' }, 'Otro grosor…'));
+    thickSel.value = '6.35';
+    const tIn = num(dec(6.35));
+    const gapIn = num(dec(3)), marIn = num(dec(5)), qtyIn = num('10', { step: '1', min: '1' });
     const rot = h('input', { type: 'checkbox', checked: '' });
     const out = h('div', { class: 'fit-out' });
-    const tot = units.reduce((a, u) => a + u.area, 0);
-    const sheets = [...FIT_SHEETS, ['Área de la máquina (la actual)', doc.sheet.w, doc.sheet.h]];
+    const manualBox = h('div', {});
     const areaTxt = mm2 => isInch() ? `${fmt(mm2 / 645.16, 0)} in² (${fmt(mm2 / 645.16 / 144, 2)} ft²)` : `${fmt(mm2 / 100, 0)} cm² (${fmt(mm2 / 1e6, 2)} m²)`;
-    const calc = () => {
-      const gap = parseFloat(gapIn.value) * unitMM, mar = parseFloat(marIn.value) * unitMM, qty = Math.max(1, Math.floor(+qtyIn.value || 1));
-      if (![gap, mar].every(Number.isFinite) || gap < 0 || mar < 0) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa la separación y el margen: no pueden ser negativos.')); return; }
-      let best = null;
-      const rows = sheets.map(([name, sw, sh]) => {
-        const fits = units.every(u => (u.w <= sw - 2 * mar && u.h <= sh - 2 * mar) || (rot.checked && u.h <= sw - 2 * mar && u.w <= sh - 2 * mar));
-        if (!fits) return h('tr', {}, h('td', {}, name), h('td', { colspan: '5' }, 'Alguna pieza es más grande que la hoja'));
-        const k = fitCopies(units, sw, sh, gap, mar, rot.checked);
-        const n = fitSheets(units, qty, sw, sh, gap, mar, rot.checked);
-        if (n === null) return h('tr', {}, h('td', {}, name), h('td', { colspan: '5' }, 'No se pudo acomodar'));
-        const bought = n * sw * sh, used = qty * tot;
-        if (!best || bought < best.bought) best = { name, n, bought, used };
-        return h('tr', {}, h('td', {}, name), h('td', {}, k ? String(k) : 'no cabe completa'),
-          h('td', { class: 'n' }, `${n} hoja${n > 1 ? 's' : ''}`), h('td', {}, areaTxt(bought)),
-          h('td', {}, areaTxt(used)), h('td', {}, fmt((1 - used / bought) * 100, 0) + ' %'));
-      });
-      const reco = best ? h('p', { class: 'tip' }, `Para ${qty} caja${qty > 1 ? 's' : ''}, lo que menos madera compra: ${best.n} hoja${best.n > 1 ? 's' : ''} de ${best.name.replace('Madera ', '')}, en total ${areaTxt(best.bought)}. La madera que realmente se corta es ${areaTxt(best.used)}.`) : null;
-      out.replaceChildren(...(reco ? [reco] : []), h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Hoja'), h('th', {}, 'Cajas por hoja'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), ...rows)));
-    };
-    [gapIn, marIn, qtyIn, rot].forEach(el => el.addEventListener('input', calc));
+    const L = mm => fmt(mm / unitMM, 2) + ' ' + unitLabel();
     const row = (l, el) => h('label', {}, l, el);
-    dialog.append(h('h2', { id: 'fitTitle' }, '¿Cuántos caben en una hoja?'),
-      h('p', {}, `Cuenta cuántas copias completas del diseño (${units.length} pieza${units.length > 1 ? 's' : ''}) entran en cada hoja. No mueve nada.`),
-      h('div', { class: 'nest-grid' }, row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('¿Cuántas cajas quieres hacer?', qtyIn)),
+    const syncVis = () => {
+      manualBox.hidden = mode.value !== 'manual';
+      sw.parentElement.hidden = sh.parentElement.hidden = sheetSel.value !== 'custom';
+      tIn.parentElement.hidden = thickSel.value !== 'custom';
+      cw.parentElement.hidden = ch.parentElement.hidden = cn.parentElement.hidden = !cov.checked;
+    };
+    const getUnits = () => {
+      if (mode.value === 'design') return designUnits;
+      const w = parseFloat(pw.value) * unitMM, hh = parseFloat(ph.value) * unitMM, n = Math.floor(+pn.value);
+      if (!(w > 0 && hh > 0 && n >= 1)) return null;
+      const u = [];
+      for (let i = 0; i < n; i++) u.push({ w, h: hh, area: w * hh });
+      if (cov.checked) {
+        const w2 = parseFloat(cw.value) * unitMM, h2 = parseFloat(ch.value) * unitMM, n2 = Math.floor(+cn.value);
+        if (!(w2 > 0 && h2 > 0 && n2 >= 1)) return null;
+        for (let i = 0; i < n2; i++) u.push({ w: w2, h: h2, area: w2 * h2 });
+      }
+      return u;
+    };
+    const calc = () => {
+      syncVis();
+      const gap = parseFloat(gapIn.value) * unitMM, mar = parseFloat(marIn.value) * unitMM, qty = Math.floor(+qtyIn.value);
+      const units = getUnits();
+      if (!units) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa las medidas y las cantidades de las piezas: deben ser mayores que cero.')); return; }
+      if (![gap, mar].every(Number.isFinite) || gap < 0 || mar < 0 || !(qty >= 1)) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa la separación, el margen y la cantidad de cajas.')); return; }
+      const thick = thickSel.value === 'custom' ? parseFloat(tIn.value) * unitMM : parseFloat(thickSel.value);
+      const thickName = thickSel.value === 'custom' ? L(thick) : FIT_THICK.find(t => String(t[1]) === thickSel.value)[0];
+      const tot = units.reduce((a, u) => a + u.area, 0);
+      const mach = ['Área de la máquina (la actual)', doc.sheet.w, doc.sheet.h];
+      const chosen = sheetSel.value === 'custom' ? [`Mi plancha ${L(parseFloat(sw.value) * unitMM)} × ${L(parseFloat(sh.value) * unitMM)}`, parseFloat(sw.value) * unitMM, parseFloat(sh.value) * unitMM]
+        : sheetSel.value === 'mach' ? mach : FIT_SHEETS[+sheetSel.value];
+      if (!(chosen[1] > 0 && chosen[2] > 0)) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa el tamaño de la plancha.')); return; }
+      const compute = ([name, w, hh]) => {
+        const fits = units.every(u => (u.w <= w - 2 * mar && u.h <= hh - 2 * mar) || (rot.checked && u.h <= w - 2 * mar && u.w <= hh - 2 * mar));
+        if (!fits) return { name, err: 'Alguna pieza es más grande que la plancha' };
+        const k = fitCopies(units, w, hh, gap, mar, rot.checked), n = fitSheets(units, qty, w, hh, gap, mar, rot.checked);
+        if (n === null) return { name, err: 'No se pudo acomodar' };
+        return { name, k, n, bought: n * w * hh, used: qty * tot };
+      };
+      const mine = compute(chosen);
+      const others = [...FIT_SHEETS, mach].filter(s => s[0] !== chosen[0]).map(compute);
+      const piecesPerBox = units.length;
+      const head = mine.err
+        ? h('p', { class: 'tip err-tip' }, `${mine.name}: ${mine.err}.`)
+        : h('div', { class: 'fit-main' },
+          h('div', { class: 'fit-big' }, `${mine.n} plancha${mine.n > 1 ? 's' : ''}`),
+          h('p', { class: 'tip' }, `Para ${qty} caja${qty > 1 ? 's' : ''} (${piecesPerBox} pieza${piecesPerBox > 1 ? 's' : ''} cada una, ${qty * piecesPerBox} en total) en madera de ${thickName}. Plancha: ${mine.name.replace('Madera ', '')}. `
+            + `Compras ${areaTxt(mine.bought)} y se corta ${areaTxt(mine.used)}; sobra el ${fmt((1 - mine.used / mine.bought) * 100, 0)} %. `
+            + (mine.k ? `En cada plancha caben ${mine.k} caja${mine.k > 1 ? 's' : ''} completa${mine.k > 1 ? 's' : ''}.` : 'Una caja no cabe completa en una plancha, así que sus piezas se reparten.')));
+      const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: '5' }, r.err))
+        : h('tr', {}, h('td', {}, r.name), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
+          h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'));
+      out.replaceChildren(head, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
+        h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), tr(mine), ...others.map(tr))));
+    };
+    [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
+    manualBox.append(
+      h('div', { class: 'nest-grid' }, row(`Ancho de la pieza (${unitLabel()})`, pw), row(`Alto de la pieza (${unitLabel()})`, ph), row('Piezas por caja', pn)),
+      h('label', { class: 'check' }, cov, ' La caja lleva cobertura (tapa)'),
+      h('div', { class: 'nest-grid' }, row(`Ancho de la cobertura (${unitLabel()})`, cw), row(`Alto de la cobertura (${unitLabel()})`, ch), row('Coberturas por caja', cn)));
+    dialog.append(h('h2', { id: 'fitTitle' }, '¿Cuánta madera necesito?'),
+      h('p', {}, 'Dime las piezas, cuántas cajas quieres, la plancha y el grosor, y calculo cuántas planchas necesitas. No mueve nada de tu diseño.'),
+      row('Piezas', mode), manualBox,
+      h('div', { class: 'nest-grid' }, row('¿Cuántas cajas quieres hacer?', qtyIn), row('Grosor de la madera', thickSel), row('Tamaño de la plancha', sheetSel), row(`Grosor (${unitLabel()})`, tIn),
+        row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn)),
       h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
       out,
       h('div', { class: 'dialog-actions' }, h('button', { class: 'primary', onclick: close }, 'Cerrar')));

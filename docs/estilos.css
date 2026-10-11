@@ -389,3 +389,6 @@ button.wide { width: 100%; margin-top: 10px; }
 .fit-table th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; opacity: .7; }
 .fit-table tr:last-child td { border-bottom: 0; }
 .fit-table td.n { font-weight: 600; }
+.fit-main { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.fit-big { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.batch-dialog [hidden] { display: none !important; }
