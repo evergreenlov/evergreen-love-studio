@@ -4645,27 +4645,34 @@
     const marIn = h('input', { type: 'number', min: '0', step: 'any', value: fmt(5 / unitMM, 3) });
     const qtyIn = h('input', { type: 'number', min: '1', step: '1', value: '10' });
     const rot = h('input', { type: 'checkbox', checked: '' });
-    const out = h('div', { class: 'tw' });
+    const out = h('div', { class: 'fit-out' });
     const tot = units.reduce((a, u) => a + u.area, 0);
     const sheets = [...FIT_SHEETS, ['Área de la máquina (la actual)', doc.sheet.w, doc.sheet.h]];
+    const areaTxt = mm2 => isInch() ? `${fmt(mm2 / 645.16, 0)} in² (${fmt(mm2 / 645.16 / 144, 2)} ft²)` : `${fmt(mm2 / 100, 0)} cm² (${fmt(mm2 / 1e6, 2)} m²)`;
     const calc = () => {
       const gap = parseFloat(gapIn.value) * unitMM, mar = parseFloat(marIn.value) * unitMM, qty = Math.max(1, Math.floor(+qtyIn.value || 1));
       if (![gap, mar].every(Number.isFinite) || gap < 0 || mar < 0) { out.replaceChildren(h('p', { class: 'tip err-tip' }, 'Revisa la separación y el margen: no pueden ser negativos.')); return; }
+      let best = null;
       const rows = sheets.map(([name, sw, sh]) => {
         const fits = units.every(u => (u.w <= sw - 2 * mar && u.h <= sh - 2 * mar) || (rot.checked && u.h <= sw - 2 * mar && u.w <= sh - 2 * mar));
-        if (!fits) return h('tr', {}, h('td', {}, name), h('td', { colspan: '3' }, 'Alguna pieza es más grande que la hoja'));
+        if (!fits) return h('tr', {}, h('td', {}, name), h('td', { colspan: '5' }, 'Alguna pieza es más grande que la hoja'));
         const k = fitCopies(units, sw, sh, gap, mar, rot.checked);
         const n = fitSheets(units, qty, sw, sh, gap, mar, rot.checked);
-        return h('tr', {}, h('td', {}, name), h('td', { class: 'n' }, k ? String(k) : 'no cabe completo'),
-          h('td', {}, k ? fmt(k * tot / (sw * sh) * 100, 0) + ' %' : '—'), h('td', {}, n === null ? '—' : String(n)));
+        if (n === null) return h('tr', {}, h('td', {}, name), h('td', { colspan: '5' }, 'No se pudo acomodar'));
+        const bought = n * sw * sh, used = qty * tot;
+        if (!best || bought < best.bought) best = { name, n, bought, used };
+        return h('tr', {}, h('td', {}, name), h('td', {}, k ? String(k) : 'no cabe completa'),
+          h('td', { class: 'n' }, `${n} hoja${n > 1 ? 's' : ''}`), h('td', {}, areaTxt(bought)),
+          h('td', {}, areaTxt(used)), h('td', {}, fmt((1 - used / bought) * 100, 0) + ' %'));
       });
-      out.replaceChildren(h('table', {}, h('tr', {}, h('th', {}, 'Hoja'), h('th', {}, 'Copias por hoja'), h('th', {}, 'Madera usada'), h('th', {}, `Hojas para ${qty}`)), ...rows));
+      const reco = best ? h('p', { class: 'tip' }, `Para ${qty} caja${qty > 1 ? 's' : ''}, lo que menos madera compra: ${best.n} hoja${best.n > 1 ? 's' : ''} de ${best.name.replace('Madera ', '')}, en total ${areaTxt(best.bought)}. La madera que realmente se corta es ${areaTxt(best.used)}.`) : null;
+      out.replaceChildren(...(reco ? [reco] : []), h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Hoja'), h('th', {}, 'Cajas por hoja'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), ...rows)));
     };
     [gapIn, marIn, qtyIn, rot].forEach(el => el.addEventListener('input', calc));
     const row = (l, el) => h('label', {}, l, el);
     dialog.append(h('h2', { id: 'fitTitle' }, '¿Cuántos caben en una hoja?'),
       h('p', {}, `Cuenta cuántas copias completas del diseño (${units.length} pieza${units.length > 1 ? 's' : ''}) entran en cada hoja. No mueve nada.`),
-      h('div', { class: 'nest-grid' }, row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('Copias que quiero hacer', qtyIn)),
+      h('div', { class: 'nest-grid' }, row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('¿Cuántas cajas quieres hacer?', qtyIn)),
       h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
       out,
       h('div', { class: 'dialog-actions' }, h('button', { class: 'primary', onclick: close }, 'Cerrar')));
