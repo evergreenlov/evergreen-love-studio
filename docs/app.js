@@ -2961,6 +2961,10 @@
   /* ----- Tableta: pellizcar con dos dedos para acercar, alejar y mover el área de trabajo ----- */
   const touches = new Map();
   let pinch = null;
+  // Un dedo "primario" empieza un gesto nuevo: cualquier toque anterior ya terminó
+  svg.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch' && e.isPrimary) { touches.clear(); pinch = null; }
+  }, { capture: true });
   const touchMid = () => { const [a, b] = [...touches.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; };
   svg.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'touch') return;
@@ -2987,14 +2991,15 @@
     drawCanvas();
     e.stopImmediatePropagation();
   }, { capture: true });
-  const touchUp = e => {
+  // Al levantar un dedo (aunque el aviso llegue a otro elemento) se olvida su toque: así un toque perdido no bloquea el lienzo
+  const touchGone = e => {
     if (e.pointerType !== 'touch') return;
     touches.delete(e.pointerId);
-    if (pinch) { if (touches.size < 2) pinch = null; e.stopImmediatePropagation(); }
+    if (touches.size < 2) pinch = null;
+    if (!touches.size) { pinch = null; }
   };
-  svg.addEventListener('pointerup', touchUp, { capture: true });
-  svg.addEventListener('pointercancel', touchUp, { capture: true });
-
+  window.addEventListener('pointerup', touchGone, { capture: true });
+  window.addEventListener('pointercancel', touchGone, { capture: true });
   /* ----- Puntero ----- */
   svg.addEventListener('pointerdown', e => {
     setHitK(e);
