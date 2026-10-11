@@ -3583,6 +3583,19 @@
   const coverTip = s => h('p', { class: 'tip', id: 'covTip' }, coverText(s));
   function updateCoverTip(s) { const el = $('#covTip'); if (el && s.p.cubierta === 'si') el.textContent = coverText(s); }
 
+  // Muestra y deja editar los puntos de las figuras que hay dentro de un grupo (sin doble clic)
+  function editPointsOf(shapes) {
+    const leaves = [];
+    const walkDown = s => { if (s.type === 'group') (s.children || []).forEach(walkDown); else leaves.push(s); };
+    shapes.forEach(walkDown);
+    const ok = leaves.filter(s => !s.hidden && !s.locked);
+    if (!ok.length) { msg('No hay figuras visibles dentro para editar sus puntos.'); return; }
+    sel = new Set(ok.map(s => s.id));
+    for (const s of ok) nodeShow.add(s.id);
+    nodeSel.clear(); nodeHover = null;
+    msg(`Puntos de ${ok.length} figura(s) del grupo. Pulsa «Elegir todos los puntos» para moverlos juntos, o toca uno para moverlo.`);
+    buildInspector(); buildObjects(); drawCanvas();
+  }
   function buildInspector() {
     buildInspectorFields();
     refreshHints();
@@ -3641,6 +3654,7 @@
       box.append(
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
         h('button', { class: 'primary wide', title: 'Agrupa sin combinar (Ctrl+G): se mueven y escalan juntos', onclick: () => groupSel('grupo') }, 'Agrupar'),
+        h('button', { class: 'wide', title: 'Muestra los puntos de lo elegido (y de lo que hay dentro de los grupos) para moverlos', onclick: () => editPointsOf(shapes) }, 'Ver y editar puntos'),
         ...(() => { const f = shapes.find(x => x.from && doc.origins && doc.origins[x.from.gid]); return f ? [h('button', { class: 'wide', onclick: () => restoreOrigin(f.from.gid) }, `Volver a «${f.from.name}» con parámetros`)] : []; })(),
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
@@ -3677,7 +3691,8 @@
       h('div', { class: 'insp-title' }, h('span', { class: 'type' }, TYPES[s.type].label + (parent ? ` · dentro de "${parent.name}"` : ''))),
       propRow('Nombre', name),
     );
-    if (!['group', 'text'].includes(s.type)) box.append(h('button', { class: 'wide', title: 'Muestra los puntos de la figura para moverlos (también doble clic o doble toque)', onclick: () => toggleNodes(s.id) }, nodeShow.has(s.id) ? 'Ocultar puntos' : 'Ver y editar puntos'));
+    if (s.type === 'group') box.append(h('button', { class: 'wide', title: 'Elige las figuras de adentro y muestra sus puntos para moverlos', onclick: () => editPointsOf([s]) }, 'Ver y editar los puntos de adentro'));
+    else if (s.type !== 'text') box.append(h('button', { class: 'wide', title: 'Muestra los puntos de la figura para moverlos (también doble clic o doble toque)', onclick: () => toggleNodes(s.id) }, nodeShow.has(s.id) ? 'Ocultar puntos' : 'Ver y editar puntos'));
     if (nodeShow.has(s.id) && importFrame(s) && !importFrame(s).rotated) box.append(...nodeToolsSection());
     if (s.from && doc.origins && doc.origins[s.from.gid]) {
       box.append(h('div', { class: 'origin-note' },

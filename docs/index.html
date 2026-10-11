@@ -4,7 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-agrupar-4">
+<link rel="stylesheet" href="estilos.css?v=20261019-agrupar-5">
+<script>
+/* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
+(function () {
+  var BUILD = "agrupar-5";
+  try {
+    fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+      t = (t || '').trim();
+      if (t && t !== BUILD && location.search.indexOf('b=' + t) < 0) location.replace(location.pathname + '?b=' + encodeURIComponent(t));
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -162,6 +174,7 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-agrupar-4"></script>
+<script src="app.js?v=20261019-agrupar-5"></script>
+<div id="buildTag" style="position:fixed;right:8px;bottom:4px;font:11px/1.2 system-ui;opacity:.55;pointer-events:none;z-index:50">versión agrupar-5</div>
 </body>
 </html>
