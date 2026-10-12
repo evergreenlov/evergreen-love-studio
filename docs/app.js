@@ -8025,10 +8025,95 @@
           ev.stopPropagation();
           if (!confirm(`¿Borrar la plantilla "${tpl.name}"? Tu diseño actual no se toca.`)) return;
           writeUserTemplates(readUserTemplates().filter(x => x.id !== tpl.id));
+          const dl = readDeleted(); dl[tpl.name] = new Date().toISOString(); writeDeleted(dl);
           buildUserTemplates();
+          syncTemplates({ silent: true });
         } }, '×')));
     }
   }
+
+  /* ----- Sincronizar plantillas con tu Worker de Cloudflare (gratis): mismas plantillas en todos tus aparatos ----- */
+  const SYNC_KEY = 'evergreen-love-studio:sync';
+  const DEL_KEY = 'evergreen-love-studio:plantillas-borradas';
+  const readSync = () => { try { return JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); } catch (e) { return null; } };
+  const readDeleted = () => { try { return JSON.parse(localStorage.getItem(DEL_KEY) || '{}') || {}; } catch (e) { return {}; } };
+  const writeDeleted = o => { try { localStorage.setItem(DEL_KEY, JSON.stringify(o)); } catch (e) { /* sin espacio */ } };
+  const syncUrl = cfg => String(cfg.url || '').trim().replace(/\/+$/, '') + '/plantillas';
+  // Junta lo de aquí con lo del servidor: gana la más reciente de cada nombre; las borradas después de guardarse se quitan
+  function mergeTemplates(local, remote, delLocal, delRemote) {
+    const del = { ...delRemote };
+    for (const [k, v] of Object.entries(delLocal)) if (!del[k] || del[k] < v) del[k] = v;
+    const byName = new Map();
+    for (const t of [...local, ...remote]) {
+      if (!t || !t.name || !t.doc) continue;
+      const cur = byName.get(t.name);
+      if (!cur || String(t.date || '') > String(cur.date || '')) byName.set(t.name, t);
+    }
+    const out = [];
+    for (const [name, t] of byName) {
+      if (del[name] && del[name] >= String(t.date || '')) continue;
+      out.push(t);
+    }
+    for (const [name, when] of Object.entries(del)) if (byName.has(name) && !out.find(t => t.name === name)) { /* borrada */ }
+    return { list: out, deleted: del };
+  }
+  let syncing = false;
+  async function syncTemplates(opts = {}) {
+    const cfg = readSync();
+    if (!cfg || !cfg.url || !cfg.token) { if (!opts.silent) msg('Primero configura la sincronización: Plantillas → ☁ Sincronizar plantillas…'); return false; }
+    if (syncing) return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { if (!opts.silent) msg('Sin internet: se sincroniza cuando vuelvas a tener conexión.'); return false; }
+    syncing = true;
+    try {
+      const headers = { Authorization: 'Bearer ' + cfg.token };
+      const r = await fetch(syncUrl(cfg), { headers, cache: 'no-store' });
+      if (r.status === 401) throw new Error('La clave no coincide con la del Worker.');
+      if (!r.ok) throw new Error('El servicio respondió ' + r.status);
+      const remote = await r.json();
+      const m = mergeTemplates(readUserTemplates(), Array.isArray(remote.plantillas) ? remote.plantillas : [], readDeleted(), remote.borradas && typeof remote.borradas === 'object' ? remote.borradas : {});
+      const body = JSON.stringify({ plantillas: m.list, borradas: m.deleted });
+      const same = JSON.stringify({ plantillas: remote.plantillas || [], borradas: remote.borradas || {} }) === body;
+      if (!same) {
+        const p = await fetch(syncUrl(cfg), { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body });
+        if (!p.ok) throw new Error('No se pudo guardar en el servicio (' + p.status + ').');
+      }
+      if (writeUserTemplates(m.list)) { writeDeleted(m.deleted); buildUserTemplates(); }
+      localStorage.setItem(SYNC_KEY, JSON.stringify({ ...cfg, ultima: new Date().toISOString() }));
+      if (!opts.silent) msg(`Sincronizado: ${m.list.length} plantilla(s) en este aparato y en tu nube.`);
+      return true;
+    } catch (err) {
+      if (!opts.silent) msg('No se pudo sincronizar: ' + (err.message || err));
+      return false;
+    } finally { syncing = false; }
+  }
+  function openSyncDialog() {
+    const cfg = readSync() || {};
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-labelledby': 'syncTitle' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const url = h('input', { type: 'url', placeholder: 'https://evergreen-sync.TU-NOMBRE.workers.dev', value: cfg.url || '', autocomplete: 'off', spellcheck: 'false' });
+    const token = h('input', { type: 'password', placeholder: 'La clave que pusiste en SYNC_TOKEN', value: cfg.token || '', autocomplete: 'off' });
+    const status = h('p', { class: 'tip', role: 'status' }, cfg.url ? `Conectado. Última sincronización: ${cfg.ultima ? new Date(cfg.ultima).toLocaleString() : 'todavía no'}.` : 'Todavía no está configurado.');
+    const save = h('button', { class: 'primary' }, 'Guardar y sincronizar ahora');
+    save.onclick = async () => {
+      const u = url.value.trim(), t = token.value.trim();
+      if (!(/^https:\/\//i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(u)) || !t) { status.textContent = 'Escribe la dirección completa (empieza con https://) y la clave.'; return; }
+      localStorage.setItem(SYNC_KEY, JSON.stringify({ url: u, token: t }));
+      status.textContent = 'Sincronizando…';
+      const ok = await syncTemplates({ silent: true });
+      status.textContent = ok ? 'Listo: las plantillas ya se sincronizan solas en este aparato.' : 'No se pudo conectar. Revisa la dirección y la clave (deben ser las de tu Worker).';
+      if (ok) msg('Sincronización lista.');
+    };
+    const off = h('button', {}, 'Desconectar este aparato');
+    off.onclick = () => { localStorage.removeItem(SYNC_KEY); status.textContent = 'Desconectado. Tus plantillas siguen aquí, pero ya no se sincronizan.'; };
+    dialog.append(h('h2', { id: 'syncTitle' }, '☁ Sincronizar plantillas'),
+      h('p', {}, 'Tus plantillas guardadas se suben a tu Worker de Cloudflare (gratis) y se bajan en cada aparato donde pongas la misma dirección y clave.'),
+      h('label', {}, 'Dirección de tu Worker', url), h('label', {}, 'Clave de sincronización', token), status,
+      h('div', { class: 'dialog-actions' }, off, h('button', { onclick: close }, 'Cerrar'), save));
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
   // Pasar tus plantillas a otro aparato (por ejemplo del Mac al iPad): se exportan a un archivo y se importan allá
   function exportUserTemplates() {
     const list = readUserTemplates();
@@ -8049,6 +8134,7 @@
     if (!(added || updated)) { msg('Ese archivo no trae plantillas.'); return; }
     if (writeUserTemplates(list)) { buildUserTemplates(); msg(`Plantillas importadas: ${added} nueva(s)` + (updated ? `, ${updated} actualizada(s)` : '') + '. Están en Plantillas → Mis plantillas.'); }
   }
+  $('#btnSyncTemplates').onclick = e => { e.stopPropagation(); menu.hidden = true; openSyncDialog(); };
   $('#btnExportTemplates').onclick = e => { e.stopPropagation(); menu.hidden = true; exportUserTemplates(); };
   $('#btnImportTemplates').onclick = e => {
     e.stopPropagation(); menu.hidden = true;
@@ -8081,7 +8167,11 @@
     }
     const entry = { id: same ? same.id : uid(), name, thumbnail, date: new Date().toISOString(), doc: JSON.parse(JSON.stringify({ ...doc, name })) };
     const next = same ? list.map(x => x.id === same.id ? entry : x) : [...list, entry];
-    if (writeUserTemplates(next)) msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
+    if (writeUserTemplates(next)) {
+      const dl = readDeleted(); if (dl[name]) { delete dl[name]; writeDeleted(dl); }
+      msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
+      syncTemplates({ silent: true });
+    }
   };
   document.addEventListener('click', () => { menu.hidden = true; });
   menu.addEventListener('click', e => {
@@ -8187,6 +8277,8 @@
   if (!restored) { let pu = 'mm'; try { pu = localStorage.getItem(UNITS_KEY) === 'in' ? 'in' : 'mm'; } catch (e) { /* mm */ } doc = boxTemplate('dedos', pu); }
   if (!CL) setTimeout(() => msg('Aviso: falta lib/clipper.js; unir, restar y contorno no estarán disponibles.'), 500);
   savedState = JSON.stringify(doc);
+  setTimeout(() => syncTemplates({ silent: true }), 1500);
+  window.addEventListener('online', () => syncTemplates({ silent: true }));
   setTool('select');
   fullRender();
   fitView();
