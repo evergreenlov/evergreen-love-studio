@@ -3872,8 +3872,54 @@
     refreshHints();
     updateSelBar();
   }
+
+  /* ----- Iconos de acciones en la barra izquierda (agrupar, unir, tijera…) ----- */
+  function ensureNodesShown() {
+    let any = false;
+    for (const id of sel) { const s = byId(id); if (s && importFrame(s)) { nodeShow.add(id); any = true; } }
+    if (any) { buildInspector(); drawCanvas(); }
+    return any;
+  }
+  const ACTIONS = {
+    group: () => groupSel('grupo'),
+    ungroup: () => ungroupSel(),
+    unir: () => groupSel('unir'),
+    restar: () => groupSel('restar'),
+    intersectar: () => groupSel('intersectar'),
+    excluir: () => groupSel('excluir'),
+    dup: () => duplicateSel(),
+    del: () => deleteSel(),
+    simplify: () => {
+      if (!nodeSel.size && ![...sel].some(id => nodeShow.has(id))) { if (!ensureNodesShown()) { msg('Simplificar funciona con dibujos importados: elige uno primero.'); return; } }
+      simplifySelected();
+    },
+    scissors: () => {
+      if (nodeSel.size) { scissorsSelected(); return; }
+      if (!ensureNodesShown() && ![...sel].some(id => nodeShow.has(id))) { msg('La tijera funciona con dibujos importados: elige uno primero.'); return; }
+      scissorsOn = true; svg.style.cursor = 'crosshair';
+      msg('Tijera activa: toca UN punto o borde del contorno para cortar. Esc la desactiva.');
+      buildInspector();
+    },
+  };
+  $('#tools').addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b || b.disabled) return;
+    const f = ACTIONS[b.dataset.act];
+    if (f) f();
+  });
+  function updateActionIcons() {
+    const shapes = [...sel].map(byId).filter(Boolean);
+    const many = shapes.length >= 2, one = shapes.length >= 1;
+    const editable = shapes.some(s => importFrame(s));
+    const canUn = shapes.some(s => s.type === 'group' || SEPARABLE.has(s.type));
+    const set = (act, on) => { const b = document.querySelector(`#tools [data-act="${act}"]`); if (b) b.disabled = !on; };
+    set('group', many); set('ungroup', canUn); set('unir', many); set('restar', many); set('intersectar', many); set('excluir', many);
+    set('scissors', editable); set('simplify', editable); set('dup', one); set('del', one);
+  }
+
   // Barra flotante sobre el lienzo con las acciones de siempre para lo elegido (sin teclado ni panel)
   function updateSelBar() {
+    updateActionIcons();
     const bar = $('#selBar');
     if (!bar) return;
     const shapes = [...sel].map(byId).filter(Boolean);
