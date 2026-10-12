@@ -1973,6 +1973,19 @@
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt' + (q.edit ? ' edit' : '') + (on ? ' on' : '') + (hov ? ' hov' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
+    // extremos de los contornos abiertos (por ejemplo después de usar la Tijera): un aro naranja para que se vea el corte
+    for (const id of sel) {
+      if (!nodeShow.has(id)) continue;
+      const fr = importFrame(byId(id));
+      if (!fr || fr.rotated) continue;
+      fr.a.polys.forEach(pl => {
+        if (pl.closed || pl.pts.length < 2) return;
+        for (const q of [pl.pts[0], pl.pts[pl.pts.length - 1]]) {
+          const [x, y] = frameWorld(fr, q);
+          svgEl('circle', { cx: r4(x), cy: r4(y), r: r4(8 * px), class: 'cut-end', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+        }
+      });
+    }
     // puntos intermedios elegidos (no se ven normalmente): pequeños, para saber qué se va a mover
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
@@ -1994,7 +2007,7 @@
   }
   function toggleNodes(id) {
     sel = new Set([id]);
-    if (nodeShow.has(id)) { nodeShow.delete(id); nodeSel.clear(); nodeHover = null; msg('Puntos ocultos.'); }
+    if (nodeShow.has(id)) { nodeShow.delete(id); nodeSel.clear(); nodeHover = null; scissorsOn = false; svg.style.cursor = ''; msg('Puntos ocultos.'); }
     else {
       nodeShow.add(id);
       const n = nodeList(id), s = byId(id), editable = n.some(q => q.edit);
@@ -2756,7 +2769,7 @@
         h('button', { onclick: () => smoothSelected(false), title: 'Quita las manijas: el punto vuelve a ser una esquina' }, 'Punta'),
         h('button', { onclick: () => { if (nodeSel.size) deleteNodes(); else msg('Elige primero los puntos que quieres borrar.'); } }, 'Borrar punto'),
         h('button', { title: 'Corta el contorno en los puntos elegidos: la figura cerrada queda abierta', onclick: scissorsSelected }, 'Tijera (en el punto)'),
-        h('button', { class: scissorsOn ? 'primary' : '', title: 'Con esto activo, toca un punto o un borde del contorno y se corta ahí', onclick: () => { scissorsOn = !scissorsOn; msg(scissorsOn ? 'Tijera activa: toca un punto o un borde para cortar. Vuelve a pulsarla para dejar de cortar.' : 'Tijera desactivada.'); buildInspector(); } }, scissorsOn ? 'Tijera activa ✓' : 'Tijera (tocar y cortar)'),
+        h('button', { class: scissorsOn ? 'primary' : '', title: 'Con esto activo, toca un punto o un borde del contorno y se corta ahí', onclick: () => { scissorsOn = !scissorsOn; svg.style.cursor = scissorsOn ? 'crosshair' : ''; msg(scissorsOn ? 'Tijera activa: toca UN punto o borde para cortar (se usa una vez). Esc o este botón la desactivan.' : 'Tijera desactivada.'); buildInspector(); } }, scissorsOn ? 'Tijera activa ✓' : 'Tijera (tocar y cortar)'),
         h('button', { onclick: () => { for (const id of [...sel]) nodeShow.delete(id); nodeSel.clear(); buildInspector(); drawCanvas(); } }, 'Ocultar puntos'))];
   }
 
@@ -3282,8 +3295,9 @@
       const hit = nodeNear(p) || segNear(p) || csegNear(p);
       if (hit && scissorsOn) {
         const nd = hit.kind === 'seg' || hit.kind === 'cseg' ? insertNode(hit) : hit;
-        if (nd && nd.key && cutAtNode(nd.id, nodeParts(nd.key).pi, nodeParts(nd.key).vi)) { nodeSel.clear(); nodeHover = null; checkpoint(); fullRender(); msg('Cortado. El contorno quedó abierto en ese punto.'); }
-        else { msg('No se pudo cortar ahí.'); drawCanvas(); }
+        scissorsOn = false; svg.style.cursor = '';   // la tijera se usa una vez por activación
+        if (nd && nd.key && cutAtNode(nd.id, nodeParts(nd.key).pi, nodeParts(nd.key).vi)) { nodeSel.clear(); nodeHover = null; checkpoint(); fullRender(); msg('Cortado. Ahora hay dos extremos en ese punto: puedes mover cada uno. La tijera se desactivó.'); }
+        else { msg('No se pudo cortar ahí. La tijera se desactivó.'); fullRender(); }
         return;
       }
       if (hit) {
@@ -3512,6 +3526,7 @@
   /* ================= Herramientas ================= */
   function setTool(t) {
     tool = t;
+    if (typeof scissorsOn !== 'undefined' && scissorsOn) { scissorsOn = false; svg.style.cursor = ''; }
     for (const b of document.querySelectorAll('#tools button')) b.classList.toggle('active', b.dataset.tool === t);
     stage.classList.toggle('tool-draw', !['select', 'hand'].includes(t));
     stage.classList.toggle('tool-hand', t === 'hand');
@@ -8001,6 +8016,7 @@
     if (!nodeSel.size && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && [...sel].some(id => nodeShow.has(id))) {
       e.preventDefault(); msg('Haz clic en un punto para elegirlo y muévelo con las flechas (con los puntos visibles, las flechas ya no mueven toda la figura).'); return;
     }
+    if (e.key === 'Escape' && scissorsOn) { scissorsOn = false; svg.style.cursor = ''; buildInspector(); msg('Tijera desactivada.'); return; }
     if (e.key === 'Escape' && (nodeSel.size || nodeShow.size)) {
       if (nodeSel.size) nodeSel.clear(); else { nodeShow.clear(); nodeHover = null; svg.style.cursor = ''; msg('Puntos ocultos.'); }
       drawCanvas(); return;
