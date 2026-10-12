@@ -4185,7 +4185,30 @@
     if (!ok.length) return [];
     const pct = h('input', { value: '100', type: 'number', min: '1', step: 'any', 'aria-label': 'Escala en porcentaje' });
     const hasParam = doc.params.some(p => p.name === 'escala');
+    // Tamaño deseado: se escribe el ancho o el alto que debe medir TODO lo elegido y se ajusta manteniendo la proporción
+    evaluateAll();
+    const bb0 = unionBox(ok.map(s => { const r = evalCache.get(s.id); return r && r.bbox; }));
+    const sizeRows = [];
+    if (bb0 && bb0.w > 0 && bb0.h > 0) {
+      const u = v => fmt(v / unitMM, 3);
+      const wIn = h('input', { value: u(bb0.w), type: 'number', min: '0', step: 'any', 'aria-label': 'Ancho deseado' });
+      const hIn = h('input', { value: u(bb0.h), type: 'number', min: '0', step: 'any', 'aria-label': 'Alto deseado' });
+      wIn.addEventListener('input', () => { const v = parseFloat(wIn.value); if (v > 0) hIn.value = u(v * unitMM * bb0.h / bb0.w); });
+      hIn.addEventListener('input', () => { const v = parseFloat(hIn.value); if (v > 0) wIn.value = u(v * unitMM * bb0.w / bb0.h); });
+      const apply = h('button', { class: 'primary wide', title: 'Ajusta todo lo elegido para que mida el ancho y el alto escritos (mantiene la proporción)', onclick: () => {
+        const v = parseFloat(wIn.value);
+        if (!(v > 0)) { msg('Escribe el ancho o el alto que quieres.'); return; }
+        scaleShapes(ok, v * unitMM / bb0.w * 100);
+      } }, 'Poner este tamaño');
+      sizeRows.push(
+        h('div', { class: 'insp-sub' }, 'Tamaño que quieres (todo lo elegido junto)'),
+        propRow(`Ancho (${unitLabel()})`, wIn),
+        propRow(`Alto (${unitLabel()})`, hIn),
+        apply,
+        h('p', { class: 'tip' }, `Ahora mide ${u(bb0.w)} × ${u(bb0.h)} ${unitLabel()}. Escribe el ancho o el alto y el otro se calcula solo, sin deformar.`));
+    }
     return [
+      ...sizeRows,
       h('div', { class: 'insp-sub' }, 'Tamaño de todo lo seleccionado'),
       propRow('Escala %', pct),
       h('div', { class: 'btn-grid' },
@@ -4262,7 +4285,7 @@
     if (!c) return;
     rewriteScale(shapes, null, c[0], c[1], pct / 100);
     checkpoint(); fullRender();
-    msg(`${shapes.length} piezas escaladas al ${fmt(pct)} %.`);
+    msg(`${shapes.length} ${shapes.length === 1 ? 'figura escalada' : 'figuras escaladas'} al ${fmt(pct)} %.`);
   }
   // Conecta las piezas a "escala" (en %) sin cambiar su tamaño actual; luego basta con cambiar ese parámetro.
   function linkScale(shapes) {
