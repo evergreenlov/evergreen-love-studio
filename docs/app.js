@@ -2148,11 +2148,13 @@
     }
     return { mode: 'node', items: wholePolyItems(items), anchor: { x: hit.x, y: hit.y }, start: null, moved: false };
   }
-  function moveNodeItems(items, du, dv) {
+  // dx, dy en mm del lienzo: cada figura los convierte con su propio tamaño, para que todas se muevan lo mismo
+  function moveNodeItems(items, dxMM, dyMM) {
     const redo = new Map();
     for (const it of items) {
       const fr = importFrame(byId(it.id));
       if (!fr) continue;
+      const du = dxMM / fr.w, dv = dyMM / fr.sy;
       if (it.curve) { fr.a.curves[it.pi].n[it.vi].p = [it.u + du, it.v + dv]; redo.set(it.id + '|' + it.pi, [fr.a, it.pi]); continue; }
       const pl = fr.a.polys[it.pi];
       if (it.all) { it.p0.forEach((q, i) => { if (pl.pts[i]) pl.pts[i] = [q[0] + du, q[1] + dv, ...(q[2] ? [1] : [])]; }); continue; }
@@ -2166,7 +2168,7 @@
     // Imán suave: el punto se pega a la cuadrícula solo cuando está muy cerca (a ~5 px); si no, se mueve libre y sin saltos
     const soft = v => { const q = snapV(v, e); return Math.abs(q - v) * view.s < 5 ? q : v; };
     const t = { x: soft(d.anchor.x + (p.x - d.start.x)), y: soft(d.anchor.y + (p.y - d.start.y)) };
-    moveNodeItems(d.items, (t.x - d.anchor.x) / fr.w, (t.y - d.anchor.y) / fr.sy);
+    moveNodeItems(d.items, t.x - d.anchor.x, t.y - d.anchor.y);
     d.moved = true;
     $('#stCoords').textContent = `Punto  x ${fmt(t.x / unitMM, isInch() ? 3 : 2)} · y ${fmt(t.y / unitMM, isInch() ? 3 : 2)} ${unitLabel()}`;
     if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; evaluateParams(); drawCanvas(); }); // un redibujado por cuadro
@@ -2250,8 +2252,7 @@
       items.push({ id, pi, same, u: p0[0], v: p0[1] });
     }
     if (!items.length) return;
-    const fr = importFrame(byId(items[0].id));
-    moveNodeItems(wholePolyItems(items), dx / fr.w, dy / fr.sy);
+    moveNodeItems(wholePolyItems(items), dx, dy);
     checkpoint(); fullRender();
   }
   // Selecciona los puntos que caen dentro de un recuadro
@@ -2855,7 +2856,17 @@
   function drawOverlay() {
     layerOverlay.replaceChildren();
     { const pb = $('#penBar'); if (pb) pb.hidden = !(tool === 'pen' && pen.nodes.length); }
-    { const nb = $('#nodeBar'); if (nb) { nb.hidden = !(nodeSel.size && tool === 'select'); if (!nb.hidden) $('#btnNodeDel').textContent = `Borrar ${nodeSel.size} punto${nodeSel.size > 1 ? 's' : ''}`; } }
+    { const nb = $('#nodeBar');
+      if (nb) {
+        const showing = tool === 'select' && [...sel].some(id => nodeShow.has(id) && importFrame(byId(id)) && !importFrame(byId(id)).rotated);
+        nb.hidden = !showing;
+        if (showing) {
+          const has = nodeSel.size > 0;
+          $('#btnNodeDel').hidden = !has; $('#btnNodeCut').hidden = !has; $('#btnNodeClear').hidden = !has;
+          $('#btnNodeAll').textContent = has ? 'Elegir todos' : 'Elegir todos los puntos';
+          if (has) $('#btnNodeDel').textContent = `Borrar ${nodeSel.size} punto${nodeSel.size > 1 ? 's' : ''}`;
+        }
+      } }
     drawGuides();
     const pad = 3 / view.s;
     for (const id of sel) {
@@ -3972,6 +3983,7 @@
         h('div', { class: 'insp-title' }, `${shapes.length} objetos seleccionados`),
         h('button', { class: 'primary wide', title: 'Agrupa sin combinar (Ctrl+G): se mueven y escalan juntos', onclick: () => groupSel('grupo') }, 'Agrupar'),
         h('button', { class: 'wide', title: 'Muestra los puntos de lo elegido (y de lo que hay dentro de los grupos) para moverlos', onclick: () => editPointsOf(shapes) }, 'Ver y editar puntos'),
+        ...(shapes.some(s => nodeShow.has(s.id) && importFrame(s) && !importFrame(s).rotated) ? nodeToolsSection() : []),
         ...(() => { const f = shapes.find(x => x.from && doc.origins && doc.origins[x.from.gid]); return f ? [h('button', { class: 'wide', onclick: () => restoreOrigin(f.from.gid) }, `Volver a «${f.from.name}» con parámetros`)] : []; })(),
         ...(shapes.some(s => SEPARABLE.has(s.type) || (s.type === 'import' && doc.assets[s.p.asset] && doc.assets[s.p.asset].kind === 'vector' && splitPieces(doc.assets[s.p.asset].polys).length > 1))
           ? [h('button', { class: 'primary wide', onclick: () => separateMany(shapes.filter(s => s.type === 'import' || SEPARABLE.has(s.type))) }, 'Separar en piezas independientes')]
@@ -7953,6 +7965,7 @@
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
   $('#unitSelect').onchange = e => setUnits(e.target.value);
+  $('#btnNodeAll').onclick = () => selectAllNodes();
   $('#btnNodeDel').onclick = () => deleteNodes();
   $('#btnNodeCut').onclick = () => scissorsSelected();
   $('#btnNodeClear').onclick = () => { nodeSel.clear(); drawCanvas(); buildInspector(); };

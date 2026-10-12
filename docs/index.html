@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-iconos-2">
+<link rel="stylesheet" href="estilos.css?v=20261019-seleccion-2">
 <script>
 /* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
 (function () {
-  var BUILD = "iconos-2";
+  var BUILD = "seleccion-2";
   try {
     fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = (t || '').trim();
@@ -23,7 +23,7 @@
   <div class="brand">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 5 11h3l-4 6h6v5h4v-5h6l-4-6h3z" fill="currentColor"/></svg>
     <span>Evergreen Love Studio</span>
-    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v iconos-2</span>
+    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v seleccion-2</span>
   </div>
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="seg" id="unitSeg" role="group" aria-label="Trabajar en milímetros o pulgadas"><button type="button" data-u="mm" title="Trabajar en milímetros">mm</button><button type="button" data-u="in" title="Trabajar en pulgadas">pulgadas</button></div>
@@ -139,6 +139,7 @@
       <button id="btnSelDel" title="Eliminar lo elegido">Eliminar</button>
     </div>
     <div class="measure-bar" id="nodeBar" hidden>
+      <button id="btnNodeAll" class="active" title="Elige todos los puntos de las figuras elegidas (Cmd+A): al arrastrar uno se mueven todos juntos">Elegir todos los puntos</button>
       <button id="btnNodeDel" class="danger" title="Borra los puntos elegidos (Supr). Si están todos, se borra el contorno entero">Borrar puntos</button>
       <button id="btnNodeCut" title="Corta el contorno en los puntos elegidos">Tijera</button>
       <button id="btnNodeClear" title="Deja de tener puntos elegidos (Esc)">Quitar elección</button>
@@ -196,6 +197,6 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-iconos-2"></script>
+<script src="app.js?v=20261019-seleccion-2"></script>
 </body>
 </html>
