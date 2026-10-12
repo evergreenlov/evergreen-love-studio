@@ -1942,10 +1942,19 @@
     if (!s || s.type !== 'import') return null;
     const a = doc.assets && doc.assets[s.p.asset];
     if (!a || a.kind !== 'vector') return null;
-    const x = len(s, 'x'), y = len(s, 'y'), w = Math.abs(len(s, 'w')), aspect = a.h / a.w;
+    // Si la figura está dentro de grupos, se suma el desplazamiento (X/Y) de cada grupo, por ejemplo el que deja «Acomodar».
+    // Si algún grupo la gira, la repite o la engrosa, sus puntos no se editan en su sitio.
+    let gx = 0, gy = 0, groupFx = false;
+    for (let p = parentOf(s.id); p && p.type === 'group'; p = parentOf(p.id)) {
+      const px = len(p, 'x'), py = len(p, 'y');
+      if (Number.isFinite(px)) gx += px || 0;
+      if (Number.isFinite(py)) gy += py || 0;
+      if ((num(p, 'rot', 0) || 0) !== 0 || (p.p.rep && p.p.rep !== 'no') || (p.p.off && len(p, 'off')) || (p.p.redond && len(p, 'redond'))) groupFx = true;
+    }
+    const x = len(s, 'x') + gx, y = len(s, 'y') + gy, w = Math.abs(len(s, 'w')), aspect = a.h / a.w;
     const h = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * aspect;
     if (![x, y, w, h].every(Number.isFinite) || !w || !h) return null;
-    const rotated = (num(s, 'rot', 0) || 0) !== 0 || (s.p.rep && s.p.rep !== 'no');
+    const rotated = groupFx || (num(s, 'rot', 0) || 0) !== 0 || (s.p.rep && s.p.rep !== 'no');
     return { a, x, y, w, sy: h / aspect, rotated };
   }
   const frameWorld = (fr, q) => [fr.x + q[0] * fr.w, fr.y + q[1] * fr.sy];
