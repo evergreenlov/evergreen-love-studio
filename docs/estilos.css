@@ -423,3 +423,5 @@ button.wide { width: 100%; margin-top: 10px; }
 .tools { flex-direction: row; align-items: flex-start; justify-content: center; gap: 2px; padding: 8px 2px; overflow-y: auto; }
 .tools-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .tools-acts { border-left: 1px solid var(--border); padding-left: 2px; }
+.node-pt.on { fill: #ff5a00; stroke: #fff; stroke-width: 1.6px; }
+.cut-end { stroke: #ff5a00; }

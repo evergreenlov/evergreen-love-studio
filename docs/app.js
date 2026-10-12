@@ -1969,7 +1969,7 @@
       if (!nodeShow.has(id)) continue;
       const pts = nodeList(id), step = Math.max(1, Math.ceil(pts.length / 2500));
       for (let i = 0; i < pts.length; i += step) {
-        const q = pts[i], on = q.key && nodeSel.has(q.key), hov = nodeHover && nodeHover.kind === 'node' && nodeHover.key === q.key, h2 = (on || hov) ? hs * 1.35 : hs;
+        const q = pts[i], on = q.key && nodeSel.has(q.key), hov = nodeHover && nodeHover.kind === 'node' && nodeHover.key === q.key, h2 = on ? hs * 1.8 : hov ? hs * 1.35 : hs;
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt' + (q.edit ? ' edit' : '') + (on ? ' on' : '') + (hov ? ' hov' : ''), 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
@@ -1990,7 +1990,7 @@
     for (const id of sel) {
       if (!nodeShow.has(id)) continue;
       for (const q of hiddenSelectedNodes(id)) {
-        const h2 = hs * (COARSE ? 0.8 : 0.6);
+        const h2 = hs * 1.5;
         svgEl('rect', { x: r4(q.x - h2 / 2), y: r4(q.y - h2 / 2), width: r4(h2), height: r4(h2), class: 'node-pt edit on', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }
@@ -3499,7 +3499,7 @@
     else if (d.mode === 'nmarq') {
       const b = rectFrom(d.start, d.cur);
       if (b.w * view.s < 4 && b.h * view.s < 4) { if (d.had) { nodeSel.clear(); } else { sel.clear(); nodeHover = null; buildInspector(); buildObjects(); } }
-      else selectNodesIn(b, d.add);
+      else { selectNodesIn(b, d.add); if (nodeSel.size) msg(`${nodeSel.size} punto(s) elegido(s), en naranja. Arrastra uno para moverlos juntos, o usa los botones de abajo.`); }
       drawCanvas();
     }
     else if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
