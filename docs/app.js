@@ -8066,7 +8066,9 @@
     syncing = true;
     try {
       const headers = { Authorization: 'Bearer ' + cfg.token };
-      const r = await fetch(syncUrl(cfg), { headers, cache: 'no-store' });
+      // con mala señal no se queda esperando: a los 12 s se deja para la próxima vez
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 12000);
+      const r = await fetch(syncUrl(cfg), { headers, cache: 'no-store', signal: ctl.signal }).finally(() => clearTimeout(timer));
       if (r.status === 401) throw new Error('La clave no coincide con la del Worker.');
       if (!r.ok) throw new Error('El servicio respondió ' + r.status);
       const remote = await r.json();
@@ -8074,7 +8076,8 @@
       const body = JSON.stringify({ plantillas: m.list, borradas: m.deleted });
       const same = JSON.stringify({ plantillas: remote.plantillas || [], borradas: remote.borradas || {} }) === body;
       if (!same) {
-        const p = await fetch(syncUrl(cfg), { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body });
+        const ctl2 = new AbortController(), timer2 = setTimeout(() => ctl2.abort(), 20000);
+        const p = await fetch(syncUrl(cfg), { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body, signal: ctl2.signal }).finally(() => clearTimeout(timer2));
         if (!p.ok) throw new Error('No se pudo guardar en el servicio (' + p.status + ').');
       }
       if (writeUserTemplates(m.list)) { writeDeleted(m.deleted); buildUserTemplates(); }
@@ -8082,7 +8085,7 @@
       if (!opts.silent) msg(`Sincronizado: ${m.list.length} plantilla(s) en este aparato y en tu nube.`);
       return true;
     } catch (err) {
-      if (!opts.silent) msg('No se pudo sincronizar: ' + (err.message || err));
+      if (!opts.silent) msg('No se pudo sincronizar' + (err && err.name === 'AbortError' ? ' (la conexión tardó demasiado)' : ': ' + (err.message || err)) + '. Tus plantillas siguen aquí y se sincronizan cuando haya conexión.');
       return false;
     } finally { syncing = false; }
   }
