@@ -6352,8 +6352,10 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
+        const parsed = JSON.parse(reader.result);
+        if (parsed && parsed.app === 'evergreen-plantillas') { importUserTemplatesData(parsed); return; }
         checkpoint();
-        loadDoc(JSON.parse(reader.result));
+        loadDoc(parsed);
         checkpoint(); fullRender(); fitView();
         msg('Diseño abierto: ' + file.name);
       } catch (err) { msg('No se pudo abrir ese archivo.'); }
@@ -8027,6 +8029,36 @@
         } }, '×')));
     }
   }
+  // Pasar tus plantillas a otro aparato (por ejemplo del Mac al iPad): se exportan a un archivo y se importan allá
+  function exportUserTemplates() {
+    const list = readUserTemplates();
+    if (!list.length) { msg('Todavía no tienes plantillas guardadas para exportar.'); return; }
+    download('mis-plantillas-evergreen.json', JSON.stringify({ app: 'evergreen-plantillas', version: 1, date: new Date().toISOString(), plantillas: list }), 'application/json');
+    msg(`${list.length} plantilla(s) exportadas a «mis-plantillas-evergreen.json». Pásalo al otro aparato (AirDrop o iCloud) y ahí usa Plantillas → Importar plantillas.`);
+  }
+  function importUserTemplatesData(obj) {
+    if (!obj || obj.app !== 'evergreen-plantillas' || !Array.isArray(obj.plantillas)) throw new Error('formato');
+    const list = readUserTemplates();
+    let added = 0, updated = 0;
+    for (const t of obj.plantillas) {
+      if (!t || !t.name || !t.doc || !Array.isArray(t.doc.shapes)) continue;
+      const i = list.findIndex(x => x.name === t.name);
+      const entry = { id: i >= 0 ? list[i].id : uid(), name: String(t.name), thumbnail: typeof t.thumbnail === 'string' ? t.thumbnail : '', date: t.date || new Date().toISOString(), doc: t.doc };
+      if (i >= 0) { list[i] = entry; updated++; } else { list.push(entry); added++; }
+    }
+    if (!(added || updated)) { msg('Ese archivo no trae plantillas.'); return; }
+    if (writeUserTemplates(list)) { buildUserTemplates(); msg(`Plantillas importadas: ${added} nueva(s)` + (updated ? `, ${updated} actualizada(s)` : '') + '. Están en Plantillas → Mis plantillas.'); }
+  }
+  $('#btnExportTemplates').onclick = e => { e.stopPropagation(); menu.hidden = true; exportUserTemplates(); };
+  $('#btnImportTemplates').onclick = e => {
+    e.stopPropagation(); menu.hidden = true;
+    const input = h('input', { type: 'file', accept: '.json,application/json' });
+    input.addEventListener('change', async () => {
+      const f = input.files[0]; if (!f) return;
+      try { importUserTemplatesData(JSON.parse(await f.text())); } catch (err) { msg('Ese archivo no es de plantillas de Evergreen.'); }
+    });
+    input.click();
+  };
   $('#btnSaveTemplate').onclick = e => {
     e.stopPropagation();
     menu.hidden = true;

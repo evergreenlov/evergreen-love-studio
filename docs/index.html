@@ -4,11 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-grupo-pos-1">
+<link rel="stylesheet" href="estilos.css?v=20261019-plantillas-1">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#2f7d4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Evergreen">
 <script>
 /* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
 (function () {
-  var BUILD = "grupo-pos-1";
+  var BUILD = "plantillas-1";
   try {
     fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = (t || '').trim();
@@ -23,7 +29,7 @@
   <div class="brand">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 5 11h3l-4 6h6v5h4v-5h6l-4-6h3z" fill="currentColor"/></svg>
     <span>Evergreen Love Studio</span>
-    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v grupo-pos-1</span>
+    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v plantillas-1</span>
   </div>
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="seg" id="unitSeg" role="group" aria-label="Trabajar en milímetros o pulgadas"><button type="button" data-u="mm" title="Trabajar en milímetros">mm</button><button type="button" data-u="in" title="Trabajar en pulgadas">pulgadas</button></div>
@@ -59,6 +65,8 @@
         <div class="menu-sep"></div>
         <div id="userTemplates"></div>
         <button id="btnSaveTemplate" class="menu-save">＋ Guardar diseño actual como plantilla…</button>
+        <button id="btnExportTemplates" class="menu-save" title="Guarda todas tus plantillas en un archivo para llevarlas a otro aparato (iPad, otra computadora)">⇪ Exportar mis plantillas (para otro aparato)…</button>
+        <button id="btnImportTemplates" class="menu-save" title="Trae las plantillas que exportaste en otro aparato">⇩ Importar plantillas…</button>
       </div>
     </div>
     <button id="btnNest" title="Acomodar las piezas para ahorrar madera">Acomodar</button>
@@ -197,6 +205,30 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-grupo-pos-1"></script>
+<script src="app.js?v=20261019-plantillas-1"></script>
+<script>
+/* Uso sin internet: se guarda una copia de la aplicación en este aparato (hace falta abrirla una vez con internet). */
+(function () {
+  var tag = function () { return document.getElementById('buildTag'); };
+  function estado(texto, listo) {
+    var t = tag(); if (!t) return;
+    t.dataset.base = t.dataset.base || t.textContent;
+    t.textContent = t.dataset.base + (texto ? ' · ' + texto : '');
+    t.title = listo ? 'La aplicación está guardada en este aparato: funciona sin internet.' : 'Versión de la página que estás usando';
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'offline-listo') estado('sin internet ✓', true);
+    });
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').then(function () {
+        return navigator.serviceWorker.ready;
+      }).then(function () { estado('sin internet ✓', true); }).catch(function () {});
+    });
+  }
+  window.addEventListener('offline', function () { estado('sin conexión', true); });
+  window.addEventListener('online', function () { estado('sin internet ✓', true); });
+})();
+</script>
 </body>
 </html>
