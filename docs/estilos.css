@@ -415,3 +415,5 @@ button.wide { width: 100%; margin-top: 10px; }
 .nudge-btn { min-width: 44px; min-height: 40px; font-size: 18px; }
 .build-tag { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .cut-end { fill: none; stroke: #e8731a; stroke-width: 2; pointer-events: none; }
+#nodeBar { top: auto; bottom: 112px; }
+#nodeBar .danger { color: #fff; background: var(--danger, #b3261e); border-color: var(--danger, #b3261e); }

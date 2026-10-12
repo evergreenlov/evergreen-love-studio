@@ -2192,21 +2192,45 @@
     if (!nodeSel.size) return false;
     const by = new Map();
     for (const k of nodeSel) { const { id, pi, vi } = nodeParts(k), kk = id + '|' + pi; if (!by.has(kk)) by.set(kk, { id, pi, vs: [] }); by.get(kk).vs.push(vi); }
-    let removed = 0, kept = 0;
+    let removed = 0, kept = 0, contours = 0;
+    const dropPolys = new Map();   // id -> Set(pi): contornos que se borran completos
     for (const { id, pi, vs } of by.values()) {
       const s = byId(id); if (!s) continue;
       ownAsset(s);
-      const fr = importFrame(s), pl = fr.a.polys[pi], min = pl.closed ? 3 : 2, cv = fr.a.curves && fr.a.curves[pi];
+      const fr = importFrame(s); if (!fr) continue;
+      const pl = fr.a.polys[pi], cv = fr.a.curves && fr.a.curves[pi];
+      if (!pl) continue;
+      const min = pl.closed ? 3 : 2, vset = new Set(vs);
+      // ¿Están elegidos todos los puntos que se ven de este contorno? Entonces se borra el contorno completo.
+      const visible = cv ? cv.n.map((_, i) => i) : vertexIdx(pl);
+      if (visible.length && visible.every(i => vset.has(i))) {
+        if (!dropPolys.has(id)) dropPolys.set(id, new Set());
+        dropPolys.get(id).add(pi); contours++; removed += cv ? cv.n.length : pl.pts.length;
+        continue;
+      }
       if (cv) {
-        for (const vi of vs.sort((a, b) => b - a)) { if (cv.n.length > min) { cv.n.splice(vi, 1); removed++; } else kept++; }
+        for (const vi of [...vset].sort((x, y) => y - x)) { if (cv.n.length > min) { cv.n.splice(vi, 1); removed++; } else kept++; }
         reflat(fr.a, pi);
         continue;
       }
-      for (const vi of vs.sort((a, b) => b - a)) { if (pl.pts.length > min) { pl.pts.splice(vi, 1); removed++; } else kept++; }
+      for (const vi of [...vset].sort((x, y) => y - x)) { if (pl.pts.length > min) { pl.pts.splice(vi, 1); removed++; } else kept++; }
     }
+    // quitar contornos completos (y la figura si se queda sin nada)
+    const gone = [];
+    for (const [id, pis] of dropPolys) {
+      const s = byId(id), fr = s && importFrame(s); if (!fr) continue;
+      const a = fr.a, oldCurves = a.curves || null, keep = [], map = new Map();
+      a.polys.forEach((p, i) => { if (!pis.has(i)) { map.set(i, keep.length); keep.push(p); } });
+      a.polys = keep;
+      if (oldCurves) { a.curves = {}; for (const [k, c] of Object.entries(oldCurves)) if (map.has(+k)) a.curves[map.get(+k)] = c; }
+      if (!a.polys.length && !(a.texts && a.texts.length)) gone.push(s);
+    }
+    for (const s of gone) { const l = listOf(s.id), ix = l.indexOf(s); if (ix >= 0) l.splice(ix, 1); sel.delete(s.id); nodeShow.delete(s.id); }
     nodeSel.clear(); nodeHover = null;
     if (removed) { checkpoint(); fullRender(); }
-    msg(removed ? `${removed} punto(s) borrado(s).` + (kept ? ' Algunos no se borraron: la figura necesita al menos 3 puntos (2 si es una línea).' : '') : 'No se pueden borrar: la figura necesita al menos 3 puntos (2 si es una línea).');
+    msg(removed
+      ? (contours ? `${contours} contorno(s) borrado(s) completos` + (gone.length ? ' (la figura se quedó sin nada y se quitó)' : '') + '. ' : '') + (removed - 0) + ' punto(s) borrado(s).' + (kept ? ' Algunos no se borraron: un contorno necesita al menos 3 puntos (2 si es una línea).' : '')
+      : 'No se pueden borrar: el contorno necesita al menos 3 puntos (2 si es una línea). Para quitarlo entero, elige todos sus puntos.');
     return true;
   }
   function nudgeNodes(dx, dy) {
@@ -2831,6 +2855,7 @@
   function drawOverlay() {
     layerOverlay.replaceChildren();
     { const pb = $('#penBar'); if (pb) pb.hidden = !(tool === 'pen' && pen.nodes.length); }
+    { const nb = $('#nodeBar'); if (nb) { nb.hidden = !(nodeSel.size && tool === 'select'); if (!nb.hidden) $('#btnNodeDel').textContent = `Borrar ${nodeSel.size} punto${nodeSel.size > 1 ? 's' : ''}`; } }
     drawGuides();
     const pad = 3 / view.s;
     for (const id of sel) {
@@ -7882,6 +7907,9 @@
   $('#btnZoomOut').onclick = () => zoomCenter(0.8);
   $('#btnFit').onclick = fitView;
   $('#unitSelect').onchange = e => setUnits(e.target.value);
+  $('#btnNodeDel').onclick = () => deleteNodes();
+  $('#btnNodeCut').onclick = () => scissorsSelected();
+  $('#btnNodeClear').onclick = () => { nodeSel.clear(); drawCanvas(); buildInspector(); };
   $('#btnSelGroup').onclick = () => groupSel('grupo');
   $('#btnSelUngroup').onclick = ungroupSel;
   $('#btnSelDup').onclick = duplicateSel;
