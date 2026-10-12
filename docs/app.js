@@ -2543,6 +2543,63 @@
     else msg('No hubo nada que simplificar (ya son curvas o tienen pocos puntos).');
   }
 
+
+  /* ----- Tijera: corta el contorno en un punto (la figura cerrada se abre; una línea abierta se parte en dos) ----- */
+  let scissorsOn = false;
+  function cutAtNode(id, pi, vi) {
+    const sh0 = byId(id); if (!sh0) return false;
+    ownAsset(sh0);
+    const fr = importFrame(sh0); if (!fr || fr.rotated) return false;
+    const a = fr.a, pl = a.polys[pi], cv = a.curves && a.curves[pi];
+    if (!pl) return false;
+    const copyN = nd => ({ p: [nd.p[0], nd.p[1]], i: nd.i ? [nd.i[0], nd.i[1]] : null, o: nd.o ? [nd.o[0], nd.o[1]] : null, s: !!nd.s });
+    if (cv) {
+      const n = cv.n, L = n.length;
+      if (vi < 0 || vi >= L) return false;
+      if (cv.closed) {
+        const rot = n.slice(vi).concat(n.slice(0, vi)).map(copyN);
+        const first = copyN(rot[0]); first.i = null; first.s = false;
+        const last = copyN(rot[0]); last.o = null; last.s = false;
+        rot[0] = first; rot.push(last);
+        cv.n = rot; cv.closed = false; pl.closed = false;
+      } else {
+        if (vi <= 0 || vi >= L - 1) return false;   // en un extremo no hay nada que cortar
+        const A = n.slice(0, vi + 1).map(copyN), B = n.slice(vi).map(copyN);
+        A[A.length - 1].o = null; A[A.length - 1].s = false;
+        B[0].i = null; B[0].s = false;
+        cv.n = A;
+        const ni = a.polys.length;
+        a.polys.push({ ...pl, closed: false, pts: [] });
+        a.curves[ni] = { closed: false, n: B };
+        reflat(a, ni);
+      }
+      reflat(a, pi);
+      return true;
+    }
+    const pts = pl.pts.map(q => q.slice());
+    if (vi < 0 || vi >= pts.length) return false;
+    if (pl.closed) {
+      const rot = pts.slice(vi).concat(pts.slice(0, vi));
+      rot.push(rot[0].slice());
+      pl.pts = rot; pl.closed = false;
+    } else {
+      if (vi <= 0 || vi >= pts.length - 1) return false;
+      pl.pts = pts.slice(0, vi + 1);
+      a.polys.push({ ...pl, closed: false, pts: pts.slice(vi) });
+    }
+    return true;
+  }
+  // Corta en el punto elegido(s) o en el punto tocado sobre el borde
+  function scissorsSelected() {
+    if (!nodeSel.size) { msg('Elige primero uno o más puntos (clic o recuadro) y pulsa Tijera; o activa «Tijera» y toca el contorno.'); return; }
+    const keys = [...nodeSel].map(nodeParts).sort((x, y) => y.vi - x.vi);   // de atrás hacia adelante para no mover los índices
+    let done = 0;
+    for (const { id, pi, vi } of keys) if (cutAtNode(id, pi, vi)) done++;
+    nodeSel.clear(); nodeHover = null;
+    if (done) { checkpoint(); fullRender(); msg(`${done} corte(s). El contorno quedó abierto en ese punto: se puede separar o editar por tramos.`); }
+    else msg('No se pudo cortar ahí (en un extremo de una línea abierta no hay nada que cortar).');
+  }
+
   // Suavizar o volver esquina los puntos elegidos
   function smoothSelected(smooth) {
     if (!nodeSel.size) { msg('Elige primero uno o más puntos (clic, o un recuadro).'); return; }
@@ -2698,6 +2755,8 @@
         h('button', { class: 'primary', onclick: () => smoothSelected(true), title: 'Convierte los puntos elegidos en curva suave' }, 'Suavizar'),
         h('button', { onclick: () => smoothSelected(false), title: 'Quita las manijas: el punto vuelve a ser una esquina' }, 'Punta'),
         h('button', { onclick: () => { if (nodeSel.size) deleteNodes(); else msg('Elige primero los puntos que quieres borrar.'); } }, 'Borrar punto'),
+        h('button', { title: 'Corta el contorno en los puntos elegidos: la figura cerrada queda abierta', onclick: scissorsSelected }, 'Tijera (en el punto)'),
+        h('button', { class: scissorsOn ? 'primary' : '', title: 'Con esto activo, toca un punto o un borde del contorno y se corta ahí', onclick: () => { scissorsOn = !scissorsOn; msg(scissorsOn ? 'Tijera activa: toca un punto o un borde para cortar. Vuelve a pulsarla para dejar de cortar.' : 'Tijera desactivada.'); buildInspector(); } }, scissorsOn ? 'Tijera activa ✓' : 'Tijera (tocar y cortar)'),
         h('button', { onclick: () => { for (const id of [...sel]) nodeShow.delete(id); nodeSel.clear(); buildInspector(); drawCanvas(); } }, 'Ocultar puntos'))];
   }
 
@@ -3221,6 +3280,12 @@
       const bh = bezHandleNear(p);
       if (bh) { drag = startBezDrag(bh); drag.start = p; return; }
       const hit = nodeNear(p) || segNear(p) || csegNear(p);
+      if (hit && scissorsOn) {
+        const nd = hit.kind === 'seg' || hit.kind === 'cseg' ? insertNode(hit) : hit;
+        if (nd && nd.key && cutAtNode(nd.id, nodeParts(nd.key).pi, nodeParts(nd.key).vi)) { nodeSel.clear(); nodeHover = null; checkpoint(); fullRender(); msg('Cortado. El contorno quedó abierto en ese punto.'); }
+        else { msg('No se pudo cortar ahí.'); drawCanvas(); }
+        return;
+      }
       if (hit) {
         let d = null;
         if (hit.kind === 'seg' || hit.kind === 'cseg') d = startNodeDrag(insertNode(hit), false);
