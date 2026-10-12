@@ -6469,9 +6469,13 @@
     for (const el of root.querySelectorAll('*')) for (const a of [...el.attributes]) if (/^on/i.test(a.name)) el.removeAttribute(a.name);
     // Tamaño real: width/height con unidades; sin unidades se toman como píxeles (96 por pulgada)
     const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    // Los SVG de Illustrator usan «px» de 1/72 de pulgada (no de 1/96): si no, salen 25 % más chicos de lo que diseñó quien los hizo
+    const illustrator = /Generator:\s*Adobe Illustrator/i.test(text);
+    const pxMM = illustrator ? 25.4 / 72 : MM_PER.px;
     const dim = (attr, fallback) => {
       const m = /^([\d.]+)\s*(mm|cm|in|pt|pc|px)?$/.exec((root.getAttribute(attr) || '').trim());
-      return m ? +m[1] * MM_PER[m[2] || ''] : fallback * MM_PER.px;
+      if (m && (!m[2] || m[2] === 'px')) return +m[1] * pxMM;
+      return m ? +m[1] * MM_PER[m[2] || ''] : fallback * pxMM;
     };
     const wMM = dim('width', vb.length === 4 ? vb[2] : 1000), hMM = dim('height', vb.length === 4 ? vb[3] : 1000);
     root.setAttribute('width', wMM + 'mm'); root.setAttribute('height', hMM + 'mm');
