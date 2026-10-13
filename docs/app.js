@@ -1832,11 +1832,11 @@
     return e;
   }
   let msgTimer = 0;
-  function msg(text) {
+  function msg(text, ms = 4500) {
     const el = $('#stMsg');
     el.textContent = text;
     clearTimeout(msgTimer);
-    msgTimer = setTimeout(() => { el.textContent = ''; }, 4500);
+    msgTimer = setTimeout(() => { el.textContent = ''; }, ms);
   }
 
   /* ================= Lienzo ================= */
@@ -6344,9 +6344,14 @@
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    if (/\.(ai|eps|pdf|dwg|cdr|psd)$/i.test(file.name)) {
+      const ext = (file.name.match(/\.(\w+)$/) || [, ''])[1].toUpperCase();
+      msg(`Los archivos .${ext} no se pueden abrir aquí. Usa la versión .svg del mismo diseño (casi todos los diseños traen una). Si no la tiene, ábrelo en Illustrator o Inkscape y guárdalo como SVG.`, 15000);
+      return;
+    }
     // SVG, DXF e imágenes se importan como objetos editables dentro del diseño actual
     if (/\.(svg|dxf|png|jpe?g)$/i.test(file.name) || /^image\//.test(file.type)) {
-      try { await importFile(file); } catch (err) { msg('No se pudo importar ese archivo: ' + err.message); }
+      try { await importFile(file); } catch (err) { msg('No se pudo importar ese archivo: ' + err.message, 15000); }
       return;
     }
     const reader = new FileReader();
@@ -6477,6 +6482,7 @@
       msg('Diseño abierto para editar: ' + file.name);
       return;
     }
+    if (isDxf && /^AC10\d\d/.test(text)) throw new Error('este «.dxf» en realidad es un archivo DWG de AutoCAD (formato binario) y la página no lo puede leer. Abre la versión .svg del mismo diseño, o en AutoCAD/LibreCAD guárdalo como DXF de texto');
     if (isDxf) asset = importDxf(text, file.name);
     else if (isSvg) asset = importSvgFile(text, file.name);
     else { asset = await importImageLogo(file); asset.realW = 50; }
