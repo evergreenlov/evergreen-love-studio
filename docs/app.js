@@ -558,7 +558,7 @@
     }
     // Tapa con lengüeta: la tapa va por dentro de las paredes y su lengüeta entra en una muesca de la pared de atrás;
     // la cubierta aparte (más grande) se pega encima y descansa sobre el borde de las paredes.
-    let hingeCover = null, pivotAxis = null;
+    let hingeCover = null, pivotAxis = null, pivotHole = null;
     const layoutExtra = [];
     if (pivote) {
       // Bisagra de espigas: la tapa lleva una lengüeta a cada lado que gira en un agujero redondo de la pared. Todo es plano y sin pegar.
@@ -570,7 +570,11 @@
       const dh = Math.hypot(t, tw) + 0.5;                                   // el agujero debe dejar girar la lengüeta (diagonal de su sección)
       const vh = dh / 2 + 2;                                                 // el centro del agujero queda 2 mm de material debajo del borde de arriba
       const sink = vh - t / 2;                                              // la tapa baja hasta que su mitad quede a la altura del agujero
-      const tabOut = gap + t - 0.2;                                         // la lengüeta llega casi al borde de afuera de la pared
+      // Con cubierta en los lados, la lengüeta atraviesa también la cubierta (que lleva su agujero) y se ve por fuera
+      const coverSide = s.p.cubierta === 'si' && (s.p.cubiertaCaras || 'todas') !== 'frente';
+      const cvS = coverSide ? (s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t) : 0;
+      if (!Number.isFinite(cvS) || cvS < 0) return null;
+      const tabOut = gap + t + cvS - 0.2;                                   // la lengüeta llega casi al borde de afuera (de la pared o de la cubierta)
       const zh = D - t - gap - back - tw / 2;
       if (![gap, innerW, innerD, tw, dh].every(Number.isFinite) || gap < 0 || tw < 3 || innerW <= 4 * t || innerD <= tw + back + 4 * t || H < sink + t + 2 * t) return null;
       const circle = (cx, cy, r) => Array.from({ length: 28 }, (_, i) => [cx + r * Math.cos(i * Math.PI / 14), cy + r * Math.sin(i * Math.PI / 14)]);
@@ -593,6 +597,7 @@
       panels.push({ name: 'Tapa', w: innerW + 2 * X, h: innerD, place: 'top', holes: [], pts: lp,
         axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap - X, H - sink - t, t + gap], out: [0, 1, 0] } });
       pivotAxis = [0, H - vh, zh];
+      if (coverSide) pivotHole = { zh, vh, r: dh / 2 - k };
       // Con «Cubierta de otra madera → todas las caras», la tapa también lleva su cubierta: va dentro del hueco, pegada encima de la tapa, y gira con ella
       if (s.p.cubierta === 'si' && (s.p.cubiertaCaras || 'todas') === 'todas') {
         const cvT = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
@@ -667,6 +672,14 @@
         addC('Cubierta Lado derecho', D + 2 * sx, H, 'right', [0, 0, -1], [0, -1, 0], [-1, 0, 0], [W + c, H, D + sx], [1, 0, 0]);
         if (caras === 'todas') addC('Cubierta Base', W + 2 * c, D + 2 * c, 'bottom', [1, 0, 0], [0, 0, 1], [0, 1, 0], [-c, -c, -c], [0, -1, 0]);
         if (caras === 'todas' && lid) addC('Cubierta Tapa', W + 2 * c, D + 2 * c, 'top', [1, 0, 0], [0, 0, 1], [0, -1, 0], [-c, H + c, -c], [0, 1, 0]);
+      }
+      // Bisagra de espigas: las cubiertas de los lados dejan el espacio (agujero) por donde sale la lengüeta de la tapa
+      if (pivotHole) {
+        const circle = (cx, cy, r) => Array.from({ length: 28 }, (_, i) => [cx + r * Math.cos(i * Math.PI / 14), cy + r * Math.sin(i * Math.PI / 14)]);
+        for (const cv of covers) {
+          if (cv.name === 'Cubierta Lado izquierdo') cv.holes.push(circle(pivotHole.zh + sx, pivotHole.vh, pivotHole.r));
+          if (cv.name === 'Cubierta Lado derecho') cv.holes.push(circle(D + sx - pivotHole.zh, pivotHole.vh, pivotHole.r));
+        }
       }
       panels.push(...covers);
       for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
