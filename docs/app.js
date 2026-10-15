@@ -144,11 +144,11 @@
   const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar', excluir: 'Excluir (quita lo que se cruza)' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
   const JOINT_OPTS = { dedos: 'Con dedos (finger joint)', planas: 'Sin dedos (para pegar)' };
-  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', no: 'Abierta' };
+  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta (se abre hacia atrás) y cubierta aparte', no: 'Abierta' };
   const GRIP_OPTS = { si: 'Con hueco para el dedo', no: 'Sin hueco' };
   const DRAWER_OPTS = { no: 'Sin cajón', si: 'Con cajón' };
   const ENGRAVE_OPTS = { auto: 'Automático', tapa: 'Tapa', frente: 'Frente', cajon: 'Frente del cajón' };
-  const ENGRAVE_TARGETS = { tapa: ['Tapa deslizante', 'Tapa', 'Mueble techo'], frente: ['Frente', 'Frente decorativo'], cajon: ['Frente decorativo'] };
+  const ENGRAVE_TARGETS = { tapa: ['Cubierta de la tapa', 'Tapa deslizante', 'Tapa', 'Mueble techo'], frente: ['Frente', 'Frente decorativo'], cajon: ['Frente decorativo'] };
   const SLIDE_KEYS = new Set(['borde', 'holgura', 'agarre']);
   const DIM_OPTS = { exteriores: 'Exteriores', interiores: 'Interiores' };
   const ROT = ['rot', 'Rotación °'];
@@ -179,7 +179,7 @@
         ['uniones', 'Uniones', JOINT_OPTS], ['dedoModo', 'Dedos', { ancho: 'Por ancho de dedo', cantidad: 'Por cantidad' }],
         ['nAncho', 'Dedos a lo ancho'], ['nProf', 'Dedos a lo profundo'], ['nAlto', 'Dedos a lo alto'], ['cajon', 'Cajón', DRAWER_OPTS], ['nCaj', 'Cantidad de cajones'], ['holguraC', 'Holgura cajón'], ['tapa', 'Tapa', LID_OPTS],
         ['cubierta', 'Cubierta de otra madera', { no: 'Sin cubierta', si: 'Con cubierta (paneles lisos, sin dedos)' }], ['grosorCub', 'Grosor de la cubierta'], ['cubiertaCaras', 'Caras con cubierta', { todas: 'Todas las caras', paredes: 'Solo las paredes (sin tapa)', frente: 'Solo el frente' }], ['cubiertaLargas', 'Cubiertas más largas', { lados: 'Los lados (izquierdo y derecho)', frente: 'Frente y atrás' }],
-        ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
+        ['borde', 'Borde sobre la tapa'], ['holgura', 'Holgura ranura / tapa'], ['lengua', 'Ancho de la lengüeta (vacío = automático)'], ['tapaCub', 'Cubierta aparte sobre la tapa', { si: 'Con cubierta aparte (más grande, se pega encima)', no: 'Sin cubierta aparte' }], ['grosorTapaCub', 'Grosor de esa cubierta (vacío = igual al grosor)'], ['agarre', 'Agarre', GRIP_OPTS], ['medidas', 'Medidas', DIM_OPTS],
         ['x', 'X'], ['y', 'Y'], ['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto'], ['t', 'Grosor material'],
         ['dedo', 'Ancho de dedo'], ['kerf', 'Kerf (corte)'], ['sep', 'Separación piezas'], ROT,
         ['divX', 'Compartimentos a lo ancho'], ['divZ', 'Compartimentos a lo profundo'], ['divH', 'Altura divisiones'],
@@ -237,7 +237,7 @@
     cuadricula: [['repN', 'Columnas'], ['repM', 'Filas'], ['repDx', 'Paso X'], ['repDy', 'Paso Y']],
     circular: [['repN', 'Cantidad'], ['repCx', 'Centro X'], ['repCy', 'Centro Y'], ['repA', 'Ángulo total °']],
   };
-  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'refuerzo', 'curva', 'trazo']);
+  const NON_EXPR = new Set(['texto', 'top', 'right', 'bottom', 'left', 'mode', 'rep', 'uniones', 'tapa', 'medidas', 'agarre', 'cajon', 'grabadoEn', 'grabadoTexto', 'grabadoLogo', 'prop', 'asset', 'dedoModo', 'asa', 'asaTexto', 'frente', 'fuente', 'grabadoFuente', 'asaFuente', 'pared', 'colgar', 'cierre', 'baseDisco', 'forma', 'cFI', 'cFD', 'cAI', 'cAD', 'baseDedos', 'cubierta', 'cubiertaCaras', 'cubiertaLargas', 'tapaCub', 'refuerzo', 'curva', 'trazo']);
   const NON_LENGTH = new Set(['n', 'profEst', 'nEsq', 'nBaseT', 'nAnillos', 'rot', 'repN', 'repM', 'repA', 'divX', 'divZ', 'nCaj', 'nAncho', 'nProf', 'nAlto', 'nTab', 'nH', 'nV', 'nAros', 'puentes']);
   const isLengthKey = k => !NON_EXPR.has(k) && !NON_LENGTH.has(k);
   const canOffset = s => !TYPES[s.type].open && !TYPES[s.type].noOffset;
@@ -506,7 +506,7 @@
     const kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
     let W = len(s, 'ancho', 100), D = len(s, 'profundo', 80), H = len(s, 'alto', 60);
     const wall = s.p.pared === 'si'; // bandeja de pared: abierta al frente, sin tapa ni cajón
-    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante';
+    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante', hinge = lidMode === 'bisagra';
     const fingers = (s.p.uniones || 'dedos') === 'dedos';
     if (s.p.cajon === 'si' && !wall) return drawerModel(s, { t, fw, sep, kerf, W, D, H, fingers });
     // Tapa deslizante: ranura de alto (grosor + holgura) a "borde" del canto superior de los lados
@@ -556,10 +556,41 @@
       }
       panels.push(lidPanel);
     }
+    // Tapa con lengüeta: la tapa va por dentro de las paredes y su lengüeta entra en una muesca de la pared de atrás;
+    // la cubierta aparte (más grande) se pega encima y descansa sobre el borde de las paredes.
+    let hingeCover = null;
+    if (hinge) {
+      const gap = s.p.holgura && String(s.p.holgura).trim() ? len(s, 'holgura') : 0.3;
+      const innerW = W - 2 * t - 2 * gap, innerD = D - 2 * t - 2 * gap;
+      const tabW = s.p.lengua && String(s.p.lengua).trim() ? len(s, 'lengua') : Math.max(10, Math.min(40, innerW * 0.18));
+      const tabL = t + 0.6;
+      if (![gap, innerW, innerD, tabW].every(Number.isFinite) || gap < 0 || innerW <= 4 * t || innerD <= 3 * t || tabW < 3 || tabW > innerW - 2 * t) return null;
+      const cut = (panel, x0, x1, depth) => {
+        if (!CL || !panel) return;
+        const nx0 = x0 + k, nx1 = x1 - k, ny = depth - k;   // el láser quita k por lado: se dibuja un poco más chico
+        const r = fromC(clip(CL.ClipType.ctDifference, toC([{ closed: true, pts: panel.pts }]), toC([{ closed: true, pts: [[nx0, -k - 2], [nx1, -k - 2], [nx1, ny], [nx0, ny]] }])));
+        if (r.length) panel.pts = r.reduce((p, q) => polyArea(q.pts) > polyArea(p.pts) ? q : p).pts;
+      };
+      cut(panels.find(q => q.place === 'back'), W / 2 - tabW / 2 - gap, W / 2 + tabW / 2 + gap, t + gap);           // muesca de la lengüeta
+      const fingerW = Math.max(20, Math.min(60, W * 0.22)), fingerD = Math.max(6, Math.min(14, H * 0.18));
+      cut(panels.find(q => q.place === 'front'), W / 2 - fingerW / 2, W / 2 + fingerW / 2, fingerD);                 // hueco para levantar la tapa con el dedo
+      const lidPts = kerfOffset(cleanPolygon([[0, 0], [innerW, 0], [innerW, innerD], [(innerW + tabW) / 2, innerD], [(innerW + tabW) / 2, innerD + tabL],
+        [(innerW - tabW) / 2, innerD + tabL], [(innerW - tabW) / 2, innerD], [0, innerD]]), k);
+      panels.push({ name: 'Tapa', w: innerW, h: innerD + tabL, place: 'top', holes: [], pts: lidPts,
+        axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap, H - t, t + gap], out: [0, 1, 0] } });
+      if (s.p.tapaCub !== 'no') {
+        const tc = s.p.grosorTapaCub && String(s.p.grosorTapaCub).trim() ? len(s, 'grosorTapaCub') : t;
+        if (!(tc > 0) || !Number.isFinite(tc)) return null;
+        hingeCover = { name: 'Cubierta de la tapa', w: W, h: D, place: 'top', holes: [], pts: rect(W, D), th: tc, color: 0xa9743f,
+          axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [0, H, 0], out: [0, 1, 0] } };
+        panels.push(hingeCover);
+      }
+    }
     const divs = boxDividers(s, { W, D, t, fw, kerf, innerTop, fingers }, panels.find(q => q.place === 'bottom'));
     if (!divs) return null;
     const byPlace = pl => panels.find(q => q.place === pl);
     const layout = [['front', 'back'], ['left', 'right'], ['bottom', 'top']].map(row => row.map(byPlace));
+    if (hingeCover) layout.push([hingeCover]);
     for (let i = 0; i < divs.length; i += 4) layout.push(divs.slice(i, i + 4));
     if (wall && s.p.colgar !== 'no') hangingHoles(s, panels.find(q => q.place === 'bottom'), { W, D, t, k });
     // Cubierta de otra madera: paneles lisos pegados por fuera (sin dedos); cada uno es una pieza más del plano de corte
@@ -582,7 +613,7 @@
       panels.push(...covers);
       for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
     }
-    return { W, D, H, t, fingers, lid, slide, sep, panels, dividers: divs, layout, wall };
+    return { W, D, H, t, fingers, lid, slide, hinge, sep, panels, dividers: divs, layout, wall };
   }
 
   // Bandeja de pared: dos agujeros para tornillos cerca del borde de arriba (en las celdas de las esquinas)
@@ -1009,12 +1040,12 @@
 
   function engraveTargets(s, m) {
     let where = s.p.grabadoEn || 'auto';
-    if (where === 'auto') where = m.drawer ? 'cajon' : (m.slide || m.lid) ? 'tapa' : 'frente';
+    if (where === 'auto') where = m.drawer ? 'cajon' : (m.slide || m.lid || m.hinge) ? 'tapa' : 'frente';
     const faces = m.panels.filter(q => q.face).sort((a, b) => a.faceIndex - b.faceIndex);
     if (faces.length && (where === 'cajon' || where === 'frente')) return faces.map((q, i) => ({ q, lid: false, i }));
     const find = n => m.panels.find(q => q.name === n);
     const q = (ENGRAVE_TARGETS[where] || []).map(find).find(Boolean) || find('Frente') || faces[0];
-    return q ? [{ q, lid: ['Tapa deslizante', 'Tapa', 'Mueble techo'].includes(q.name), i: 0 }] : [];
+    return q ? [{ q, lid: ['Cubierta de la tapa', 'Tapa deslizante', 'Tapa', 'Mueble techo'].includes(q.name), i: 0 }] : [];
   }
 
   // Devuelve la pieza de grabado (op "grabado") centrada en la cara elegida, evitando dedos y huecos.
@@ -4506,7 +4537,10 @@
     if (key === 'nAncho' || key === 'nProf' || key === 'nAlto') return planas || !byCount;
     if (key === 'dedo') return planas || byCount;
     if (drawer && key === 'tapa') return true;
-    if (key === 'borde' || key === 'holgura') return drawer || s.p.tapa !== 'deslizante';
+    if (key === 'lengua' || key === 'tapaCub') return drawer || s.p.tapa !== 'bisagra';
+    if (key === 'grosorTapaCub') return drawer || s.p.tapa !== 'bisagra' || s.p.tapaCub === 'no';
+    if (key === 'holgura') return drawer || !(s.p.tapa === 'deslizante' || s.p.tapa === 'bisagra');
+    if (key === 'borde') return drawer || s.p.tapa !== 'deslizante';
     if (key === 'agarre') return !(drawer || s.p.tapa === 'deslizante');
     return false;
   }
@@ -5180,6 +5214,10 @@
     let savedPrice = {}; try { savedPrice = JSON.parse(localStorage.getItem(PRICE_KEY) || '{}') || {}; } catch (e) { savedPrice = {}; }
     const priceIn = num(savedPrice.precio || '');
     priceIn.placeholder = 'opcional, ej. 8.00';
+    const priceAlt = num(savedPrice.alterno || ''); priceAlt.placeholder = 'opcional: otro proveedor o grosor';
+    const minIn = num(savedPrice.minutos || ''); minIn.placeholder = 'minutos de láser por caja';
+    const hourIn = num(savedPrice.hora || ''); hourIn.placeholder = 'costo del láser por hora';
+    const profitIn = num(savedPrice.ganancia || ''); profitIn.placeholder = 'ej. 40';
     const curSel = h('select', { 'aria-label': 'Moneda' }, ...['$', '€', '£', 'MXN $', 'COP $', 'USD $'].map(c => h('option', { value: c }, c)));
     curSel.value = savedPrice.moneda || '$';
     const rot = h('input', { type: 'checkbox', checked: '' });
@@ -5248,7 +5286,23 @@
       const money = v => (cur === '$' || cur === '' ? '$' : cur + ' ') + (cur === '$' || cur === '' ? '' : '') + fmt(v, 2);
       const moneyTxt = v => (cur === '€' || cur === '£' ? cur : '$') + fmt(v, 2) + (['MXN', 'COP', 'USD'].includes(cur) ? ' ' + cur : '');
       const perArea = hasPrice ? price / (chosen[1] * chosen[2]) : 0;
-      try { localStorage.setItem(PRICE_KEY, JSON.stringify({ precio: priceIn.value, moneda: curSel.value })); } catch (e) { /* sin almacenamiento */ }
+      try { localStorage.setItem(PRICE_KEY, JSON.stringify({ precio: priceIn.value, moneda: curSel.value, alterno: priceAlt.value, minutos: minIn.value, hora: hourIn.value, ganancia: profitIn.value })); } catch (e) { /* sin almacenamiento */ }
+      const num0 = el => { const v = parseFloat(String(el.value).replace(',', '.')); return Number.isFinite(v) && v > 0 ? v : 0; };
+      const laserMin = num0(minIn), laserHour = num0(hourIn), profit = num0(profitIn), priceB = num0(priceAlt);
+      const woodPerBox = hasPrice && mine && !mine.err ? mine.n * price / qty : 0;
+      const laserPerBox = laserMin && laserHour ? laserMin * laserHour / 60 : 0;
+      const costPerBox = woodPerBox + laserPerBox;
+      const costLines = [];
+      if (hasPrice && !mine.err) {
+        costLines.push(`Madera: ${moneyTxt(woodPerBox)} por caja.`);
+        if (laserPerBox) costLines.push(`Láser: ${moneyTxt(laserPerBox)} por caja (${fmt(laserMin, 1)} min a ${moneyTxt(laserHour)} por hora).`);
+        if (laserPerBox) costLines.push(`Costo total por caja: ${moneyTxt(costPerBox)}; ${qty} cajas: ${moneyTxt(costPerBox * qty)}.`);
+        if (profit) costLines.push(`Con ${fmt(profit, 0)} % de ganancia, precio de venta sugerido: ${moneyTxt(costPerBox * (1 + profit / 100))} por caja (ganas ${moneyTxt(costPerBox * profit / 100)} por caja, ${moneyTxt(costPerBox * profit / 100 * qty)} en ${qty}).`);
+        if (priceB) {
+          const woodB = mine.n * priceB / qty, diff = woodB - woodPerBox;
+          costLines.push(`Comparando con la plancha a ${moneyTxt(priceB)}: ${moneyTxt(woodB)} de madera por caja (${diff <= 0 ? 'ahorras ' + moneyTxt(-diff) : 'pagas ' + moneyTxt(diff) + ' más'} por caja, ${moneyTxt(Math.abs(diff) * qty)} en ${qty}).`);
+        }
+      }
       const piecesPerBox = units.length;
       let listTxt = '';
       if (mode.value === 'design') {
@@ -5266,6 +5320,7 @@
             + `En cada plancha caben ${mine.p} pieza${mine.p > 1 ? 's' : ''}`
             + (mode.value === 'manual' ? ` (${typeCounts(chosen)})` : '') + '. '
             + (mine.k ? `Eso son ${mine.k} caja${mine.k > 1 ? 's' : ''} completa${mine.k > 1 ? 's' : ''} por plancha.` : 'Una caja no cabe completa en una plancha, así que sus piezas se reparten.')));
+      const costBox = costLines.length ? h('div', { class: 'fit-main' }, h('div', { class: 'insp-sub' }, 'Costos'), ...costLines.map(t => h('p', { class: 'tip' }, t))) : null;
       const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: hasPrice ? '7' : '6' }, r.err))
         : h('tr', {}, h('td', {}, r.name), h('td', { class: 'n' }, String(r.p)), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
           h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'),
@@ -5296,10 +5351,10 @@
         preview.append(h('p', { class: 'tip' }, `Así quedan en una plancha: ${Object.entries(cnt).map(([k, v]) => `${v} ${k.toLowerCase()}${v > 1 ? 's' : ''}`).join(' y ')}.`));
         if (mode.value === 'manual') preview.append(place);
       }
-      out.replaceChildren(head, preview, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
+      out.replaceChildren(head, ...(costBox ? [costBox] : []), preview, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
         h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Piezas por plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante'), ...(hasPrice ? [h('th', {}, 'Costo (aprox. por área)')] : [])), tr(mine), ...others.map(tr))));
     };
-    [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, priceIn, curSel, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
+    [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, priceIn, curSel, priceAlt, minIn, hourIn, profitIn, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
     manualBox.append(
       h('div', { class: 'nest-grid' }, row(`Ancho de la pieza (${unitLabel()})`, pw), row(`Alto de la pieza (${unitLabel()})`, ph), row('Piezas por caja', pn)),
       h('label', { class: 'check' }, cov, ' La caja lleva cobertura (tapa)'),
@@ -5310,7 +5365,7 @@
       plist.length ? h('p', { class: 'tip' }, 'Medidas de Parámetros que puedes usar en los cuadros (escribe el nombre o una cuenta, como ancho o alto*2): ' + plist.map(p => `${p.name} = ${fmt(vars[p.name], 3)} ${unitLabel()}`).join(' · ')) : null,
       manualBox,
       h('div', { class: 'nest-grid' }, row('¿Cuántas cajas quieres hacer?', qtyIn), row('Grosor de la madera', thickSel), row('Tamaño de la plancha', sheetSel), row(`Grosor (${unitLabel()})`, tIn),
-        row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('Precio de una plancha', priceIn), row('Moneda', curSel)),
+        row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('Precio de una plancha', priceIn), row('Moneda', curSel), row('Precio alternativo (comparar)', priceAlt), row('Minutos de láser por caja', minIn), row('Costo del láser por hora', hourIn), row('Ganancia %', profitIn)),
       h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
       out,
       h('div', { class: 'dialog-actions' }, h('button', { class: 'primary', onclick: close }, 'Cerrar')));
@@ -7076,7 +7131,7 @@
   function boxTemplate(uniones = 'dedos', units = 'mm', sheet, tapa = 'si', cajon = 'no') {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
-    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
+    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
     const values = units === 'in'
       ? [['ancho', '4'], ['profundo', '3'], ['alto', '2.5'], ['grosor', '0.125'], ['dedo', '0.4'], ['kerf', '0.004'], ['sep', '0.2']]
       : [['ancho', '100'], ['profundo', '80'], ['alto', '60'], ['grosor', '3'], ['dedo', '10'], ['kerf', '0.1'], ['sep', '5']];
@@ -7225,6 +7280,7 @@
     'box-planas': (u, s) => boxTemplate('planas', u, s),
     'box-slide': (u, s) => boxTemplate('dedos', u, s, 'deslizante'),
     'box-drawer': (u, s) => boxTemplate('dedos', u, s, 'si', 'si'),
+    'box-hinge-lid': (u, s) => boxTemplate('dedos', u, s, 'bisagra'),
     basket: basketTemplate,
     typetray: trayTemplate,
     taper: taperTemplate,
@@ -7249,6 +7305,26 @@
     top: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, -1, 0], out: [0, 1, 0] },
   };
   const WOOD = { front: 0xd9b384, back: 0xd9b384, left: 0xc79d68, right: 0xc79d68, bottom: 0xcfa878, top: 0xcfa878 };
+  // Colores de madera para ver la caja en 3D (solo la vista; no cambia el diseño ni la exportación)
+  const WOOD_TYPES = [
+    ['auto', 'Automática (según el material)', null],
+    ['abedul', 'Contrachapado / abedul claro', 0xe3c79b], ['pino', 'Pino', 0xe8cf94], ['tilo', 'Tilo (basswood)', 0xe6cfa1],
+    ['roble', 'Roble', 0xc9a26a], ['cerezo', 'Cerezo', 0xb9714a], ['nogal', 'Nogal', 0x7a5236], ['caoba', 'Caoba', 0x8c4a32],
+    ['negro', 'Negro / ébano', 0x2e2a28], ['blanco', 'Blanco pintado', 0xf1efe9], ['mdf', 'MDF', 0xb59a74], ['acrilico', 'Acrílico transparente', 0xcfe6f0],
+    ['rojo', 'Rojo pintado', 0xb3322c], ['verde', 'Verde pintado', 0x4f7d54], ['azul', 'Azul pintado', 0x3f6fa3],
+  ];
+  const WOOD_KEY = 'evergreen-love-studio:madera3d';
+  const woodPick = (() => { try { return { main: 'auto', cover: 'auto', ...(JSON.parse(localStorage.getItem(WOOD_KEY) || '{}') || {}) }; } catch (e) { return { main: 'auto', cover: 'auto' }; } })();
+  const woodHex = id => { const t = WOOD_TYPES.find(w => w[0] === id); return t ? t[2] : null; };
+  const shade = (hex, f) => { const r = Math.min(255, Math.round(((hex >> 16) & 255) * f)), g = Math.min(255, Math.round(((hex >> 8) & 255) * f)), b = Math.min(255, Math.round((hex & 255) * f)); return (r << 16) | (g << 8) | b; };
+  // Color final de una pieza en 3D: el elegido (con un poco de sombra según la cara) o el de siempre
+  function pickWood(orig, place) {
+    const base = woodHex(woodPick.main);
+    if (base == null) return orig;
+    const f = { front: 1.04, back: 1.04, left: 0.94, right: 0.94, bottom: 0.9, top: 1 }[place];
+    return shade(base, f === undefined ? 1 : f);
+  }
+  function pickCover(orig) { const base = woodHex(woodPick.cover); return base == null ? orig : base; }
   function placeOrigin(m, q) {
     const { W, D, H, t, fingers } = m;
     const topY = (fingers ? 0 : t) + q.h; // las paredes se apoyan en el piso (con dedos) o sobre la base (sin dedos)
@@ -7329,7 +7405,7 @@
         0, 0, 0, 1);
       const holder = new T.Group();
       holder.userData.out = ax.out;
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: 0xdcb887, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: pickWood(0xdcb887), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       for (const obj of [mesh, edges]) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
       v3.group.add(holder);
@@ -7373,7 +7449,7 @@
       const geo = new T.ExtrudeGeometry(shape, { depth: tMM, bevelEnabled: false, curveSegments: 1 });
       geo.rotateX(-Math.PI / 2);
       const holder = new T.Group();
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: wood, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: pickWood(wood), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 30), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       holder.add(mesh, edges);
       holder.userData.out = [0, 0, 0];
@@ -7472,7 +7548,7 @@
       // Con cajón, el mueble queda fijo y el control desliza el cajón hacia afuera
       holder.userData.out = m.drawer ? [0, 0, 0] : q.axes ? q.axes.out : P.out;
       holder.userData.slide = !!q.drawer;
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color || WOOD[q.place] || 0xe2bf8d, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
       if (engQs.has(q) || ovs.has(q)) {
@@ -7489,7 +7565,7 @@
   // Maceta: pared curva (cilindro o medio cilindro con pared recta), base con pestañas, refuerzo y aros
   function build3DPlanter(m, T) {
     const p = m.planter, cx = m.W / 2, cz = p.half ? p.R : m.D / 2;
-    const mat = c => new T.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0, side: T.DoubleSide });
+    const mat = c => new T.MeshStandardMaterial({ color: pickWood(c), roughness: 0.85, metalness: 0, side: T.DoubleSide });
     const add = (geos, color, out, pos, rotX) => {
       const holder = new T.Group();
       for (const geo of geos) {
@@ -7548,7 +7624,7 @@
     const c = m.cone, cx = m.W / 2, cz = m.D / 2;
     const add = (geo, color, y, out) => {
       const holder = new T.Group();
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: pickWood(color), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       for (const o of [mesh, edges]) { o.position.set(cx, y, cz); holder.add(o); }
       holder.userData.out = out;
@@ -7945,6 +8021,16 @@
     v3.open = false;
     cancelAnimationFrame(v3.raf);
     $('#view3d').hidden = true;
+  }
+  {
+    const fill = (sel, cur) => { for (const [id, nm] of WOOD_TYPES) sel.append(h('option', { value: id }, nm)); sel.value = cur; };
+    fill($('#woodMain'), woodPick.main); fill($('#woodCover'), woodPick.cover);
+    const onPick = () => {
+      woodPick.main = $('#woodMain').value; woodPick.cover = $('#woodCover').value;
+      try { localStorage.setItem(WOOD_KEY, JSON.stringify(woodPick)); } catch (e) { /* sin almacenamiento */ }
+      if (v3.open) build3D();
+    };
+    $('#woodMain').addEventListener('change', onPick); $('#woodCover').addEventListener('change', onPick);
   }
   $('#btnView3d').onclick = () => open3D();
   $('#btnView3dClose').onclick = close3D;
