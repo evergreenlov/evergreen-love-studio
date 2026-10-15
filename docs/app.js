@@ -613,7 +613,7 @@
       panels.push(...covers);
       for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
     }
-    return { W, D, H, t, fingers, lid, slide, hinge, sep, panels, dividers: divs, layout, wall };
+    return { W, D, H, t, fingers, lid, slide, hinge, hingePivot: hinge ? [0, H, D - t] : null, sep, panels, dividers: divs, layout, wall };
   }
 
   // Bandeja de pared: dos agujeros para tornillos cerca del borde de arriba (en las celdas de las esquinas)
@@ -7548,6 +7548,7 @@
       // Con cajón, el mueble queda fijo y el control desliza el cajón hacia afuera
       holder.userData.out = m.drawer ? [0, 0, 0] : q.axes ? q.axes.out : P.out;
       holder.userData.slide = !!q.drawer;
+      holder.userData.lid = !!m.hinge && (q.name === 'Tapa' || q.name === 'Cubierta de la tapa');
       const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
@@ -7696,6 +7697,18 @@
     const m = v3.model;
     if (!m) return;
     const e = parseFloat($('#explode').value) || 0, dist = Math.max(m.W, m.D, m.H) * 0.45 * e;
+    if (m.hinge && m.hingePivot) {
+      // Caja con tapa de lengüeta: el control abre y cierra la tapa (con su cubierta), girando sobre el borde de atrás
+      const T = window.THREE, ang = e * 110 * Math.PI / 180, P = new T.Vector3(...m.hingePivot);
+      for (const holder of v3.group.children) {
+        if (holder.userData.lid) {
+          holder.rotation.set(ang, 0, 0);
+          holder.position.copy(P).sub(P.clone().applyEuler(holder.rotation));
+        } else { holder.rotation.set(0, 0, 0); holder.position.set(0, 0, 0); }
+      }
+      $('#explodeLabel').textContent = e > 0.01 ? `Tapa abierta ${Math.round(e * 110)}°` : 'Abrir la tapa';
+      return;
+    }
     for (const holder of v3.group.children) {
       const [x, y, z] = holder.userData.out;
       holder.position.set(x * dist, y * dist, z * dist);
