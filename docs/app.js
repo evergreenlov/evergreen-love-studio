@@ -5089,7 +5089,7 @@
     dialog.showModal();
   }
   /* ----- ¿Cuántos caben? Cuenta copias del diseño por hoja, sin mover nada ----- */
-  const FIT_SHEETS = [['Madera 12 × 12 in', 304.8, 304.8], ['Madera 12 × 18 in', 457.2, 304.8], ['Madera 12 × 24 in', 609.6, 304.8], ['Madera 24 × 24 in', 609.6, 609.6]];
+  const FIT_SHEETS = [['Madera 12 × 12 in', 304.8, 304.8], ['Madera 12 × 18 in', 457.2, 304.8], ['Madera 12 × 24 in', 609.6, 304.8], ['Madera 24 × 24 in', 609.6, 609.6], ['Plancha 600 × 300 mm', 600, 300], ['Plancha 900 × 600 mm', 900, 600], ['Plancha 1200 × 600 mm', 1200, 600], ['Plancha 1220 × 610 mm (4 × 2 ft)', 1220, 610], ['Plancha 2440 × 1220 mm (8 × 4 ft)', 2440, 1220]];
   function fitUnits() {
     evaluateParams(); evaluateAll();
     let roots = selectedRoots();
@@ -5176,6 +5176,12 @@
     thickSel.value = '6.35';
     const tIn = num(dec(6.35));
     const gapIn = num(dec(3)), marIn = num(dec(5)), qtyIn = num('10', { step: '1', min: '1' });
+    const PRICE_KEY = 'evergreen-love-studio:precio-plancha';
+    let savedPrice = {}; try { savedPrice = JSON.parse(localStorage.getItem(PRICE_KEY) || '{}') || {}; } catch (e) { savedPrice = {}; }
+    const priceIn = num(savedPrice.precio || '');
+    priceIn.placeholder = 'opcional, ej. 8.00';
+    const curSel = h('select', { 'aria-label': 'Moneda' }, ...['$', '€', '£', 'MXN $', 'COP $', 'USD $'].map(c => h('option', { value: c }, c)));
+    curSel.value = savedPrice.moneda || '$';
     const rot = h('input', { type: 'checkbox', checked: '' });
     const plist = doc.params.filter(p => Number.isFinite(vars[p.name]));
     const tParam = plist.find(p => /^(grosor|espesor|thickness|t)$/i.test(p.name));
@@ -5235,6 +5241,14 @@
       };
       const mine = compute(chosen);
       const others = [...FIT_SHEETS, mach].filter(s => s[0] !== chosen[0]).map(compute);
+      // Costo: precio de la plancha elegida; para las otras se estima por área (mismo precio por m²)
+      const price = parseFloat(String(priceIn.value).replace(',', '.'));
+      const hasPrice = Number.isFinite(price) && price > 0;
+      const cur = curSel.value.replace(/\s*\$$/, '').trim() || '$';
+      const money = v => (cur === '$' || cur === '' ? '$' : cur + ' ') + (cur === '$' || cur === '' ? '' : '') + fmt(v, 2);
+      const moneyTxt = v => (cur === '€' || cur === '£' ? cur : '$') + fmt(v, 2) + (['MXN', 'COP', 'USD'].includes(cur) ? ' ' + cur : '');
+      const perArea = hasPrice ? price / (chosen[1] * chosen[2]) : 0;
+      try { localStorage.setItem(PRICE_KEY, JSON.stringify({ precio: priceIn.value, moneda: curSel.value })); } catch (e) { /* sin almacenamiento */ }
       const piecesPerBox = units.length;
       let listTxt = '';
       if (mode.value === 'design') {
@@ -5247,13 +5261,15 @@
         : h('div', { class: 'fit-main' },
           h('div', { class: 'fit-big' }, `${mine.n} plancha${mine.n > 1 ? 's' : ''}`),
           h('p', { class: 'tip' }, listTxt + `Para ${qty} caja${qty > 1 ? 's' : ''} (${piecesPerBox} pieza${piecesPerBox > 1 ? 's' : ''} cada una, ${qty * piecesPerBox} en total) en madera de ${thickName}. Plancha: ${mine.name.replace('Madera ', '')}. `
-            + `Compras ${areaTxt(mine.bought)} y se corta ${areaTxt(mine.used)}; sobra el ${fmt((1 - mine.used / mine.bought) * 100, 0)} %. `
+            + `Compras ${areaTxt(mine.bought)} y se corta ${areaTxt(mine.used)}; aprovechas el ${fmt(mine.used / mine.bought * 100, 0)} % y sobra el ${fmt((1 - mine.used / mine.bought) * 100, 0)} %. `
+            + (hasPrice ? `Costo de la madera: ${moneyTxt(mine.n * price)} en total, ${moneyTxt(mine.n * price / qty)} por caja. ` : '')
             + `En cada plancha caben ${mine.p} pieza${mine.p > 1 ? 's' : ''}`
             + (mode.value === 'manual' ? ` (${typeCounts(chosen)})` : '') + '. '
             + (mine.k ? `Eso son ${mine.k} caja${mine.k > 1 ? 's' : ''} completa${mine.k > 1 ? 's' : ''} por plancha.` : 'Una caja no cabe completa en una plancha, así que sus piezas se reparten.')));
-      const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: '6' }, r.err))
+      const tr = r => r.err ? h('tr', {}, h('td', {}, r.name), h('td', { colspan: hasPrice ? '7' : '6' }, r.err))
         : h('tr', {}, h('td', {}, r.name), h('td', { class: 'n' }, String(r.p)), h('td', {}, r.k ? String(r.k) : 'no cabe completa'), h('td', { class: 'n' }, `${r.n} plancha${r.n > 1 ? 's' : ''}`),
-          h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'));
+          h('td', {}, areaTxt(r.bought)), h('td', {}, areaTxt(r.used)), h('td', {}, fmt((1 - r.used / r.bought) * 100, 0) + ' %'),
+          ...(hasPrice ? [h('td', {}, moneyTxt(r.bought * perArea))] : []));
       const preview = h('div', {});
       const layout = mine.err ? [] : fitLayout(units, chosen[1], chosen[2], gap, mar, rot.checked);
       if (layout.length) {
@@ -5281,9 +5297,9 @@
         if (mode.value === 'manual') preview.append(place);
       }
       out.replaceChildren(head, preview, h('p', { class: 'insp-sub' }, 'Comparación con otros tamaños'),
-        h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Piezas por plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante')), tr(mine), ...others.map(tr))));
+        h('div', { class: 'fit-table' }, h('table', {}, h('tr', {}, h('th', {}, 'Plancha'), h('th', {}, 'Piezas por plancha'), h('th', {}, 'Cajas por plancha'), h('th', {}, `Necesitas (${qty})`), h('th', {}, 'Madera a comprar'), h('th', {}, 'Madera usada'), h('th', {}, 'Sobrante'), ...(hasPrice ? [h('th', {}, 'Costo (aprox. por área)')] : [])), tr(mine), ...others.map(tr))));
     };
-    [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
+    [mode, pw, ph, pn, cov, cw, ch, cn, sheetSel, sw, sh, thickSel, tIn, gapIn, marIn, qtyIn, priceIn, curSel, rot].forEach(el => { el.addEventListener('input', calc); el.addEventListener('change', calc); });
     manualBox.append(
       h('div', { class: 'nest-grid' }, row(`Ancho de la pieza (${unitLabel()})`, pw), row(`Alto de la pieza (${unitLabel()})`, ph), row('Piezas por caja', pn)),
       h('label', { class: 'check' }, cov, ' La caja lleva cobertura (tapa)'),
@@ -5294,7 +5310,7 @@
       plist.length ? h('p', { class: 'tip' }, 'Medidas de Parámetros que puedes usar en los cuadros (escribe el nombre o una cuenta, como ancho o alto*2): ' + plist.map(p => `${p.name} = ${fmt(vars[p.name], 3)} ${unitLabel()}`).join(' · ')) : null,
       manualBox,
       h('div', { class: 'nest-grid' }, row('¿Cuántas cajas quieres hacer?', qtyIn), row('Grosor de la madera', thickSel), row('Tamaño de la plancha', sheetSel), row(`Grosor (${unitLabel()})`, tIn),
-        row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn)),
+        row(`Ancho de la plancha (${unitLabel()})`, sw), row(`Alto de la plancha (${unitLabel()})`, sh), row(`Separación entre piezas (${unitLabel()})`, gapIn), row(`Margen del borde (${unitLabel()})`, marIn), row('Precio de una plancha', priceIn), row('Moneda', curSel)),
       h('label', { class: 'check' }, rot, ' Permitir girar las piezas 90°'),
       out,
       h('div', { class: 'dialog-actions' }, h('button', { class: 'primary', onclick: close }, 'Cerrar')));
