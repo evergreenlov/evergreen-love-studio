@@ -593,6 +593,17 @@
       panels.push({ name: 'Tapa', w: innerW + 2 * X, h: innerD, place: 'top', holes: [], pts: lp,
         axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap - X, H - sink - t, t + gap], out: [0, 1, 0] } });
       pivotAxis = [0, H - vh, zh];
+      // Con «Cubierta de otra madera → todas las caras», la tapa también lleva su cubierta: va dentro del hueco, pegada encima de la tapa, y gira con ella
+      if (s.p.cubierta === 'si' && (s.p.cubiertaCaras || 'todas') === 'todas') {
+        const cvT = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
+        if (Number.isFinite(cvT) && cvT > 0) {
+          const cw = innerW - 0.2, cd = innerD - 0.2;
+          const topCover = { name: 'Cubierta Tapa', w: cw, h: cd, place: 'top', holes: [], pts: rect(cw, cd), th: cvT, color: 0xa9743f,
+            axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap + 0.1, H - sink, t + gap + 0.1], out: [0, 1, 0] } };
+          panels.push(topCover);
+          layoutExtra.push(topCover);
+        }
+      }
     }
     if (hinge) {
       // La pieza grande de arriba (Tapa) lleva una lengüeta que sobresale por el borde de atrás y pasa por una ranura de un
@@ -7597,7 +7608,7 @@
       // Con cajón, el mueble queda fijo y el control desliza el cajón hacia afuera
       holder.userData.out = m.drawer ? [0, 0, 0] : q.axes ? q.axes.out : P.out;
       holder.userData.slide = !!q.drawer;
-      holder.userData.lid = !!m.hinge && (q.name === 'Tapa' || q.name === 'Cubierta de la tapa');
+      holder.userData.lid = !!m.hinge && (q.name === 'Tapa' || q.name === 'Cubierta de la tapa' || q.name === 'Cubierta Tapa');
       const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
