@@ -626,7 +626,15 @@
         const cvT = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
         if (Number.isFinite(cvT) && cvT > 0) {
           const cw = innerW - 0.2, cd = innerD - 0.2;
-          const topCover = { name: 'Cubierta Tapa', w: cw, h: cd, place: 'top', holes: [], pts: rect(cw, cd), th: cvT, color: 0xa9743f,
+          // Con lengüeta al frente, la cubierta lleva una muesca en el borde de adelante: ahí descansa la lengüeta de la tapa.
+          // Ancho = lengüeta + holgura por lado; fondo = lo que mide la lengüeta (sin pasar de una quinta parte de la cubierta)
+          let coverPts = rect(cw, cd);
+          if (backTab && tabF > 0) {
+            const nw = tabF + 2 * gap + 1, nd = Math.min(tabLf, cd / 5);
+            const nx0 = cw / 2 - nw / 2 + k, nx1 = cw / 2 + nw / 2 - k;
+            coverPts = cleanPolygon([[-k, -k], [nx0, -k], [nx0, nd - k], [nx1, nd - k], [nx1, -k], [cw + k, -k], [cw + k, cd + k], [-k, cd + k]]);
+          }
+          const topCover = { name: 'Cubierta Tapa', w: cw, h: cd, place: 'top', holes: [], pts: coverPts, th: cvT, color: 0xa9743f,
             axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap + 0.1, H - sink, t + gap + 0.1], out: [0, 1, 0] } };
           panels.push(topCover);
           layoutExtra.push(topCover);
