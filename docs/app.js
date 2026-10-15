@@ -144,7 +144,7 @@
   const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar', excluir: 'Excluir (quita lo que se cruza)' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
   const JOINT_OPTS = { dedos: 'Con dedos (finger joint)', planas: 'Sin dedos (para pegar)' };
-  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta (se abre hacia atrás) y cubierta aparte', no: 'Abierta' };
+  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta (se abre hacia atrás) y cubierta aparte', pivote: 'Tapa con bisagra de espigas (gira en agujeros de los lados)', no: 'Abierta' };
   const GRIP_OPTS = { si: 'Con hueco para el dedo', no: 'Sin hueco' };
   const DRAWER_OPTS = { no: 'Sin cajón', si: 'Con cajón' };
   const ENGRAVE_OPTS = { auto: 'Automático', tapa: 'Tapa', frente: 'Frente', cajon: 'Frente del cajón' };
@@ -506,7 +506,7 @@
     const kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
     let W = len(s, 'ancho', 100), D = len(s, 'profundo', 80), H = len(s, 'alto', 60);
     const wall = s.p.pared === 'si'; // bandeja de pared: abierta al frente, sin tapa ni cajón
-    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante', hinge = lidMode === 'bisagra';
+    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante', hinge = lidMode === 'bisagra', pivote = lidMode === 'pivote';
     const fingers = (s.p.uniones || 'dedos') === 'dedos';
     if (s.p.cajon === 'si' && !wall) return drawerModel(s, { t, fw, sep, kerf, W, D, H, fingers });
     // Tapa deslizante: ranura de alto (grosor + holgura) a "borde" del canto superior de los lados
@@ -558,7 +558,41 @@
     }
     // Tapa con lengüeta: la tapa va por dentro de las paredes y su lengüeta entra en una muesca de la pared de atrás;
     // la cubierta aparte (más grande) se pega encima y descansa sobre el borde de las paredes.
-    let hingeCover = null;
+    let hingeCover = null, pivotAxis = null;
+    if (pivote) {
+      // Bisagra de espigas: la tapa lleva una lengüeta a cada lado que gira en un agujero redondo de la pared. Todo es plano y sin pegar.
+      if (!fingers) return null;
+      const gap = s.p.holgura && String(s.p.holgura).trim() ? len(s, 'holgura') : 0.3;
+      const innerW = W - 2 * t - 2 * gap, innerD = D - 2 * t - 2 * gap;
+      const tw = s.p.lengua && String(s.p.lengua).trim() ? len(s, 'lengua') : Math.max(8, 3 * t);   // ancho de la lengüeta (a lo largo de la tapa)
+      const back = 3;                                                       // margen entre la lengüeta y el borde de atrás de la tapa
+      const dh = Math.hypot(t, tw) + 0.5;                                   // el agujero debe dejar girar la lengüeta (diagonal de su sección)
+      const vh = dh / 2 + 2;                                                 // el centro del agujero queda 2 mm de material debajo del borde de arriba
+      const sink = vh - t / 2;                                              // la tapa baja hasta que su mitad quede a la altura del agujero
+      const tabOut = gap + t - 0.2;                                         // la lengüeta llega casi al borde de afuera de la pared
+      const zh = D - t - gap - back - tw / 2;
+      if (![gap, innerW, innerD, tw, dh].every(Number.isFinite) || gap < 0 || tw < 3 || innerW <= 4 * t || innerD <= tw + back + 4 * t || H < sink + t + 2 * t) return null;
+      const circle = (cx, cy, r) => Array.from({ length: 28 }, (_, i) => [cx + r * Math.cos(i * Math.PI / 14), cy + r * Math.sin(i * Math.PI / 14)]);
+      for (const place of ['left', 'right']) {
+        const p = panels.find(q => q.place === place);
+        if (p) p.holes.push(circle(zh, vh, dh / 2 - k));
+      }
+      const cutTop = (panel, x0, x1, depth) => {
+        if (!CL || !panel) return;
+        const r = fromC(clip(CL.ClipType.ctDifference, toC([{ closed: true, pts: panel.pts }]), toC([{ closed: true, pts: [[x0 + k, -k - 2], [x1 - k, -k - 2], [x1 - k, depth - k], [x0 + k, depth - k]] }])));
+        if (r.length) panel.pts = r.reduce((p, q) => polyArea(q.pts) > polyArea(p.pts) ? q : p).pts;
+      };
+      const fingerW = Math.max(20, Math.min(60, W * 0.22)), fingerD = Math.max(6, Math.min(14, H * 0.18), sink + 4);
+      cutTop(panels.find(q => q.place === 'front'), W / 2 - fingerW / 2, W / 2 + fingerW / 2, fingerD);
+      // Tapa con las dos lengüetas laterales (x desplazado para que el borde izquierdo de la pieza sea 0)
+      const zt0 = innerD - back - tw, zt1 = innerD - back;
+      const X = tabOut;
+      const lp = kerfOffset(cleanPolygon([[X, 0], [X + innerW, 0], [X + innerW, zt0], [2 * X + innerW, zt0], [2 * X + innerW, zt1], [X + innerW, zt1], [X + innerW, innerD],
+        [X, innerD], [X, zt1], [0, zt1], [0, zt0], [X, zt0]]), k);
+      panels.push({ name: 'Tapa', w: innerW + 2 * X, h: innerD, place: 'top', holes: [], pts: lp,
+        axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap - X, H - sink - t, t + gap], out: [0, 1, 0] } });
+      pivotAxis = [0, H - vh, zh];
+    }
     if (hinge) {
       const gap = s.p.holgura && String(s.p.holgura).trim() ? len(s, 'holgura') : 0.3;
       const innerW = W - 2 * t - 2 * gap, innerD = D - 2 * t - 2 * gap;
@@ -613,7 +647,7 @@
       panels.push(...covers);
       for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
     }
-    return { W, D, H, t, fingers, lid, slide, hinge, hingePivot: hinge ? [0, H, D - t] : null, sep, panels, dividers: divs, layout, wall };
+    return { W, D, H, t, fingers, lid, slide, hinge: hinge || pivote, hingePivot: hinge ? [0, H, D - t] : pivotAxis, sep, panels, dividers: divs, layout, wall };
   }
 
   // Bandeja de pared: dos agujeros para tornillos cerca del borde de arriba (en las celdas de las esquinas)
@@ -4537,9 +4571,10 @@
     if (key === 'nAncho' || key === 'nProf' || key === 'nAlto') return planas || !byCount;
     if (key === 'dedo') return planas || byCount;
     if (drawer && key === 'tapa') return true;
-    if (key === 'lengua' || key === 'tapaCub') return drawer || s.p.tapa !== 'bisagra';
+    if (key === 'lengua') return drawer || !(s.p.tapa === 'bisagra' || s.p.tapa === 'pivote');
+    if (key === 'tapaCub') return drawer || s.p.tapa !== 'bisagra';
     if (key === 'grosorTapaCub') return drawer || s.p.tapa !== 'bisagra' || s.p.tapaCub === 'no';
-    if (key === 'holgura') return drawer || !(s.p.tapa === 'deslizante' || s.p.tapa === 'bisagra');
+    if (key === 'holgura') return drawer || !(s.p.tapa === 'deslizante' || s.p.tapa === 'bisagra' || s.p.tapa === 'pivote');
     if (key === 'borde') return drawer || s.p.tapa !== 'deslizante';
     if (key === 'agarre') return !(drawer || s.p.tapa === 'deslizante');
     return false;
@@ -7131,7 +7166,7 @@
   function boxTemplate(uniones = 'dedos', units = 'mm', sheet, tapa = 'si', cajon = 'no') {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
-    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
+    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : tapa === 'pivote' ? 'Caja con bisagra de espigas' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
     const values = units === 'in'
       ? [['ancho', '4'], ['profundo', '3'], ['alto', '2.5'], ['grosor', '0.125'], ['dedo', '0.4'], ['kerf', '0.004'], ['sep', '0.2']]
       : [['ancho', '100'], ['profundo', '80'], ['alto', '60'], ['grosor', '3'], ['dedo', '10'], ['kerf', '0.1'], ['sep', '5']];
@@ -7281,6 +7316,7 @@
     'box-slide': (u, s) => boxTemplate('dedos', u, s, 'deslizante'),
     'box-drawer': (u, s) => boxTemplate('dedos', u, s, 'si', 'si'),
     'box-hinge-lid': (u, s) => boxTemplate('dedos', u, s, 'bisagra'),
+    'box-pivot-lid': (u, s) => boxTemplate('dedos', u, s, 'pivote'),
     basket: basketTemplate,
     typetray: trayTemplate,
     taper: taperTemplate,
