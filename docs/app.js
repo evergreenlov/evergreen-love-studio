@@ -609,6 +609,18 @@
         axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap - X, H - sink - t, t + gap - tabLf], out: [0, 1, 0] } });
       pivotAxis = [0, H - vh, zh];
       if (coverSide) pivotHole = { zh, vh, r: dh / 2 - k };
+      // Apoyo de la tapa (repisa): marco en U que se pega por dentro de las paredes, justo debajo de la tapa. Termina en las espigas
+      // (sin banda de atrás) para que la parte de atrás de la tapa pueda bajar al abrir.
+      {
+        const rw = W - 2 * t - 0.2, rl = zh - 1 - (t + 0.1), ledge = Math.max(3, Math.min(8, rw / 6));
+        if (rw > 4 * ledge && rl > 2 * ledge + 4) {
+          const U = kerfOffset(cleanPolygon([[0, 0], [rw, 0], [rw, rl], [rw - ledge, rl], [rw - ledge, ledge], [ledge, ledge], [ledge, rl], [0, rl]]), k);
+          const ledgePanel = { name: 'Apoyo de la tapa', w: rw, h: rl, place: 'bottom', holes: [], pts: U,
+            axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + 0.1, H - sink - 2 * t, t + 0.1], out: [0, -1, 0] } };
+          panels.push(ledgePanel);
+          layoutExtra.push(ledgePanel);
+        }
+      }
       // Con «Cubierta de otra madera → todas las caras», la tapa también lleva su cubierta: va dentro del hueco, pegada encima de la tapa, y gira con ella
       if (s.p.cubierta === 'si' && (s.p.cubiertaCaras || 'todas') === 'todas') {
         const cvT = s.p.grosorCub && String(s.p.grosorCub).trim() ? len(s, 'grosorCub') : t;
