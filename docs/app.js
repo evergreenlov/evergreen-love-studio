@@ -144,7 +144,7 @@
   const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar', excluir: 'Excluir (quita lo que se cruza)' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
   const JOINT_OPTS = { dedos: 'Con dedos (finger joint)', planas: 'Sin dedos (para pegar)' };
-  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta que sobresale por atrás (soporte de bisagra) y cubierta aparte', pivote: 'Tapa con bisagra de espigas (gira en agujeros de los lados)', no: 'Abierta' };
+  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta que sobresale por atrás (soporte de bisagra) y cubierta aparte', pivote: 'Tapa con bisagra de espigas (gira en agujeros de los lados)', pivoteLengua: 'Tapa con espigas laterales y lengüeta por atrás (sobresale)', no: 'Abierta' };
   const GRIP_OPTS = { si: 'Con hueco para el dedo', no: 'Sin hueco' };
   const DRAWER_OPTS = { no: 'Sin cajón', si: 'Con cajón' };
   const ENGRAVE_OPTS = { auto: 'Automático', tapa: 'Tapa', frente: 'Frente', cajon: 'Frente del cajón' };
@@ -506,7 +506,7 @@
     const kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
     let W = len(s, 'ancho', 100), D = len(s, 'profundo', 80), H = len(s, 'alto', 60);
     const wall = s.p.pared === 'si'; // bandeja de pared: abierta al frente, sin tapa ni cajón
-    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante', hinge = lidMode === 'bisagra', pivote = lidMode === 'pivote';
+    const lidMode = wall ? 'no' : (s.p.tapa || 'si'), lid = lidMode === 'si', slide = lidMode === 'deslizante', hinge = lidMode === 'bisagra', backTab = lidMode === 'pivoteLengua', pivote = lidMode === 'pivote' || backTab;
     const fingers = (s.p.uniones || 'dedos') === 'dedos';
     if (s.p.cajon === 'si' && !wall) return drawerModel(s, { t, fw, sep, kerf, W, D, H, fingers });
     // Tapa deslizante: ranura de alto (grosor + holgura) a "borde" del canto superior de los lados
@@ -558,7 +558,7 @@
     }
     // Tapa con lengüeta: la tapa va por dentro de las paredes y su lengüeta entra en una muesca de la pared de atrás;
     // la cubierta aparte (más grande) se pega encima y descansa sobre el borde de las paredes.
-    let hingeCover = null, pivotAxis = null, pivotHole = null;
+    let hingeCover = null, pivotAxis = null, pivotHole = null, hingeMaxDeg = 110;
     const layoutExtra = [];
     if (pivote) {
       // Bisagra de espigas: la tapa lleva una lengüeta a cada lado que gira en un agujero redondo de la pared. Todo es plano y sin pegar.
@@ -592,9 +592,25 @@
       // Tapa con las dos lengüetas laterales (x desplazado para que el borde izquierdo de la pieza sea 0)
       const zt0 = innerD - back - tw, zt1 = innerD - back;
       const X = tabOut;
-      const lp = kerfOffset(cleanPolygon([[X, 0], [X + innerW, 0], [X + innerW, zt0], [2 * X + innerW, zt0], [2 * X + innerW, zt1], [X + innerW, zt1], [X + innerW, innerD],
-        [X, innerD], [X, zt1], [0, zt1], [0, zt0], [X, zt0]]), k);
-      panels.push({ name: 'Tapa', w: innerW + 2 * X, h: innerD, place: 'top', holes: [], pts: lp,
+      // Lengüeta visible por atrás (solo en el modo con lengüeta): sale por una ranura de la pared de atrás, lo bastante alta para dejar girar la tapa
+      let tabB = 0, tabLb = 0;
+      if (backTab) {
+        tabB = Math.max(8, Math.min(30, innerW * 0.18));
+        tabLb = gap + t + 3;
+        const backZ = D + 3, Lp = backZ - zh, drop = Lp * Math.sin(65 * Math.PI / 180);
+        const v0 = Math.max(1.5, sink - 0.4), v1 = sink + t + drop + 0.4;
+        const sx0b = W / 2 - tabB / 2 - gap, sx1b = W / 2 + tabB / 2 + gap;
+        const backPanel = panels.find(q => q.place === 'back');
+        if (backPanel && v1 < H - 3) backPanel.holes.push([[sx0b + k, v0 + k], [sx1b - k, v0 + k], [sx1b - k, v1 - k], [sx0b + k, v1 - k]]);
+        else return null;
+        hingeMaxDeg = 65;
+      }
+      const cxl = X + innerW / 2;
+      const outline = [[X, 0], [X + innerW, 0], [X + innerW, zt0], [2 * X + innerW, zt0], [2 * X + innerW, zt1], [X + innerW, zt1], [X + innerW, innerD]];
+      if (backTab) outline.push([cxl + tabB / 2, innerD], [cxl + tabB / 2, innerD + tabLb], [cxl - tabB / 2, innerD + tabLb], [cxl - tabB / 2, innerD]);
+      outline.push([X, innerD], [X, zt1], [0, zt1], [0, zt0], [X, zt0]);
+      const lp = kerfOffset(cleanPolygon(outline), k);
+      panels.push({ name: 'Tapa', w: innerW + 2 * X, h: innerD + tabLb, place: 'top', holes: [], pts: lp,
         axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [t + gap - X, H - sink - t, t + gap], out: [0, 1, 0] } });
       pivotAxis = [0, H - vh, zh];
       if (coverSide) pivotHole = { zh, vh, r: dh / 2 - k };
@@ -684,7 +700,7 @@
       panels.push(...covers);
       for (let i = 0; i < covers.length; i += 3) layout.push(covers.slice(i, i + 3));
     }
-    return { W, D, H, t, fingers, lid, slide, hinge: hinge || pivote, hingePivot: pivotAxis, sep, panels, dividers: divs, layout, wall };
+    return { W, D, H, t, fingers, lid, slide, hinge: hinge || pivote, hingePivot: pivotAxis, hingeMax: hingeMaxDeg, sep, panels, dividers: divs, layout, wall };
   }
 
   // Bandeja de pared: dos agujeros para tornillos cerca del borde de arriba (en las celdas de las esquinas)
@@ -4608,7 +4624,7 @@
     if (key === 'nAncho' || key === 'nProf' || key === 'nAlto') return planas || !byCount;
     if (key === 'dedo') return planas || byCount;
     if (drawer && key === 'tapa') return true;
-    if (key === 'lengua') return drawer || !(s.p.tapa === 'bisagra' || s.p.tapa === 'pivote');
+    if (key === 'lengua') return drawer || !(s.p.tapa === 'bisagra' || s.p.tapa === 'pivote' || s.p.tapa === 'pivoteLengua');
     if (key === 'tapaCub') return drawer || s.p.tapa !== 'bisagra';
     if (key === 'grosorTapaCub') return drawer || s.p.tapa !== 'bisagra' || s.p.tapaCub === 'no';
     if (key === 'holgura') return drawer || !(s.p.tapa === 'deslizante' || s.p.tapa === 'bisagra' || s.p.tapa === 'pivote');
@@ -7203,7 +7219,7 @@
   function boxTemplate(uniones = 'dedos', units = 'mm', sheet, tapa = 'si', cajon = 'no') {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
-    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : tapa === 'pivote' ? 'Caja con bisagra de espigas' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
+    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : tapa === 'pivote' ? 'Caja con bisagra de espigas' : tapa === 'pivoteLengua' ? 'Caja con lengüeta y bisagra de espigas' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
     const values = units === 'in'
       ? [['ancho', '4'], ['profundo', '3'], ['alto', '2.5'], ['grosor', '0.125'], ['dedo', '0.4'], ['kerf', '0.004'], ['sep', '0.2']]
       : [['ancho', '100'], ['profundo', '80'], ['alto', '60'], ['grosor', '3'], ['dedo', '10'], ['kerf', '0.1'], ['sep', '5']];
@@ -7354,6 +7370,7 @@
     'box-drawer': (u, s) => boxTemplate('dedos', u, s, 'si', 'si'),
     'box-hinge-lid': (u, s) => boxTemplate('dedos', u, s, 'bisagra'),
     'box-pivot-lid': (u, s) => boxTemplate('dedos', u, s, 'pivote'),
+    'box-pivot-tab-lid': (u, s) => boxTemplate('dedos', u, s, 'pivoteLengua'),
     basket: basketTemplate,
     typetray: trayTemplate,
     taper: taperTemplate,
@@ -7772,14 +7789,14 @@
     const e = parseFloat($('#explode').value) || 0, dist = Math.max(m.W, m.D, m.H) * 0.45 * e;
     if (m.hinge && m.hingePivot) {
       // Caja con tapa de lengüeta: el control abre y cierra la tapa (con su cubierta), girando sobre el borde de atrás
-      const T = window.THREE, ang = e * 110 * Math.PI / 180, P = new T.Vector3(...m.hingePivot);
+      const T = window.THREE, maxDeg = m.hingeMax || 110, ang = e * maxDeg * Math.PI / 180, P = new T.Vector3(...m.hingePivot);
       for (const holder of v3.group.children) {
         if (holder.userData.lid) {
           holder.rotation.set(ang, 0, 0);
           holder.position.copy(P).sub(P.clone().applyEuler(holder.rotation));
         } else { holder.rotation.set(0, 0, 0); holder.position.set(0, 0, 0); }
       }
-      $('#explodeLabel').textContent = e > 0.01 ? `Tapa abierta ${Math.round(e * 110)}°` : 'Abrir la tapa';
+      $('#explodeLabel').textContent = e > 0.01 ? `Tapa abierta ${Math.round(e * maxDeg)}°` : 'Abrir la tapa';
       return;
     }
     for (const holder of v3.group.children) {
