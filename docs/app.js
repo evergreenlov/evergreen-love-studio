@@ -615,7 +615,10 @@
       if (s.p.tapaCub !== 'no') {
         const tc = s.p.grosorTapaCub && String(s.p.grosorTapaCub).trim() ? len(s, 'grosorTapaCub') : t;
         if (!(tc > 0) || !Number.isFinite(tc)) return null;
-        hingeCover = { name: 'Cubierta de la tapa', w: W, h: D, place: 'top', holes: [], pts: rect(W, D), th: tc, color: 0xa9743f,
+        // Muesca en el borde de atrás de la cubierta, sobre la lengüeta: así la lengüeta queda libre y la cubierta no la traba
+        const nx0 = W / 2 - tabW / 2 - gap + k, nx1 = W / 2 + tabW / 2 + gap - k, nd = t + gap + 1.5;
+        const coverPts = cleanPolygon([[-k, -k], [W + k, -k], [W + k, D + k], [nx1, D + k], [nx1, D - nd + k], [nx0, D - nd + k], [nx0, D + k], [-k, D + k]]);
+        hingeCover = { name: 'Cubierta de la tapa', w: W, h: D, place: 'top', holes: [], pts: coverPts, th: tc, color: 0xa9743f,
           axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [0, H, 0], out: [0, 1, 0] } };
         panels.push(hingeCover);
       }
