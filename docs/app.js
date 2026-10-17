@@ -6533,9 +6533,18 @@
       + (skippedImages ? '. El DXF no admite imágenes: para el logo en PNG/JPG usa Exportar SVG.' : ''));
   }
 
-  function saveFile() {
+  // Copia de seguridad en .json (solo se abre en esta aplicación)
+  function saveJsonFile() {
     download(safeName() + '.json', JSON.stringify(doc, null, 2), 'application/json');
-    msg('Diseño guardado en tu carpeta de Descargas.');
+    msg('Copia .json guardada en Descargas. Solo la abre esta aplicación; para xTool usa Guardar (SVG).');
+  }
+  // Guardar = SVG: se abre directo en xTool y, al abrirlo aquí, recupera el diseño editable (lleva una copia dentro)
+  function saveFile() {
+    evaluateParams(); evaluateAll();
+    const { bbox } = exportItems();
+    if (!bbox) { saveJsonFile(); return; }
+    withFonts(exportSVG);
+    msg(`Guardado «${safeName()}.svg» en Descargas: ábrelo en xTool o aquí para seguir editando.`, 8000);
   }
 
   function loadDoc(d) {
@@ -8234,6 +8243,7 @@
   $('#btnOpen').onclick = () => $('#fileInput').click();
   $('#btnImport').onclick = () => $('#fileInput').click();
   $('#btnSave').onclick = saveFile;
+  $('#btnSaveJson').onclick = saveJsonFile;
   $('#btnExport').onclick = () => withFonts(exportSVG);
   $('#btnExportDxf').onclick = () => withFonts(exportDXF);
   $('#btnUndo').onclick = undo;
