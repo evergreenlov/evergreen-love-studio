@@ -510,9 +510,9 @@
     const mg = s.p.margen && String(s.p.margen).trim() ? len(s, 'margen') : 1.5 * t;      // de la orilla de la placa a la pared
     const ear = Math.max(2 * t, H * 0.45);                                                   // orejas de las paredes largas hacia la bisagra
     const bw = s.p.bvAncho && String(s.p.bvAncho).trim() ? len(s, 'bvAncho') : H + 2 * t + ear;
-    const bL = s.p.bvLargo && String(s.p.bvLargo).trim() ? len(s, 'bvLargo') : 15;
-    const bB = s.p.bvPuente && String(s.p.bvPuente).trim() ? len(s, 'bvPuente') : 3;
-    const bS = s.p.bvPaso && String(s.p.bvPaso).trim() ? len(s, 'bvPaso') : 2;
+    const bL = s.p.bvLargo && String(s.p.bvLargo).trim() ? len(s, 'bvLargo') : 40;
+    const bB = s.p.bvPuente && String(s.p.bvPuente).trim() ? len(s, 'bvPuente') : 8;
+    const bS = s.p.bvPaso && String(s.p.bvPaso).trim() ? len(s, 'bvPaso') : 3.2;
     const Sx = W - 2 * mg - 2 * t, Sz = D - 2 * mg - 2 * t;
     if (![mg, ear, bw, bL, bB, bS, Sx, Sz].every(Number.isFinite) || mg < 0 || bw < 2 * t || bL <= 0 || bB < 0 || bS <= 0 || Sx < 3 * t || Sz < 3 * t || H < 4 * t) return null;
     const etw = Math.min(15, H / 3), r = Math.min(10, H / 4), pr = Math.min(8, D / 8, W / 8);
@@ -528,8 +528,13 @@
     const shift = (pl, dx) => pl.map(([x, y]) => [x + dx, y]);
     // Placa: tapa | banda de bisagra | base
     const hm = Math.min(6 * t, D / 4);
-    const lines = hingeLines(W, hm, bw, D - 2 * hm, bL, bB, bS).map(l => l.pts);
-    const plate = { name: 'Placa (tapa + bisagra + base)', w: 2 * W + bw, h: D, place: 'plate', only2d: true, holes: baseSlots.map(sl => shift(sl, x0)), pts: roundRect(-k, -k, 2 * W + bw + 2 * k, D + 2 * k, pr + k), lines };
+    // Cortes de la bisagra: ranuras angostas con puntas (hexágonos alargados, ~0.45 de grosor de ancho), en columnas alternadas.
+    // Son huecos reales (no líneas), así la banda se dobla de verdad.
+    const sw = Math.max(0.8, 0.45 * t);
+    const slit = (cx, a, e) => { const hw = Math.max(0.15, (sw - 2 * k) / 2) , tip = hw * 0.45, m2 = (a + e) / 2; return [[cx - tip, a], [cx + tip, a], [cx + hw, m2], [cx + tip, e], [cx - tip, e], [cx - hw, m2]]; };
+    const slits = x => hingeLines(x, hm, bw, D - 2 * hm, bL, bB, bS).filter(l => l.pts[1][1] - l.pts[0][1] > 4).map(l => slit(l.pts[0][0], l.pts[0][1], l.pts[1][1]));
+    const lines = [];
+    const plate = { name: 'Placa (tapa + bisagra + base)', w: 2 * W + bw, h: D, place: 'plate', only2d: true, holes: [...baseSlots.map(sl => shift(sl, x0)), ...slits(W)], pts: roundRect(-k, -k, 2 * W + bw + 2 * k, D + 2 * k, pr + k), lines };
     // Paredes de los extremos (largo = fondo): pestañas abajo, y puntas arriba que entran en las ranuras de las paredes largas
     const Le = D - 2 * mg;
     const endPts = [[0, 0], [Le, 0], [Le, etw], [Le - t, etw], [Le - t, H]];
@@ -556,8 +561,7 @@
     const baseP = { name: 'Base', w: W, h: D, place: 'bottom', holes: baseSlots, pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(0) };
     const lidP = { name: 'Tapa', w: W, h: D, place: 'top', holes: [], pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(Y) };
     // Para la vista 3D: la banda de bisagra (con sus cortes) queda entre la base y la tapa cuando la caja se abre plana
-    const slit = ([[ax, ay], [bx, by]]) => [[ax - 0.25, ay], [bx + 0.25, ay], [bx + 0.25, by], [ax - 0.25, by]];
-    const bandP = { name: 'Banda de bisagra', w: bw, h: D, place: 'bottom', band: true, holes: hingeLines(0, hm, bw, D - 2 * hm, bL, bB, bS).map(l => slit(l.pts)), pts: [[0, 0], [bw, 0], [bw, D], [0, D]], axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-bw, 0, 0], out: [0, -1, 0] } };
+    const bandP = { name: 'Banda de bisagra', w: bw, h: D, place: 'bottom', band: true, holes: slits(0), pts: [[0, 0], [bw, 0], [bw, D], [0, D]], axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-bw, 0, 0], out: [0, -1, 0] } };
     const panels = [baseP, lidP, bandP, plate, endA, endB, lonF, lonK];
     return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[plate], [endA, endB], [lonF, lonK]], wall: false, libro: true };
   }
