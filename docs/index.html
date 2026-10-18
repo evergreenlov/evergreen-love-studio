@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-guardar-svg-1">
+<link rel="stylesheet" href="estilos.css?v=20261019-vista3d-pro-2">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#2f7d4f">
@@ -14,7 +14,7 @@
 <script>
 /* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
 (function () {
-  var BUILD = "guardar-svg-1";
+  var BUILD = "vista3d-pro-2";
   try {
     fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = (t || '').trim();
@@ -29,7 +29,7 @@
   <div class="brand">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 5 11h3l-4 6h6v5h4v-5h6l-4-6h3z" fill="currentColor"/></svg>
     <span>Evergreen Love Studio</span>
-    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v guardar-svg-1</span>
+    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v vista3d-pro-2</span>
   </div>
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="seg" id="unitSeg" role="group" aria-label="Trabajar en milímetros o pulgadas"><button type="button" data-u="mm" title="Trabajar en milímetros">mm</button><button type="button" data-u="in" title="Trabajar en pulgadas">pulgadas</button></div>
@@ -141,9 +141,11 @@
         <label class="range"><span id="explodeLabel">Separar piezas</span> <input type="range" id="explode" min="0" max="1" step="0.01" value="0"></label>
         <label class="range"><span>Madera</span> <select id="woodMain" aria-label="Color de la madera en 3D"></select></label>
         <label class="range"><span>Cubierta</span> <select id="woodCover" aria-label="Color de la cubierta en 3D"></select></label>
+        <span class="v3cam"><button id="v3Home" title="Vista inicial">Inicio</button><button id="v3Top" title="Desde arriba">Arriba</button><button id="v3Front" title="De frente">Frente</button><button id="v3Spin" title="Girar sola">Girar</button><button id="v3Img" title="Guarda una imagen PNG de lo que ves">Guardar imagen</button></span>
         <button id="btnView3dFit">Centrar</button>
         <button id="btnView3dClose" class="primary">Cerrar</button>
       </div>
+      <div class="v3sizes" id="v3Sizes" hidden></div>
       <div class="view3d-canvas" id="view3dCanvas"></div>
       <p class="view3d-help">Arrastra para girar · rueda para acercar · clic derecho para desplazar · Esc para cerrar</p>
       <p class="view3d-msg" id="view3dMsg" hidden></p>
@@ -213,7 +215,7 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-guardar-svg-1"></script>
+<script src="app.js?v=20261019-vista3d-pro-2"></script>
 <script>
 /* Uso sin internet: se guarda una copia de la aplicación en este aparato (hace falta abrirla una vez con internet). */
 (function () {

@@ -425,3 +425,10 @@ button.wide { width: 100%; margin-top: 10px; }
 .tools-acts { border-left: 1px solid var(--border); padding-left: 2px; }
 .node-pt.on { fill: #ff5a00; stroke: #fff; stroke-width: 1.6px; }
 .cut-end { stroke: #ff5a00; }
+.v3cam { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.v3cam button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.v3sizes { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.v3sizes[hidden] { display: none; }
+.v3sizes .range { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.v3sizes input[type=range] { width: 150px; }
+.v3size-val { min-width: 74px; color: var(--text); font-variant-numeric: tabular-nums; font-size: 13px; }

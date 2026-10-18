@@ -7885,6 +7885,74 @@
     v3.controls.update();
     v3.lastR = R;
   }
+
+  /* ----- Vista 3D: cámara rápida, guardar imagen y medidas con deslizadores ----- */
+  function setCam3D(kind) {
+    const m = v3.model;
+    if (!m) return;
+    v3.controls.autoRotate = false; $('#v3Spin').classList.remove('active');
+    const R = Math.hypot(m.W, m.H, m.D), tg = v3.controls.target;
+    if (kind === 'home') fit3D();
+    else if (kind === 'top') v3.camera.position.set(tg.x, tg.y + R * 1.9, tg.z + 0.01);
+    else if (kind === 'front') v3.camera.position.set(tg.x, tg.y + R * 0.1, tg.z - R * 1.9);
+    v3.controls.update();
+  }
+  function saveImage3D() {
+    if (!v3.renderer) return;
+    v3.renderer.render(v3.scene, v3.camera);
+    v3.renderer.domElement.toBlob(b => {
+      if (!b) { msg('No se pudo guardar la imagen.'); return; }
+      const url = URL.createObjectURL(b), a2 = document.createElement('a');
+      a2.href = url; a2.download = (safeName() || 'caja') + '-3d.png'; document.body.append(a2); a2.click(); a2.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      msg('Imagen guardada en Descargas.');
+    }, 'image/png');
+  }
+  // Deslizadores de ancho / profundo / alto de la caja que se está viendo (solo cajas paramétricas)
+  const SIZE_KEYS = { box: [['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto']], taper: [['ancho', 'Ancho abajo'], ['prof', 'Largo abajo'], ['alto', 'Alto']], planter: [['d', 'Diámetro'], ['alto', 'Alto']], cone: [['d', 'Diámetro abajo'], ['alto', 'Alto']], basket: [['ancho', 'Ancho'], ['profundo', 'Fondo'], ['alto', 'Alto']] };
+  // Pone en los deslizadores las medidas de ahora (cuando cambian los Parámetros u otra cosa)
+  function syncSizes3D() {
+    const box = $('#v3Sizes'), s = v3.id && byId(v3.id);
+    if (!box || box.hidden || !s) return;
+    for (const inp of box.querySelectorAll('input[data-key]')) {
+      if (document.activeElement === inp) continue;
+      const cur = len(s, inp.dataset.key);
+      if (!Number.isFinite(cur) || cur <= 0) continue;
+      inp.value = String(Math.round(cur / unitMM * 1000) / 1000);
+      const out = inp.parentElement.querySelector('.v3size-val');
+      if (out) out.textContent = fmt(cur / unitMM, isInch() ? 3 : 1) + ' ' + unitLabel();
+    }
+  }
+  let sizeBase = null;
+  function build3DSizes() {
+    const box = $('#v3Sizes');
+    if (!box) return;
+    const s = v3.id && byId(v3.id), keys = s && SIZE_KEYS[s.type];
+    box.replaceChildren();
+    box.hidden = !keys || !!v3.art || !!v3.gid;
+    if (box.hidden) return;
+    evaluateParams();
+    sizeBase = sizeBase && sizeBase.id === s.id ? sizeBase : { id: s.id, v: {} };
+    for (const [key, label] of keys) {
+      if (s.p[key] === undefined) continue;
+      const cur = len(s, key); if (!Number.isFinite(cur) || cur <= 0) continue;
+      if (sizeBase.v[key] === undefined) sizeBase.v[key] = cur;
+      const base = sizeBase.v[key], u = unitMM;
+      const rng = h('input', { type: 'range', min: String(Math.round(base * 0.4 / u * 100) / 100), max: String(Math.round(base * 2.5 / u * 100) / 100), step: isInch() ? '0.0625' : '1', value: String(Math.round(cur / u * 1000) / 1000), 'aria-label': label, 'data-key': key });
+      const out = h('span', { class: 'v3size-val' }, fmt(cur / u, isInch() ? 3 : 1) + ' ' + unitLabel());
+      rng.addEventListener('input', () => {
+        const v = parseFloat(rng.value); if (!(v > 0)) return;
+        // si la medida es un parámetro, se cambia el parámetro; si es un número, la medida de la figura
+        const nm = String(s.p[key]).trim(), q = doc.params.find(p => p.name === nm);
+        if (q) q.expr = fmt(v); else s.p[key] = fmt(v);
+        out.textContent = fmt(v, isInch() ? 3 : 1) + ' ' + unitLabel();
+        liveRender(); syncParamInputs();
+      });
+      rng.addEventListener('change', () => { checkpoint(); fullRender(); });
+      box.append(h('label', { class: 'range' }, h('span', {}, label), rng, out));
+    }
+  }
+
   function loop3D() {
     if (!v3.open) return;
     v3.controls.update();
@@ -8186,7 +8254,8 @@
     $('#view3d').hidden = false;
     resize3D();
     evaluateParams();
-    build3D(); fit3D();
+    sizeBase = null;
+    build3D(); fit3D(); build3DSizes();
     cancelAnimationFrame(v3.raf);
     loop3D();
   }
@@ -8205,6 +8274,11 @@
     };
     $('#woodMain').addEventListener('change', onPick); $('#woodCover').addEventListener('change', onPick);
   }
+  $('#v3Home').onclick = () => setCam3D('home');
+  $('#v3Top').onclick = () => setCam3D('top');
+  $('#v3Front').onclick = () => setCam3D('front');
+  $('#v3Spin').onclick = e => { if (!v3.controls) return; v3.controls.autoRotate = !v3.controls.autoRotate; v3.controls.autoRotateSpeed = 3; e.currentTarget.classList.toggle('active', v3.controls.autoRotate); };
+  $('#v3Img').onclick = saveImage3D;
   $('#btnView3d').onclick = () => open3D();
   $('#btnView3dClose').onclick = close3D;
   $('#btnView3dFit').onclick = fit3D;
@@ -8219,7 +8293,7 @@
     if (one && (one.type === 'box' || one.type === 'taper')) updateCoverTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
     if (one && (one.type === 'taper' || one.type === 'cone' || one.type === 'planter')) updateShapeTip(one);
-    if (v3.open) build3D();
+    if (v3.open) { build3D(); syncSizes3D(); }
   }
   function fullRender() {
     evaluateParams();
@@ -8228,7 +8302,7 @@
     for (const b of document.querySelectorAll('#unitSeg button')) { const on = b.dataset.u === doc.units; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
-    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) build3D(); else close3D(); }
+    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); } else close3D(); }
   }
   function updateButtons() {
     $('#btnUndo').disabled = !undoStack.length && JSON.stringify(doc) === savedState;
