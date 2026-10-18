@@ -3359,17 +3359,18 @@
     if (!ts.length || !b) return;
     if (ts.some(t => nodeShow.has(t.id))) return; // con los puntos visibles se editan puntos, no se escala
     if (ts.some(t => t.locked)) return;
-    const px = 1 / view.s, hs = 9 * px, pad = 3 * px;
+    const px = 1 / view.s, coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches, hs = (coarse ? 20 : 9) * px, pad = (coarse ? 6 : 3) * px;
     const canScale = ts.every(s => SCALABLE.has(s.type));
     const canRotate = ts.every(s => s.type !== 'line');
     const x0 = b.x - pad, y0 = b.y - pad, x1 = b.x + b.w + pad, y1 = b.y + b.h + pad;
     if (canRotate) {
       const cx = (x0 + x1) / 2, ry = y0 - 26 * px;
       svgEl('path', { d: `M${cx} ${y0}V${ry}`, class: 'handle-line', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
-      svgEl('circle', { cx, cy: ry, r: 6 * px, class: 'handle rot', 'data-handle': 'rot', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
+      svgEl('circle', { cx, cy: ry, r: (coarse ? 12 : 6) * px, class: 'handle rot', 'data-handle': 'rot', 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
     }
     if (canScale) {
       for (const [name, x, y] of [['nw', x0, y0], ['ne', x1, y0], ['se', x1, y1], ['sw', x0, y1]]) {
+        if (coarse) svgEl('rect', { x: x - 24 * px, y: y - 24 * px, width: 48 * px, height: 48 * px, class: 'handle-hit ' + name, 'data-handle': name }, layerOverlay);   // zona grande para el dedo
         svgEl('rect', { x: x - hs / 2, y: y - hs / 2, width: hs, height: hs, class: 'handle ' + name, 'data-handle': name, 'vector-effect': 'non-scaling-stroke' }, layerOverlay);
       }
     }

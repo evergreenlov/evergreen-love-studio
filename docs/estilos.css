@@ -248,6 +248,9 @@ button.wide { width: 100%; margin-top: 10px; }
 .handle.nw, .handle.se { cursor: nwse-resize; }
 .handle.ne, .handle.sw { cursor: nesw-resize; }
 .handle.rot { cursor: grab; fill: var(--sel); }
+.handle-hit { fill: transparent; stroke: none; pointer-events: all; }
+.handle-hit.nw, .handle-hit.se { cursor: nwse-resize; }
+.handle-hit.ne, .handle-hit.sw { cursor: nesw-resize; }
 .handle-line { stroke: var(--sel); stroke-width: 1px; pointer-events: none; }
 
 /* Mis plantillas */
