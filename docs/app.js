@@ -7886,6 +7886,127 @@
     v3.lastR = R;
   }
 
+
+  /* ----- Estudio de plantilla: opciones a la izquierda, 3D en el centro, detalles y descargas a la derecha ----- */
+  const LID_STYLES = [
+    ['no', 'Abierta'], ['si', 'Tapa con dedos'], ['deslizante', 'Tapa deslizante'], ['bisagra', 'Lengüeta y cubierta'],
+    ['pivote', 'Espigas'], ['pivoteLengua', 'Espigas y lengüeta'], ['vivo', 'Bisagra viva'],
+  ];
+  const lidIcon = k => {
+    const box = '<rect x="6" y="14" width="28" height="13" rx="1"/>';
+    const lid = {
+      no: '<path d="M6 14h28" stroke-dasharray="2 2"/>',
+      si: '<rect x="5" y="9" width="30" height="5" rx="1"/>',
+      deslizante: '<rect x="14" y="9" width="24" height="4" rx="1"/><path d="M8 7h8M13 5l3 2-3 2"/>',
+      bisagra: '<path d="M5 14l4-9h26l-2 9"/><rect x="17" y="3" width="6" height="3"/>',
+      pivote: '<path d="M5 14l4-9h26l-2 9"/><circle cx="6" cy="12" r="2"/>',
+      pivoteLengua: '<path d="M5 14l4-9h26l-2 9"/><circle cx="6" cy="12" r="2"/><rect x="17" y="14" width="6" height="3"/>',
+      vivo: '<path d="M5 14l4-9h26l-2 9"/><path d="M5 14c2 2 3-2 5 0" />',
+    }[k] || '';
+    return `<svg viewBox="0 0 40 30" width="40" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${box}${lid}</svg>`;
+  };
+  const ASSEMBLY = {
+    no: ['Une las cuatro paredes con sus dedos (un poco de pegamento si quieres que quede fija).', 'Mete la base entre las paredes.'],
+    si: ['Une las paredes con sus dedos y mete la base.', 'La tapa se encaja con los mismos dedos: pégala al final.'],
+    deslizante: ['Une las paredes y mete la base.', 'La tapa entra por las ranuras de los lados; revisa que corra suave.'],
+    bisagra: ['Arma las paredes y la base.', 'Pega el soporte de bisagra por fuera de la pared de atrás, a la altura de la tapa.', 'Pasa la lengüeta de la tapa por la ranura del soporte y pega la cubierta encima de la tapa.'],
+    pivote: ['Arma las paredes con la base y pega el apoyo en U por dentro, debajo de la tapa.', 'Mete las espigas de la tapa en los agujeros de los lados antes de cerrar la última pared.'],
+    pivoteLengua: ['Arma las paredes con la base y pega el apoyo en U por dentro.', 'Mete las espigas de la tapa en los agujeros de los lados.', 'La lengüeta al frente queda en la muesca: sirve para levantar la tapa.'],
+    vivo: ['Dobla suavemente la banda de la bisagra varias veces antes de armar.', 'Une las paredes por sus dedos y pégalas sobre la base.', 'Cierra la tapa sobre la caja: el hueco del frente deja meter el dedo.'],
+  };
+  let v3SizesEl = null;
+  function build3DLeft() {
+    const box = $('#v3Style');
+    if (!box) return;
+    const s = v3.id && byId(v3.id);
+    if (!v3SizesEl) v3SizesEl = $('#v3Sizes');
+    box.replaceChildren();
+    if (!s || v3.art || v3.gid) { $('#v3Left').hidden = true; return; }
+    $('#v3Left').hidden = false;
+    const sec = t => h('div', { class: 'v3sec' }, t);
+    const apply = fn => { fn(); checkpoint(); fullRender(); build3DLeft(); build3DRight(); };
+    if (s.type === 'box' && s.p.pared !== 'si' && s.p.cajon !== 'si') {
+      box.append(sec('Estilo de la caja'));
+      const grid = h('div', { class: 'v3cards' });
+      for (const [k, label] of LID_STYLES) {
+        const b = h('button', { class: 'v3card' + ((s.p.tapa || 'si') === k ? ' active' : ''), title: LID_OPTS[k], 'aria-pressed': String((s.p.tapa || 'si') === k) });
+        b.innerHTML = lidIcon(k) + `<span>${label}</span>`;
+        b.onclick = () => apply(() => { s.p.tapa = k; if (['pivote', 'pivoteLengua', 'vivo', 'bisagra'].includes(k)) s.p.uniones = 'dedos'; });
+        grid.append(b);
+      }
+      box.append(grid);
+      box.append(sec('Uniones'));
+      const need = ['pivote', 'pivoteLengua', 'vivo'].includes(s.p.tapa);
+      box.append(h('div', { class: 'v3row' },
+        ...[['dedos', 'Con dedos'], ['planas', 'Para pegar']].map(([k, label]) => h('button', { class: 'v3chip' + ((s.p.uniones || 'dedos') === k ? ' active' : ''), disabled: need && k === 'planas' ? '' : null, onclick: () => apply(() => { s.p.uniones = k; }) }, label))));
+      box.append(sec('Cubierta de otra madera'));
+      box.append(h('div', { class: 'v3row' },
+        ...[['no', 'Sin cubierta'], ['si', 'Con cubierta']].map(([k, label]) => h('button', { class: 'v3chip' + ((s.p.cubierta || 'no') === k ? ' active' : ''), onclick: () => apply(() => { s.p.cubierta = k; }) }, label))));
+    }
+    // Grosor de la madera
+    const tKey = s.p.t !== undefined ? 't' : null;
+    if (tKey) {
+      box.append(sec('Grosor de la madera'));
+      const cur = len(s, 't', 3), near = FIT_THICK.find(x => Math.abs(x[1] - cur) < 0.3);
+      const sel2 = h('select', { 'aria-label': 'Grosor de la madera' }, ...FIT_THICK.map(([l, v]) => h('option', { value: String(v) }, l)), h('option', { value: 'otro' }, near ? 'Otro…' : `Actual: ${fmt(cur / unitMM, 3)} ${unitLabel()}`));
+      sel2.value = near ? String(near[1]) : 'otro';
+      sel2.onchange = () => {
+        if (sel2.value === 'otro') return;
+        const mm = parseFloat(sel2.value), nm = String(s.p.t).trim(), q = doc.params.find(p => p.name === nm);
+        apply(() => { if (q) q.expr = fmt(mm / unitMM, 4); else s.p.t = fmt(mm / unitMM, 4); });
+      };
+      box.append(sel2);
+    }
+    // las medidas (deslizadores) van debajo
+    const sizes = v3SizesEl;
+    box.append(sec('Medidas'));
+    box.append(sizes);
+    build3DSizes();
+    resize3D();
+  }
+  // Panel derecho: resumen, avisos, armado y descargas
+  function build3DRight() {
+    const box = $('#v3Right');
+    if (!box) return;
+    const s = v3.id && byId(v3.id), m = v3.model;
+    box.replaceChildren();
+    if (!s || !m || v3.art || v3.gid) { box.hidden = true; return; }
+    box.hidden = false;
+    const row = (k, v) => h('div', { class: 'v3kv' }, h('span', {}, k), h('b', {}, v));
+    const u = v => fmt(v / unitMM, isInch() ? 2 : 1);
+    const cut = (m.panels || []).filter(q => !q.only2d);
+    const area = cut.reduce((a2, q) => a2 + Math.abs(shoelace(q.pts)) - (q.holes || []).reduce((z, hl) => z + Math.abs(shoelace(hl)), 0), 0);
+    const flat = (m.layout || []).flat().filter(Boolean);
+    const sheet = doc.sheet, over = flat.filter(q => !((q.w <= sheet.w && q.h <= sheet.h) || (q.h <= sheet.w && q.w <= sheet.h)));
+    box.append(h('div', { class: 'v3sec' }, 'Detalles'),
+      row('Exterior', `${u(m.W)} × ${u(m.D)} × ${u(m.H)} ${unitLabel()}`),
+      row('Grosor', `${fmt(m.t / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`),
+      row('Piezas', String(flat.length + (m.dividers || []).length)),
+      row('Madera (solo piezas)', isInch() ? `${fmt(area / 645.16, 0)} in²` : `${fmt(area / 100, 0)} cm²`),
+      h('div', { class: 'v3sec' }, 'Revisión'),
+      over.length
+        ? h('p', { class: 'v3check bad' }, `${over.length} pieza(s) no caben en tu plancha de ${u(sheet.w)} × ${u(sheet.h)} ${unitLabel()}: ${over.map(q => q.name).join(', ')}.`)
+        : h('p', { class: 'v3check ok' }, `Todo cabe en tu plancha de ${u(sheet.w)} × ${u(sheet.h)} ${unitLabel()} (cambia la plancha en Propiedades → Documento).`));
+    const steps = s.type === 'box' ? (ASSEMBLY[s.p.tapa || 'si'] || []) : [];
+    if (steps.length) box.append(h('div', { class: 'v3sec' }, 'Armado'), h('ol', { class: 'v3steps' }, ...steps.map(t => h('li', {}, t))));
+    box.append(h('div', { class: 'v3sec' }, 'Descargar'),
+      h('div', { class: 'v3row' },
+        h('button', { class: 'primary', onclick: () => withFonts(exportSVG) }, 'SVG'),
+        h('button', { class: 'primary', onclick: () => withFonts(exportDXF) }, 'DXF'),
+        h('button', { onclick: saveFile }, 'Guardar')));
+  }
+
+  // El estudio 3D se acomoda al ancho que tenga: ancho = 3 columnas; medio = sin detalles; angosto = opciones arriba
+  function layout3D() {
+    const el = $('#view3d');
+    if (!el || el.hidden) return;
+    const wd = el.clientWidth;
+    el.classList.toggle('compact', wd < 1150);
+    el.classList.toggle('tiny', wd < 760);
+    resize3D();
+  }
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => layout3D()).observe($('#view3d'));
+
   /* ----- Vista 3D: cámara rápida, guardar imagen y medidas con deslizadores ----- */
   function setCam3D(kind) {
     const m = v3.model;
@@ -7912,7 +8033,7 @@
   const SIZE_KEYS = { box: [['ancho', 'Ancho'], ['profundo', 'Profundo'], ['alto', 'Alto']], taper: [['ancho', 'Ancho abajo'], ['prof', 'Largo abajo'], ['alto', 'Alto']], planter: [['d', 'Diámetro'], ['alto', 'Alto']], cone: [['d', 'Diámetro abajo'], ['alto', 'Alto']], basket: [['ancho', 'Ancho'], ['profundo', 'Fondo'], ['alto', 'Alto']] };
   // Pone en los deslizadores las medidas de ahora (cuando cambian los Parámetros u otra cosa)
   function syncSizes3D() {
-    const box = $('#v3Sizes'), s = v3.id && byId(v3.id);
+    const box = v3SizesEl, s = v3.id && byId(v3.id);
     if (!box || box.hidden || !s) return;
     for (const inp of box.querySelectorAll('input[data-key]')) {
       if (document.activeElement === inp) continue;
@@ -7925,7 +8046,7 @@
   }
   let sizeBase = null;
   function build3DSizes() {
-    const box = $('#v3Sizes');
+    const box = v3SizesEl;
     if (!box) return;
     const s = v3.id && byId(v3.id), keys = s && SIZE_KEYS[s.type];
     box.replaceChildren();
@@ -8255,7 +8376,7 @@
     resize3D();
     evaluateParams();
     sizeBase = null;
-    build3D(); fit3D(); build3DSizes();
+    build3D(); build3DLeft(); build3DRight(); layout3D(); fit3D();
     cancelAnimationFrame(v3.raf);
     loop3D();
   }
@@ -8293,7 +8414,7 @@
     if (one && (one.type === 'box' || one.type === 'taper')) updateCoverTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
     if (one && (one.type === 'taper' || one.type === 'cone' || one.type === 'planter')) updateShapeTip(one);
-    if (v3.open) { build3D(); syncSizes3D(); }
+    if (v3.open) { build3D(); syncSizes3D(); build3DRight(); }
   }
   function fullRender() {
     evaluateParams();
@@ -8302,7 +8423,7 @@
     for (const b of document.querySelectorAll('#unitSeg button')) { const on = b.dataset.u === doc.units; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
-    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); } else close3D(); }
+    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); build3DRight(); } else close3D(); }
   }
   function updateButtons() {
     $('#btnUndo').disabled = !undoStack.length && JSON.stringify(doc) === savedState;
@@ -8540,6 +8661,9 @@
     checkpoint();
     doc = TEMPLATES[b.dataset.template](doc.units, doc.sheet);
     sel.clear(); checkpoint(); fullRender(); fitView();
+    // Las plantillas de cajas se abren directo en 3D, con las opciones a la izquierda
+    const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
+    if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
   });
 
   // Caja cónica en pulgadas: base 5.5", boca 6.5" (alto y grosor se cambian en Parámetros)
