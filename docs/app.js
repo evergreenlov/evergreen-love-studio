@@ -555,8 +555,11 @@
     const flatAx = y => ({ eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [0, y, 0], out: [0, y ? 1 : -1, 0] });
     const baseP = { name: 'Base', w: W, h: D, place: 'bottom', holes: baseSlots, pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(0) };
     const lidP = { name: 'Tapa', w: W, h: D, place: 'top', holes: [], pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(Y) };
-    const panels = [baseP, lidP, plate, endA, endB, lonF, lonK];
-    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, Y, 0], hingeAxis: 'z', hingeMax: 150, sep, panels, dividers: [], layout: [[plate], [endA, endB], [lonF, lonK]], wall: false, libro: true };
+    // Para la vista 3D: la banda de bisagra (con sus cortes) queda entre la base y la tapa cuando la caja se abre plana
+    const slit = ([[ax, ay], [bx, by]]) => [[ax - 0.25, ay], [bx + 0.25, ay], [bx + 0.25, by], [ax - 0.25, by]];
+    const bandP = { name: 'Banda de bisagra', w: bw, h: D, place: 'bottom', band: true, holes: hingeLines(0, hm, bw, D - 2 * hm, bL, bB, bS).map(l => slit(l.pts)), pts: [[0, 0], [bw, 0], [bw, D], [0, D]], axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-bw, 0, 0], out: [0, -1, 0] } };
+    const panels = [baseP, lidP, bandP, plate, endA, endB, lonF, lonK];
+    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[plate], [endA, endB], [lonF, lonK]], wall: false, libro: true };
   }
 
   function boxModel(s, forView = false) {
@@ -7772,6 +7775,7 @@
       // Con cajón, el mueble queda fijo y el control desliza el cajón hacia afuera
       holder.userData.out = m.drawer ? [0, 0, 0] : q.axes ? q.axes.out : P.out;
       holder.userData.slide = !!q.drawer;
+      holder.userData.band = !!q.band;
       holder.userData.lid = !!m.hinge && (q.name === 'Tapa' || q.name === 'Cubierta de la tapa' || q.name === 'Cubierta Tapa');
       const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
@@ -7928,7 +7932,8 @@
         if (holder.userData.lid) {
           if (m.hingeAxis === 'z') holder.rotation.set(0, 0, ang); else holder.rotation.set(ang, 0, 0);
           holder.position.copy(P).sub(P.clone().applyEuler(holder.rotation));
-        } else { holder.rotation.set(0, 0, 0); holder.position.set(0, 0, 0); }
+          if (m.hingeShift) holder.position.x -= m.hingeShift * Math.min(1, ang / Math.PI);
+        } else { holder.rotation.set(0, 0, 0); holder.position.set(0, 0, 0); if (holder.userData.band) holder.visible = e > 0.02; }
       }
       $('#explodeLabel').textContent = e > 0.01 ? `Tapa abierta ${Math.round(e * maxDeg)}°` : 'Abrir la tapa';
       return;
@@ -8450,6 +8455,7 @@
     resize3D();
     evaluateParams();
     sizeBase = null;
+    { const sh = byId(id); if (sh && sh.type === 'box' && sh.p.tapa === 'libro') { $('#explode').value = '1'; } }
     build3D(); build3DLeft(); build3DRight(); layout3D(); fit3D();
     cancelAnimationFrame(v3.raf);
     loop3D();
