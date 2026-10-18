@@ -563,7 +563,11 @@
     // Para la vista 3D: la banda de bisagra (con sus cortes) queda entre la base y la tapa cuando la caja se abre plana
     const bandP = { name: 'Banda de bisagra', w: bw, h: D, place: 'bottom', band: true, holes: slits(0), pts: [[0, 0], [bw, 0], [bw, D], [0, D]], axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-bw, 0, 0], out: [0, -1, 0] } };
     const panels = [baseP, lidP, bandP, plate, endA, endB, lonF, lonK];
-    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[plate], [endA, endB], [lonF, lonK]], wall: false, libro: true };
+    // Plano de corte como el original: la placa al centro, paredes largas arriba y abajo, paredes de los extremos (de pie) a los lados
+    const a = H + t, spin = q => ({ ...q, w: a, h: Le, pts: q.pts.map(([x, y]) => [a - y, x]), holes: [], axes: undefined });
+    const eA2 = spin(endA), eB2 = spin(endB);
+    const PWd = 2 * W + bw, pos = new Map([[lonF, [a + sep, 0]], [plate, [a + sep, a + sep]], [lonK, [a + sep, a + sep + D + sep]], [eA2, [0, a + sep]], [eB2, [a + sep + PWd + sep, a + sep]]]);
+    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[lonF], [eA2, plate, eB2], [lonK]], wall: false, libro: true, libroPos: pos };
   }
 
   function boxModel(s, forView = false) {
@@ -1205,6 +1209,7 @@
   // Dónde queda cada pieza de la caja en el plano de corte (las más altas primero, en filas dentro de la cama)
   function boxPlacement(s, m) {
     const x0 = len(s, 'x'), y0 = len(s, 'y');
+    if (m.libroPos) return new Map([...m.libroPos].map(([q, [px, py]]) => [q, [x0 + px, y0 + py]]));
     const pieces = m.layout.flat().filter(Boolean).sort((a, b) => b.h - a.h);
     const maxW = Math.max(doc.sheet.w - Math.max(0, x0), ...pieces.map(q => q.w));
     let x = x0, y = y0, shelf = 0;
