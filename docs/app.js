@@ -527,7 +527,7 @@
     for (const ze of [mg, D - mg - t]) for (let i = 0; i < nX; i++) { const cx = mg + t + (i + 0.5) * pX; baseSlots.push(slotRect(cx - twX / 2, ze, cx + twX / 2, ze + t)); }
     const shift = (pl, dx) => pl.map(([x, y]) => [x + dx, y]);
     // Placa: tapa | banda de bisagra | base
-    const hm = Math.min(6 * t, D / 4);
+    const hm = Math.min(2, D / 8);                                                           // la bisagra va de esquina a esquina
     // Cortes de la bisagra: ranuras angostas con puntas (hexágonos alargados, ~0.45 de grosor de ancho), en columnas alternadas.
     // Son huecos reales (no líneas), así la banda se dobla de verdad.
     const sw = Math.max(0.8, 0.45 * t);
