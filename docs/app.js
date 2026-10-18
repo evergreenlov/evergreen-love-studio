@@ -144,7 +144,7 @@
   const MODES = { grupo: 'Solo agrupar', unir: 'Unir', restar: 'Restar', intersectar: 'Intersectar', excluir: 'Excluir (quita lo que se cruza)' };
   const REP_OPTS = { no: 'Sin repetir', fila: 'En fila', cuadricula: 'Cuadrícula', circular: 'Circular' };
   const JOINT_OPTS = { dedos: 'Con dedos (finger joint)', planas: 'Sin dedos (para pegar)' };
-  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta que sobresale por atrás (soporte de bisagra) y cubierta aparte', pivote: 'Tapa con bisagra de espigas (gira en agujeros de los lados)', pivoteLengua: 'Tapa con espigas laterales y lengüeta al frente (agarradera)', vivo: 'Tapa unida a la base con bisagra viva (una sola plancha)', no: 'Abierta' };
+  const LID_OPTS = { si: 'Con tapa', deslizante: 'Tapa deslizante', bisagra: 'Tapa con lengüeta que sobresale por atrás (soporte de bisagra) y cubierta aparte', pivote: 'Tapa con bisagra de espigas (gira en agujeros de los lados)', pivoteLengua: 'Tapa con espigas laterales y lengüeta al frente (agarradera)', vivo: 'Tapa unida a la base con bisagra viva (una sola plancha)', libro: 'Caja libro: placa con bisagra viva y paredes que se paran en ranuras', no: 'Abierta' };
   const GRIP_OPTS = { si: 'Con hueco para el dedo', no: 'Sin hueco' };
   const DRAWER_OPTS = { no: 'Sin cajón', si: 'Con cajón' };
   const ENGRAVE_OPTS = { auto: 'Automático', tapa: 'Tapa', frente: 'Frente', cajon: 'Frente del cajón' };
@@ -501,6 +501,64 @@
   }
 
   // Devuelve las piezas de la caja (en mm, cada una con su origen arriba a la izquierda) y cómo se arman en 3D.
+
+  // Caja libro: una plancha (tapa + banda de bisagra viva + base) con ranuras; las 4 paredes se paran en las ranuras de la base y se traban entre sí.
+  // W = ancho de la base (y de la tapa), D = fondo, H = alto de las paredes (sin las pestañas).
+  function libroModel(s, c) {
+    const { t, fw, sep, kerf, k, W, D, H, forView } = c;
+    if (!CL) return null;
+    const mg = s.p.margen && String(s.p.margen).trim() ? len(s, 'margen') : 1.5 * t;      // de la orilla de la placa a la pared
+    const ear = Math.max(2 * t, H * 0.45);                                                   // orejas de las paredes largas hacia la bisagra
+    const bw = s.p.bvAncho && String(s.p.bvAncho).trim() ? len(s, 'bvAncho') : H + 2 * t + ear;
+    const bL = s.p.bvLargo && String(s.p.bvLargo).trim() ? len(s, 'bvLargo') : 15;
+    const bB = s.p.bvPuente && String(s.p.bvPuente).trim() ? len(s, 'bvPuente') : 3;
+    const bS = s.p.bvPaso && String(s.p.bvPaso).trim() ? len(s, 'bvPaso') : 2;
+    const Sx = W - 2 * mg - 2 * t, Sz = D - 2 * mg - 2 * t;
+    if (![mg, ear, bw, bL, bB, bS, Sx, Sz].every(Number.isFinite) || mg < 0 || bw < 2 * t || bL <= 0 || bB < 0 || bS <= 0 || Sx < 3 * t || Sz < 3 * t || H < 4 * t) return null;
+    const etw = Math.min(15, H / 3), r = Math.min(10, H / 4), pr = Math.min(8, D / 8, W / 8);
+    const nX = Math.max(1, Math.floor(Sx / (2 * fw))), nZ = Math.max(1, Math.floor(Sz / (2 * fw)));
+    const pX = Sx / nX, pZ = Sz / nZ, twX = Math.min(fw, pX * 0.6), twZ = Math.min(fw, pZ * 0.6);
+    const arc = (cx, cy, rr, a0, a1, n = 8) => Array.from({ length: n + 1 }, (_, i) => { const a = a0 + (a1 - a0) * i / n; return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)]; });
+    const roundRect = (x0, y0, w, h, rr) => cleanPolygon([...arc(x0 + w - rr, y0 + rr, rr, -Math.PI / 2, 0), ...arc(x0 + w - rr, y0 + h - rr, rr, 0, Math.PI / 2), ...arc(x0 + rr, y0 + h - rr, rr, Math.PI / 2, Math.PI), ...arc(x0 + rr, y0 + rr, rr, Math.PI, 1.5 * Math.PI)]);
+    const x0 = W + bw;
+    const slotRect = (xa, za, xb, zb) => [[xa + k, za + k], [xb - k, za + k], [xb - k, zb - k], [xa + k, zb - k]];
+    const baseSlots = [];
+    for (const xe of [mg, W - mg - t]) for (let i = 0; i < nZ; i++) { const cz = mg + t + (i + 0.5) * pZ; baseSlots.push(slotRect(xe, cz - twZ / 2, xe + t, cz + twZ / 2)); }
+    for (const ze of [mg, D - mg - t]) for (let i = 0; i < nX; i++) { const cx = mg + t + (i + 0.5) * pX; baseSlots.push(slotRect(cx - twX / 2, ze, cx + twX / 2, ze + t)); }
+    const shift = (pl, dx) => pl.map(([x, y]) => [x + dx, y]);
+    // Placa: tapa | banda de bisagra | base
+    const hm = Math.min(6 * t, D / 4);
+    const lines = hingeLines(W, hm, bw, D - 2 * hm, bL, bB, bS).map(l => l.pts);
+    const plate = { name: 'Placa (tapa + bisagra + base)', w: 2 * W + bw, h: D, place: 'plate', only2d: true, holes: baseSlots.map(sl => shift(sl, x0)), pts: roundRect(-k, -k, 2 * W + bw + 2 * k, D + 2 * k, pr + k), lines };
+    // Paredes de los extremos (largo = fondo): pestañas abajo, y puntas arriba que entran en las ranuras de las paredes largas
+    const Le = D - 2 * mg;
+    const endPts = [[0, 0], [Le, 0], [Le, etw], [Le - t, etw], [Le - t, H]];
+    for (let i = nZ - 1; i >= 0; i--) { const cu = t + (i + 0.5) * pZ; endPts.push([cu + twZ / 2, H], [cu + twZ / 2, H + t], [cu - twZ / 2, H + t], [cu - twZ / 2, H]); }
+    endPts.push([t, H], [t, etw], [0, etw]);
+    // Paredes largas: oreja redondeada hacia la bisagra, ranuras abiertas arriba para las paredes de los extremos
+    const Lw = ear + W - mg + t;
+    const sl = [[ear + mg, ear + mg + t], [ear + W - mg - t, ear + W - mg]];
+    const longPts = [[r, 0]];
+    for (const [a, b] of sl) longPts.push([a, 0], [a, etw], [b, etw], [b, 0]);
+    longPts.push([Lw, 0], [Lw, H]);
+    for (let i = nX - 1; i >= 0; i--) { const cu = ear + mg + t + (i + 0.5) * pX; longPts.push([cu + twX / 2, H], [cu + twX / 2, H + t], [cu - twX / 2, H + t], [cu - twX / 2, H]); }
+    longPts.push(...arc(r, H - r, r, Math.PI / 2, Math.PI), ...arc(r, r, r, Math.PI, 1.5 * Math.PI));
+    const kc = pts => kerfOffset(cleanPolygon(pts), k);
+    const Y = t + H, up = [0, -1, 0];
+    const wall = (name, w, pts, place, axes) => ({ name, w, h: H + t, place, holes: [], pts: kc(pts), axes });
+    const endAx = x => ({ eu: [0, 0, 1], ev: up, ew: [1, 0, 0], o: [x, Y, mg], out: [x < W / 2 ? -1 : 1, 0, 0] });
+    const lonAx = (z, dir) => ({ eu: [1, 0, 0], ev: up, ew: [0, 0, -1], o: [-ear, Y, z], out: [0, 0, dir] });
+    const endA = wall('Pared lado bisagra', Le, endPts, 'left', endAx(mg));
+    const endB = wall('Pared lado opuesto', Le, endPts, 'right', endAx(W - mg - t));
+    const lonF = wall('Pared del frente', Lw, longPts, 'front', lonAx(mg + t, -1));
+    const lonK = wall('Pared de atrás', Lw, longPts, 'back', lonAx(D - mg, 1));
+    const flatAx = y => ({ eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [0, y, 0], out: [0, y ? 1 : -1, 0] });
+    const baseP = { name: 'Base', w: W, h: D, place: 'bottom', holes: baseSlots, pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(0) };
+    const lidP = { name: 'Tapa', w: W, h: D, place: 'top', holes: [], pts: roundRect(-k, -k, W + 2 * k, D + 2 * k, pr + k), axes: flatAx(Y) };
+    const panels = [baseP, lidP, plate, endA, endB, lonF, lonK];
+    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, Y, 0], hingeAxis: 'z', hingeMax: 150, sep, panels, dividers: [], layout: [[plate], [endA, endB], [lonF, lonK]], wall: false, libro: true };
+  }
+
   function boxModel(s, forView = false) {
     const t = len(s, 't', 3), fw = len(s, 'dedo', 10), sep = len(s, 'sep', 5);
     const kerf = forView ? 0 : len(s, 'kerf', 0), k = kerf / 2;
@@ -514,6 +572,7 @@
     const slotH = t + (s.p.holgura && String(s.p.holgura).trim() ? len(s, 'holgura') : 0.15);
     if (s.p.medidas === 'interiores') { W += 2 * t; D += 2 * t; H += lid ? 2 * t : slide ? t + mTop + slotH : t; }
     if (![t, fw, sep, kerf, W, D, H, mTop, slotH].every(Number.isFinite) || t <= 0 || W <= 2 * t || D <= 3 * t || H <= 2 * t) return null;
+    if (lidMode === 'libro' && !wall) return libroModel(s, { t, fw, sep, kerf, k, W, D, H, forView });
     const lidBottom = H - mTop - slotH; // altura (Y) donde se apoya la tapa deslizante
     if (slide && (mTop < 0 || lidBottom <= 3 * t)) return null;
     const innerTop = lid ? H - t : slide ? lidBottom : H;
@@ -4680,7 +4739,7 @@
     if (drawer && key === 'tapa') return true;
     if (key === 'lengua') return drawer || !(s.p.tapa === 'bisagra' || s.p.tapa === 'pivote' || s.p.tapa === 'pivoteLengua');
     if (key === 'tapaCub') return drawer || s.p.tapa !== 'bisagra';
-    if (key === 'bvAncho' || key === 'bvLargo' || key === 'bvPuente' || key === 'bvPaso') return drawer || s.p.tapa !== 'vivo';
+    if (key === 'bvAncho' || key === 'bvLargo' || key === 'bvPuente' || key === 'bvPaso') return drawer || !(s.p.tapa === 'vivo' || s.p.tapa === 'libro');
     if (key === 'grosorTapaCub') return drawer || s.p.tapa !== 'bisagra' || s.p.tapaCub === 'no';
     if (key === 'holgura') return drawer || !(s.p.tapa === 'deslizante' || s.p.tapa === 'bisagra' || s.p.tapa === 'pivote');
     if (key === 'borde') return drawer || s.p.tapa !== 'deslizante';
@@ -7283,7 +7342,7 @@
   function boxTemplate(uniones = 'dedos', units = 'mm', sheet, tapa = 'si', cajon = 'no') {
     const d = newDoc(units);
     if (sheet) d.sheet = { ...sheet };
-    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : tapa === 'pivote' ? 'Caja con bisagra de espigas' : tapa === 'pivoteLengua' ? 'Caja con lengüeta al frente y bisagra de espigas' : tapa === 'vivo' ? 'Caja de una plancha con bisagra viva' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
+    d.name = cajon === 'si' ? 'Caja con cajón' : tapa === 'deslizante' ? 'Caja con tapa deslizante' : tapa === 'bisagra' ? 'Caja con tapa de lengüeta' : tapa === 'pivote' ? 'Caja con bisagra de espigas' : tapa === 'pivoteLengua' ? 'Caja con lengüeta al frente y bisagra de espigas' : tapa === 'vivo' ? 'Caja de una plancha con bisagra viva' : tapa === 'libro' ? 'Caja libro (una plancha con bisagra viva)' : uniones === 'dedos' ? 'Caja con dedos' : 'Caja para pegar';
     const values = units === 'in'
       ? [['ancho', '4'], ['profundo', '3'], ['alto', '2.5'], ['grosor', '0.125'], ['dedo', '0.4'], ['kerf', '0.004'], ['sep', '0.2']]
       : [['ancho', '100'], ['profundo', '80'], ['alto', '60'], ['grosor', '3'], ['dedo', '10'], ['kerf', '0.1'], ['sep', '5']];
@@ -7437,6 +7496,11 @@
     'box-living-hinge': (u, s) => {
       const d = boxTemplate('dedos', u, s, 'vivo'), inch = u === 'in', q = mm => inch ? fmt(Math.round(mm / 25.4 * 1000) / 1000) : fmt(mm);
       d.params = [['ancho', q(200)], ['profundo', q(130)], ['alto', q(60)], ['grosor', q(3)], ['dedo', q(10)], ['kerf', inch ? '0.004' : '0.1'], ['sep', q(5)]].map(([name, expr]) => ({ name, expr }));
+      return d;
+    },
+    'box-book': (u, s) => {
+      const d = boxTemplate('dedos', u, s, 'libro'), inch = u === 'in', q = mm => inch ? fmt(Math.round(mm / 25.4 * 1000) / 1000) : fmt(mm);
+      d.params = [['ancho', q(170)], ['profundo', q(235)], ['alto', q(45)], ['grosor', q(4)], ['dedo', q(35)], ['kerf', inch ? '0.004' : '0.1'], ['sep', q(5)]].map(([name, expr]) => ({ name, expr }));
       return d;
     },
     'box-pivot-tab-lid': (u, s) => boxTemplate('dedos', u, s, 'pivoteLengua'),
@@ -7890,7 +7954,7 @@
   /* ----- Estudio de plantilla: opciones a la izquierda, 3D en el centro, detalles y descargas a la derecha ----- */
   const LID_STYLES = [
     ['no', 'Abierta'], ['si', 'Tapa con dedos'], ['deslizante', 'Tapa deslizante'], ['bisagra', 'Lengüeta y cubierta'],
-    ['pivote', 'Espigas'], ['pivoteLengua', 'Espigas y lengüeta'], ['vivo', 'Bisagra viva'],
+    ['pivote', 'Espigas'], ['pivoteLengua', 'Espigas y lengüeta'], ['vivo', 'Bisagra viva'], ['libro', 'Caja libro'],
   ];
   const lidIcon = k => {
     const box = '<rect x="6" y="14" width="28" height="13" rx="1"/>';
@@ -7902,6 +7966,7 @@
       pivote: '<path d="M5 14l4-9h26l-2 9"/><circle cx="6" cy="12" r="2"/>',
       pivoteLengua: '<path d="M5 14l4-9h26l-2 9"/><circle cx="6" cy="12" r="2"/><rect x="17" y="14" width="6" height="3"/>',
       vivo: '<path d="M5 14l4-9h26l-2 9"/><path d="M5 14c2 2 3-2 5 0" />',
+      libro: '<path d="M5 14l-3-3h8M5 14l4-9h26l-2 9"/><path d="M2 11v3M4 11v3"/>',
     }[k] || '';
     return `<svg viewBox="0 0 40 30" width="40" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${box}${lid}</svg>`;
   };
@@ -7912,6 +7977,7 @@
     bisagra: ['Arma las paredes y la base.', 'Pega el soporte de bisagra por fuera de la pared de atrás, a la altura de la tapa.', 'Pasa la lengüeta de la tapa por la ranura del soporte y pega la cubierta encima de la tapa.'],
     pivote: ['Arma las paredes con la base y pega el apoyo en U por dentro, debajo de la tapa.', 'Mete las espigas de la tapa en los agujeros de los lados antes de cerrar la última pared.'],
     pivoteLengua: ['Arma las paredes con la base y pega el apoyo en U por dentro.', 'Mete las espigas de la tapa en los agujeros de los lados.', 'La lengüeta al frente queda en la muesca: sirve para levantar la tapa.'],
+    libro: ['Dobla suavemente la banda de la bisagra varias veces.', 'Mete las pestañas de las paredes largas en las ranuras de la base y pon las paredes de los extremos: se traban entre sí por las muescas.', 'Pega las paredes por dentro si quieres; la tapa se cierra sobre ellas.'],
     vivo: ['Dobla suavemente la banda de la bisagra varias veces antes de armar.', 'Une las paredes por sus dedos y pégalas sobre la base.', 'Cierra la tapa sobre la caja: el hueco del frente deja meter el dedo.'],
   };
   let v3SizesEl = null;
@@ -7931,12 +7997,12 @@
       for (const [k, label] of LID_STYLES) {
         const b = h('button', { class: 'v3card' + ((s.p.tapa || 'si') === k ? ' active' : ''), title: LID_OPTS[k], 'aria-pressed': String((s.p.tapa || 'si') === k) });
         b.innerHTML = lidIcon(k) + `<span>${label}</span>`;
-        b.onclick = () => apply(() => { s.p.tapa = k; if (['pivote', 'pivoteLengua', 'vivo', 'bisagra'].includes(k)) s.p.uniones = 'dedos'; });
+        b.onclick = () => apply(() => { s.p.tapa = k; if (['pivote', 'pivoteLengua', 'vivo', 'bisagra', 'libro'].includes(k)) s.p.uniones = 'dedos'; });
         grid.append(b);
       }
       box.append(grid);
       box.append(sec('Uniones'));
-      const need = ['pivote', 'pivoteLengua', 'vivo'].includes(s.p.tapa);
+      const need = ['pivote', 'pivoteLengua', 'vivo', 'libro'].includes(s.p.tapa);
       box.append(h('div', { class: 'v3row' },
         ...[['dedos', 'Con dedos'], ['planas', 'Para pegar']].map(([k, label]) => h('button', { class: 'v3chip' + ((s.p.uniones || 'dedos') === k ? ' active' : ''), disabled: need && k === 'planas' ? '' : null, onclick: () => apply(() => { s.p.uniones = k; }) }, label))));
       box.append(sec('Cubierta de otra madera'));
@@ -7978,6 +8044,12 @@
     const area = cut.reduce((a2, q) => a2 + Math.abs(shoelace(q.pts)) - (q.holes || []).reduce((z, hl) => z + Math.abs(shoelace(hl)), 0), 0);
     const flat = (m.layout || []).flat().filter(Boolean);
     const sheet = doc.sheet, over = flat.filter(q => !((q.w <= sheet.w && q.h <= sheet.h) || (q.h <= sheet.w && q.w <= sheet.h)));
+    let packW = 0, packH = 0, packOver = false;
+    if (!over.length && flat.length) {
+      const x0 = len(s, 'x'), y0 = len(s, 'y');
+      for (const [q, [px, py]] of boxPlacement(s, m)) { packW = Math.max(packW, px + q.w - x0); packH = Math.max(packH, py + q.h - y0); }
+      packOver = packW > sheet.w - Math.max(0, x0) + 0.01 || packH > sheet.h - Math.max(0, y0) + 0.01;
+    }
     box.append(h('div', { class: 'v3sec' }, 'Detalles'),
       row('Exterior', `${u(m.W)} × ${u(m.D)} × ${u(m.H)} ${unitLabel()}`),
       row('Grosor', `${fmt(m.t / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`),
@@ -7986,6 +8058,8 @@
       h('div', { class: 'v3sec' }, 'Revisión'),
       over.length
         ? h('p', { class: 'v3check bad' }, `${over.length} pieza(s) no caben en tu plancha de ${u(sheet.w)} × ${u(sheet.h)} ${unitLabel()}: ${over.map(q => q.name).join(', ')}.`)
+        : packOver
+        ? h('p', { class: 'v3check bad' }, `Cada pieza cabe, pero juntas piden ${u(packW)} × ${u(packH)} ${unitLabel()} y tu plancha es de ${u(sheet.w)} × ${u(sheet.h)}. Usa «Acomodar» o una plancha más grande.`)
         : h('p', { class: 'v3check ok' }, `Todo cabe en tu plancha de ${u(sheet.w)} × ${u(sheet.h)} ${unitLabel()} (cambia la plancha en Propiedades → Documento).`));
     const steps = s.type === 'box' ? (ASSEMBLY[s.p.tapa || 'si'] || []) : [];
     if (steps.length) box.append(h('div', { class: 'v3sec' }, 'Armado'), h('ol', { class: 'v3steps' }, ...steps.map(t => h('li', {}, t))));
