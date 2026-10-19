@@ -471,3 +471,43 @@ button.wide { width: 100%; margin-top: 10px; }
 .view3d.tiny .v3left { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--border); }
 .view3d.tiny .v3cards { grid-template-columns: repeat(4, 1fr); }
 .view3d.tiny .view3d-help { left: 12px; }
+
+/* Estudio: centro con pestañas, plano de corte, controles flotantes, secciones numeradas */
+.v3center { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
+.v3center .view3d-canvas { flex: 1; min-height: 0; }
+.view3d-canvas.off { visibility: hidden; }
+.v3tabs { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.v3tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 7px; font-size: 13px; color: var(--muted); }
+.v3tabs button.active { background: var(--accent); color: #fff; font-weight: 600; }
+.v3plan { position: absolute; inset: 0; overflow: auto; padding: 56px 16px 16px; background: var(--canvas); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.v3plan[hidden] { display: none; }
+.v3plan-svg { width: 100%; max-width: 1100px; height: auto; max-height: calc(100% - 40px); }
+.v3plan-sheet { fill: var(--panel); stroke: var(--muted); stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.v3plan-lbl { fill: var(--muted); font-family: inherit; }
+.v3plan-piece { fill: #e8cfa4; stroke: #d0342c; stroke-width: 1.2px; vector-effect: non-scaling-stroke; }
+.v3plan-piece.out { fill: #f6c48b; stroke: #e06a00; }
+.v3plan-line { fill: none; stroke: #d0342c; stroke-width: 0.8px; vector-effect: non-scaling-stroke; }
+.v3plan-name { fill: #6b4a2b; font-family: inherit; opacity: .75; pointer-events: none; }
+.v3plan-note, .v3plan-empty { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+.v3plan-note.bad { color: #b4530f; }
+.v3float { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 2; display: flex; gap: 18px; align-items: center; padding: 10px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.v3float[hidden], .v3float .range[hidden] { display: none; }
+.v3float .range { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12px; color: var(--muted); }
+.v3float input[type=range] { width: 150px; }
+.v3part { margin: 14px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.v3part:first-child { margin-top: 0; }
+.v3grp { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; background: var(--bg, #fff); display: flex; flex-direction: column; gap: 8px; }
+.v3grp-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
+.v3grp-h span { color: var(--muted); font-size: 12px; text-align: right; }
+.v3grp .v3sizes { display: flex; flex-direction: column; gap: 6px; padding: 0; background: none; border: 0; }
+.v3size { display: grid; grid-template-columns: 62px 1fr 64px auto; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.v3size input[type=range] { width: 100%; min-width: 0; }
+input.v3size-val { width: 64px; min-width: 0; padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.v3size-u { font-size: 12px; }
+.v3dims { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.v3dims div { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.v3dims small { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.v3dims b { font-size: 12px; font-variant-numeric: tabular-nums; }
+.v3link { margin-top: 8px; border: 0; background: none; color: var(--muted); text-decoration: underline; padding: 4px 0; }
+.view3d.tiny .v3float { bottom: 8px; gap: 10px; padding: 8px 10px; }
+.view3d.tiny .v3float input[type=range] { width: 110px; }

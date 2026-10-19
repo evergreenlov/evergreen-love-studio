@@ -567,7 +567,7 @@
     const a = H + t, spin = q => ({ ...q, w: a, h: Le, pts: q.pts.map(([x, y]) => [a - y, x]), holes: [], axes: undefined });
     const eA2 = spin(endA), eB2 = spin(endB);
     const PWd = 2 * W + bw, pos = new Map([[lonF, [a + sep, 0]], [plate, [a + sep, a + sep]], [lonK, [a + sep, a + sep + D + sep]], [eA2, [0, a + sep]], [eB2, [a + sep + PWd + sep, a + sep]]]);
-    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[lonF], [eA2, plate, eB2], [lonK]], wall: false, libro: true, libroPos: pos };
+    return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[lonF], [eA2, plate, eB2], [lonK]], wall: false, libro: true, libroPos: pos, inner: [Sx, Sz, H] };
   }
 
   function boxModel(s, forView = false) {
@@ -7934,26 +7934,27 @@
   function applyExplode() {
     const m = v3.model;
     if (!m) return;
-    const e = parseFloat($('#explode').value) || 0, dist = Math.max(m.W, m.D, m.H) * 0.45 * e;
-    if (m.hinge && m.hingePivot) {
-      // Caja con tapa de lengüeta: el control abre y cierra la tapa (con su cubierta), girando sobre el borde de atrás
-      const T = window.THREE, maxDeg = m.hingeMax || 110, ang = e * maxDeg * Math.PI / 180, P = new T.Vector3(...m.hingePivot);
-      for (const holder of v3.group.children) {
-        if (holder.userData.lid) {
-          if (m.hingeAxis === 'z') holder.rotation.set(0, 0, ang); else holder.rotation.set(ang, 0, 0);
-          holder.position.copy(P).sub(P.clone().applyEuler(holder.rotation));
-          if (m.hingeShift) holder.position.x -= m.hingeShift * Math.min(1, ang / Math.PI);
-        } else { holder.rotation.set(0, 0, 0); holder.position.set(0, 0, 0); if (holder.userData.band) holder.visible = e > 0.02; }
-      }
-      $('#explodeLabel').textContent = e > 0.01 ? `Tapa abierta ${Math.round(e * maxDeg)}°` : 'Abrir la tapa';
-      return;
-    }
+    const e = parseFloat($('#explode').value) || 0, o = parseFloat($('#openLid').value) || 0, dist = Math.max(m.W, m.D, m.H) * 0.45 * e;
+    const T = window.THREE, hingeOn = !!(m.hinge && m.hingePivot && T);
+    const maxDeg = m.hingeMax || 110, ang = o * maxDeg * Math.PI / 180, P = hingeOn ? new T.Vector3(...m.hingePivot) : null;
     for (const holder of v3.group.children) {
-      const [x, y, z] = holder.userData.out;
+      const [x, y, z] = holder.userData.out || [0, 0, 0];
+      holder.rotation.set(0, 0, 0);
       holder.position.set(x * dist, y * dist, z * dist);
-      if (holder.userData.slide && m.drawer) holder.position.z = -e * m.drawer.Dd * 0.85;
+      if (hingeOn && holder.userData.lid) {
+        // La tapa (con su cubierta) gira sobre la bisagra; además se separa con las demás piezas
+        if (m.hingeAxis === 'z') holder.rotation.set(0, 0, ang); else holder.rotation.set(ang, 0, 0);
+        holder.position.add(P.clone().sub(P.clone().applyEuler(holder.rotation)));
+        if (m.hingeShift) holder.position.x -= m.hingeShift * Math.min(1, ang / Math.PI);
+      }
+      if (holder.userData.band) holder.visible = o > 0.02;
+      if (holder.userData.slide && m.drawer) holder.position.z = -o * m.drawer.Dd * 0.85;
     }
-    $('#explodeLabel').textContent = m.drawer ? 'Abrir cajón' : 'Separar piezas';
+    const lidW = $('#openLidWrap'), expW = $('#explodeWrap');
+    if (lidW) lidW.hidden = !(hingeOn || m.drawer);
+    if (expW) expW.hidden = !!m.drawer;
+    $('#openLidLabel').textContent = m.drawer ? (o > 0.01 ? 'Cajón abierto' : 'Abrir cajón') : o > 0.01 ? `Tapa abierta ${Math.round(o * maxDeg)}°` : 'Abrir la tapa';
+    $('#explodeLabel').textContent = 'Separar piezas';
   }
   function fit3D() {
     const m = v3.model;
@@ -8004,31 +8005,56 @@
     box.replaceChildren();
     if (!s || v3.art || v3.gid) { $('#v3Left').hidden = true; return; }
     $('#v3Left').hidden = false;
-    const sec = t => h('div', { class: 'v3sec' }, t);
+    const m = v3.model;
     const apply = fn => { fn(); checkpoint(); fullRender(); build3DLeft(); build3DRight(); };
-    if (s.type === 'box' && s.p.pared !== 'si' && s.p.cajon !== 'si') {
-      box.append(sec('Estilo de la caja'));
+    const uu = v => fmt(v / unitMM, isInch() ? 2 : 1);
+    // Secciones numeradas (1 · Caja, 2 · Construcción) y tarjetas con su título y el valor elegido a la derecha
+    const part = (n, title) => box.append(h('div', { class: 'v3part' }, `${n} · ${title}`));
+    const card = (title, value) => { const c = h('section', { class: 'v3grp' }, h('div', { class: 'v3grp-h' }, h('b', {}, title), value ? h('span', {}, value) : null)); box.append(c); return c; };
+    const isBox = s.type === 'box' && s.p.pared !== 'si' && s.p.cajon !== 'si';
+    part(1, s.type === 'box' ? 'Caja' : 'Pieza');
+    if (isBox) {
+      const cur = s.p.tapa || 'si', label = (LID_STYLES.find(x => x[0] === cur) || [0, ''])[1];
+      const c = card('Estilo de la caja', label);
       const grid = h('div', { class: 'v3cards' });
-      for (const [k, label] of LID_STYLES) {
-        const b = h('button', { class: 'v3card' + ((s.p.tapa || 'si') === k ? ' active' : ''), title: LID_OPTS[k], 'aria-pressed': String((s.p.tapa || 'si') === k) });
-        b.innerHTML = lidIcon(k) + `<span>${label}</span>`;
-        b.onclick = () => apply(() => { s.p.tapa = k; if (['pivote', 'pivoteLengua', 'vivo', 'bisagra', 'libro'].includes(k)) s.p.uniones = 'dedos'; });
+      for (const [k, lb] of LID_STYLES) {
+        const b = h('button', { class: 'v3card' + (cur === k ? ' active' : ''), title: LID_OPTS[k], 'aria-pressed': String(cur === k) });
+        b.innerHTML = lidIcon(k) + `<span>${lb}</span>`;
+        b.onclick = () => apply(() => { s.p.tapa = k; if (['pivote', 'pivoteLengua', 'vivo', 'bisagra', 'libro'].includes(k)) s.p.uniones = 'dedos'; if (k === 'libro') s.p.medidas = 'exteriores'; });
         grid.append(b);
       }
-      box.append(grid);
-      box.append(sec('Uniones'));
-      const need = ['pivote', 'pivoteLengua', 'vivo', 'libro'].includes(s.p.tapa);
-      box.append(h('div', { class: 'v3row' },
-        ...[['dedos', 'Con dedos'], ['planas', 'Para pegar']].map(([k, label]) => h('button', { class: 'v3chip' + ((s.p.uniones || 'dedos') === k ? ' active' : ''), disabled: need && k === 'planas' ? '' : null, onclick: () => apply(() => { s.p.uniones = k; }) }, label))));
-      box.append(sec('Cubierta de otra madera'));
-      box.append(h('div', { class: 'v3row' },
-        ...[['no', 'Sin cubierta'], ['si', 'Con cubierta']].map(([k, label]) => h('button', { class: 'v3chip' + ((s.p.cubierta || 'no') === k ? ' active' : ''), onclick: () => apply(() => { s.p.cubierta = k; }) }, label))));
+      c.append(grid);
     }
+    // Medidas: exterior / interior, deslizadores con número, y las dos medidas a la vista
+    const sz = card('Medidas', ' ');
+    sz.querySelector('.v3grp-h span').classList.add('v3hdr-size');
+    const canInner = s.type === 'box' && s.p.tapa !== 'libro';
+    if (canInner) {
+      const inner = s.p.medidas === 'interiores';
+      const setMode = mode => apply(() => {
+        // la caja no cambia: se pasan las medidas a la otra forma de medir
+        const before = boxModel(s, true);
+        s.p.medidas = mode;
+        const after = boxModel(s, true);
+        if (!before || !after) return;
+        for (const [key, d] of [['ancho', after.W - before.W], ['profundo', after.D - before.D], ['alto', after.H - before.H]]) {
+          const v = len(s, key) - d; if (!(v > 0)) continue;
+          setSizeParam(s, key, v / unitMM);
+        }
+      });
+      sz.append(h('div', { class: 'v3row' },
+        h('button', { class: 'v3chip' + (!inner ? ' active' : ''), onclick: () => inner && setMode('exteriores') }, 'Medida exterior'),
+        h('button', { class: 'v3chip' + (inner ? ' active' : ''), onclick: () => !inner && setMode('interiores') }, 'Medida interior')));
+    }
+    sz.append(v3SizesEl);
+    build3DSizes();
+    sz.append(h('div', { class: 'v3dims' }));
+    updateDims3D();
+    part(2, 'Construcción');
     // Grosor de la madera
-    const tKey = s.p.t !== undefined ? 't' : null;
-    if (tKey) {
-      box.append(sec('Grosor de la madera'));
+    if (s.p.t !== undefined) {
       const cur = len(s, 't', 3), near = FIT_THICK.find(x => Math.abs(x[1] - cur) < 0.3);
+      const c = card('Grosor de la madera', `${fmt(cur / unitMM, isInch() ? 3 : 1)} ${unitLabel()}`);
       const sel2 = h('select', { 'aria-label': 'Grosor de la madera' }, ...FIT_THICK.map(([l, v]) => h('option', { value: String(v) }, l)), h('option', { value: 'otro' }, near ? 'Otro…' : `Actual: ${fmt(cur / unitMM, 3)} ${unitLabel()}`));
       sel2.value = near ? String(near[1]) : 'otro';
       sel2.onchange = () => {
@@ -8036,14 +8062,40 @@
         const mm = parseFloat(sel2.value), nm = String(s.p.t).trim(), q = doc.params.find(p => p.name === nm);
         apply(() => { if (q) q.expr = fmt(mm / unitMM, 4); else s.p.t = fmt(mm / unitMM, 4); });
       };
-      box.append(sel2);
+      c.append(sel2);
     }
-    // las medidas (deslizadores) van debajo
-    const sizes = v3SizesEl;
-    box.append(sec('Medidas'));
-    box.append(sizes);
-    build3DSizes();
+    if (isBox) {
+      const need = ['pivote', 'pivoteLengua', 'vivo', 'libro'].includes(s.p.tapa);
+      const un = s.p.uniones || 'dedos';
+      card('Uniones', un === 'dedos' ? 'Con dedos' : 'Para pegar').append(h('div', { class: 'v3row' },
+        ...[['dedos', 'Con dedos'], ['planas', 'Para pegar']].map(([k, label]) => h('button', { class: 'v3chip' + (un === k ? ' active' : ''), disabled: need && k === 'planas' ? '' : null, onclick: () => apply(() => { s.p.uniones = k; }) }, label))));
+      if (s.p.tapa !== 'libro') {
+        const cv = s.p.cubierta || 'no';
+        card('Cubierta de otra madera', cv === 'si' ? 'Con cubierta' : 'Sin cubierta').append(h('div', { class: 'v3row' },
+          ...[['no', 'Sin cubierta'], ['si', 'Con cubierta']].map(([k, label]) => h('button', { class: 'v3chip' + (cv === k ? ' active' : ''), onclick: () => apply(() => { s.p.cubierta = k; }) }, label))));
+      }
+    }
     resize3D();
+  }
+  // Medidas exterior y por dentro (se actualizan al mover los deslizadores)
+  function updateDims3D() {
+    const el = $('#v3Style .v3dims'), hd = $('#v3Style .v3hdr-size'), s = v3.id && byId(v3.id), m = v3.model;
+    if (!el || !s || !m) return;
+    const uu = v => fmt(v / unitMM, isInch() ? 2 : 1), ext = `${uu(m.W)} × ${uu(m.D)} × ${uu(m.H)}`;
+    if (hd) hd.textContent = `${ext} ${unitLabel()}`;
+    let inn = m.inner || null;
+    if (!inn && s.type === 'box' && !m.drawer) {
+      // lo que la caja suma a la medida por dentro (paredes, base y tapa), igual que «Medida interior»
+      const a = boxModel({ ...s, p: { ...s.p, medidas: 'exteriores' } }, true), b = boxModel({ ...s, p: { ...s.p, medidas: 'interiores' } }, true);
+      if (a && b) inn = [m.W - (b.W - a.W), m.D - (b.D - a.D), m.H - (b.H - a.H)];
+    }
+    el.replaceChildren(h('div', {}, h('small', {}, 'Exterior'), h('b', {}, ext)));
+    if (inn && inn.every(v => v > 0)) el.append(h('div', {}, h('small', {}, 'Por dentro'), h('b', {}, `${uu(inn[0])} × ${uu(inn[1])} × ${uu(inn[2])}`)));
+  }
+  // Cambia una medida de la figura: si es un parámetro, el parámetro; si es un número, la figura (valor en unidades del documento)
+  function setSizeParam(s, key, v) {
+    const nm = String(s.p[key]).trim(), q = doc.params.find(p => p.name === nm);
+    if (q) q.expr = fmt(v, 4); else s.p[key] = fmt(v, 4);
   }
   // Panel derecho: resumen, avisos, armado y descargas
   function build3DRight() {
@@ -8082,7 +8134,49 @@
       h('div', { class: 'v3row' },
         h('button', { class: 'primary', onclick: () => withFonts(exportSVG) }, 'SVG'),
         h('button', { class: 'primary', onclick: () => withFonts(exportDXF) }, 'DXF'),
-        h('button', { onclick: saveFile }, 'Guardar')));
+        h('button', { onclick: saveFile }, 'Guardar')),
+      doc.template && TEMPLATES[doc.template] ? h('button', { class: 'v3link', title: 'Vuelve a abrir esta plantilla con sus medidas de fábrica', onclick: () => loadTemplate(doc.template) }, 'Empezar de nuevo') : null);
+  }
+
+  // Pestañas del centro: la caja en 3D o el plano de corte (las piezas planas sobre tu plancha)
+  let tab3D = '3d';
+  function setTab3D(k) {
+    tab3D = k;
+    for (const [id, on] of [['#v3Tab3d', k === '3d'], ['#v3TabPlan', k === 'plan']]) { const b = $(id); if (b) { b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); } }
+    $('#view3dCanvas').classList.toggle('off', k !== '3d');
+    $('#v3Float').hidden = k !== '3d';
+    $('#v3Plan').hidden = k !== 'plan';
+    $('.view3d-help').hidden = k !== '3d';
+    if (k === 'plan') buildPlan3D(); else resize3D();
+  }
+  function buildPlan3D() {
+    const el = $('#v3Plan');
+    if (!el || el.hidden) return;
+    el.replaceChildren();
+    const s = v3.id && byId(v3.id), m = v3.model;
+    if (!s || !m || !m.layout || v3.art || v3.gid) { el.append(h('p', { class: 'v3plan-empty' }, 'El plano de corte se ve en las plantillas (cajas, macetas, canastas…). Tu diseño está en el lienzo.')); return; }
+    const placed = boxPlacement(s, m), sheet = doc.sheet;
+    let x0 = 0, y0 = 0, x1 = sheet.w, y1 = sheet.h;
+    for (const [q, [px, py]] of placed) { x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px + q.w); y1 = Math.max(y1, py + q.h); }
+    const W = x1 - x0, H = y1 - y0, pad = Math.max(W, H) * 0.04, fs = Math.max(W, H) / 55;
+    const svg = svgEl('svg', { viewBox: `${x0 - pad} ${y0 - pad - fs * 1.6} ${W + 2 * pad} ${H + 2 * pad + fs * 1.6}`, class: 'v3plan-svg', role: 'img', 'aria-label': 'Plano de corte' });
+    svgEl('rect', { x: 0, y: 0, width: sheet.w, height: sheet.h, class: 'v3plan-sheet' }, svg);
+    const tx = svgEl('text', { x: 0, y: -fs * 0.5, 'font-size': fs, class: 'v3plan-lbl' }, svg);
+    tx.textContent = `Tu plancha: ${fmt(sheet.w / unitMM, isInch() ? 2 : 0)} × ${fmt(sheet.h / unitMM, isInch() ? 2 : 0)} ${unitLabel()}`;
+    const path = (pts, close) => 'M' + pts.map(([x, y]) => `${+x.toFixed(2)} ${+y.toFixed(2)}`).join('L') + (close ? 'Z' : '');
+    for (const [q, [px, py]] of placed) {
+      const g = svgEl('g', { transform: `translate(${px} ${py})` }, svg);
+      const out = px < -0.01 || py < -0.01 || px + q.w > sheet.w + 0.01 || py + q.h > sheet.h + 0.01;
+      svgEl('path', { d: [q.pts, ...(q.holes || [])].map(pl => path(pl, true)).join(''), 'fill-rule': 'evenodd', class: 'v3plan-piece' + (out ? ' out' : '') }, g);
+      for (const ln of q.lines || []) svgEl('path', { d: path(ln, false), class: 'v3plan-line' }, g);
+      if (q.w > fs * 4 && q.h > fs * 1.4) {
+        const lb = svgEl('text', { x: q.w / 2, y: q.h / 2, 'font-size': Math.min(fs, q.h / 3), 'text-anchor': 'middle', 'dominant-baseline': 'middle', class: 'v3plan-name' }, g);
+        lb.textContent = q.name;
+      }
+    }
+    el.append(svg);
+    const outN = [...placed].filter(([q, [px, py]]) => px + q.w > sheet.w + 0.01 || py + q.h > sheet.h + 0.01).length;
+    el.append(h('p', { class: 'v3plan-note' + (outN ? ' bad' : '') }, outN ? `${outN} pieza(s) se salen de tu plancha (en naranja). Achica la caja, usa «Acomodar» o cambia la plancha en Propiedades → Documento.` : 'Todas las piezas caben en tu plancha. Las líneas rojas se cortan.'));
   }
 
   // El estudio 3D se acomoda al ancho que tenga: ancho = 3 columnas; medio = sin detalles; angosto = opciones arriba
@@ -8093,6 +8187,10 @@
     el.classList.toggle('compact', wd < 1150);
     el.classList.toggle('tiny', wd < 760);
     resize3D();
+    // si la ventana cambió mucho de tamaño, se vuelve a encuadrar la caja para que no quede fuera de vista
+    const cw = $('#view3dCanvas').clientWidth;
+    if (v3.model && v3.lastW && Math.abs(cw - v3.lastW) > v3.lastW * 0.15) fit3D();
+    if (cw) v3.lastW = cw;
   }
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => layout3D()).observe($('#view3d'));
 
@@ -8124,13 +8222,13 @@
   function syncSizes3D() {
     const box = v3SizesEl, s = v3.id && byId(v3.id);
     if (!box || box.hidden || !s) return;
-    for (const inp of box.querySelectorAll('input[data-key]')) {
+    for (const inp of box.querySelectorAll('input[type=range][data-key]')) {
       if (document.activeElement === inp) continue;
       const cur = len(s, inp.dataset.key);
       if (!Number.isFinite(cur) || cur <= 0) continue;
       inp.value = String(Math.round(cur / unitMM * 1000) / 1000);
       const out = inp.parentElement.querySelector('.v3size-val');
-      if (out) out.textContent = fmt(cur / unitMM, isInch() ? 3 : 1) + ' ' + unitLabel();
+      if (out && document.activeElement !== out) out.value = fmt(cur / unitMM, isInch() ? 3 : 1);
     }
   }
   let sizeBase = null;
@@ -8149,17 +8247,24 @@
       if (sizeBase.v[key] === undefined) sizeBase.v[key] = cur;
       const base = sizeBase.v[key], u = unitMM;
       const rng = h('input', { type: 'range', min: String(Math.round(base * 0.4 / u * 100) / 100), max: String(Math.round(base * 2.5 / u * 100) / 100), step: isInch() ? '0.0625' : '1', value: String(Math.round(cur / u * 1000) / 1000), 'aria-label': label, 'data-key': key });
-      const out = h('span', { class: 'v3size-val' }, fmt(cur / u, isInch() ? 3 : 1) + ' ' + unitLabel());
+      const out = h('input', { type: 'number', class: 'v3size-val', step: isInch() ? '0.0625' : '0.5', min: '0', value: fmt(cur / u, isInch() ? 3 : 1), 'aria-label': `${label} (${unitLabel()})` });
+      const set = v => { setSizeParam(s, key, v); liveRender(); syncParamInputs(); };
       rng.addEventListener('input', () => {
         const v = parseFloat(rng.value); if (!(v > 0)) return;
-        // si la medida es un parámetro, se cambia el parámetro; si es un número, la medida de la figura
-        const nm = String(s.p[key]).trim(), q = doc.params.find(p => p.name === nm);
-        if (q) q.expr = fmt(v); else s.p[key] = fmt(v);
-        out.textContent = fmt(v, isInch() ? 3 : 1) + ' ' + unitLabel();
-        liveRender(); syncParamInputs();
+        out.value = fmt(v, isInch() ? 3 : 1);
+        set(v);
       });
       rng.addEventListener('change', () => { checkpoint(); fullRender(); });
-      box.append(h('label', { class: 'range' }, h('span', {}, label), rng, out));
+      // escribir el número: el deslizador se estira si el número queda fuera de su rango
+      out.addEventListener('input', () => {
+        const v = parseFloat(out.value); if (!(v > 0)) return;
+        if (v < parseFloat(rng.min)) rng.min = String(v);
+        if (v > parseFloat(rng.max)) rng.max = String(v);
+        rng.value = String(v);
+        set(v);
+      });
+      out.addEventListener('change', () => { checkpoint(); fullRender(); });
+      box.append(h('div', { class: 'v3size' }, h('span', { class: 'v3size-l' }, label), rng, out, h('span', { class: 'v3size-u' }, unitLabel())));
     }
   }
 
@@ -8465,7 +8570,8 @@
     resize3D();
     evaluateParams();
     sizeBase = null;
-    { const sh = byId(id); if (sh && sh.type === 'box' && sh.p.tapa === 'libro') { $('#explode').value = '1'; } }
+    { const sh = byId(id); $('#explode').value = '0'; $('#openLid').value = sh && sh.type === 'box' && sh.p.tapa === 'libro' ? '1' : '0'; }
+    setTab3D('3d');
     build3D(); build3DLeft(); build3DRight(); layout3D(); fit3D();
     cancelAnimationFrame(v3.raf);
     loop3D();
@@ -8494,6 +8600,9 @@
   $('#btnView3dClose').onclick = close3D;
   $('#btnView3dFit').onclick = fit3D;
   $('#explode').addEventListener('input', applyExplode);
+  $('#openLid').addEventListener('input', applyExplode);
+  $('#v3Tab3d').onclick = () => setTab3D('3d');
+  $('#v3TabPlan').onclick = () => setTab3D('plan');
 
   /* ================= Render ================= */
   function liveRender() {
@@ -8504,7 +8613,7 @@
     if (one && (one.type === 'box' || one.type === 'taper')) updateCoverTip(one);
     if (one && one.type === 'basket') updateBasketTip(one);
     if (one && (one.type === 'taper' || one.type === 'cone' || one.type === 'planter')) updateShapeTip(one);
-    if (v3.open) { build3D(); syncSizes3D(); build3DRight(); }
+    if (v3.open) { build3D(); syncSizes3D(); updateDims3D(); build3DRight(); buildPlan3D(); }
   }
   function fullRender() {
     evaluateParams();
@@ -8513,7 +8622,7 @@
     for (const b of document.querySelectorAll('#unitSeg button')) { const on = b.dataset.u === doc.units; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
     drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
-    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); build3DRight(); } else close3D(); }
+    if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); updateDims3D(); build3DRight(); buildPlan3D(); } else close3D(); }
   }
   function updateButtons() {
     $('#btnUndo').disabled = !undoStack.length && JSON.stringify(doc) === savedState;
@@ -8744,16 +8853,21 @@
     }
   };
   document.addEventListener('click', () => { menu.hidden = true; });
+  // Abre una plantilla (reemplaza el diseño); las cajas y figuras 3D se abren directo en el estudio 3D
+  function loadTemplate(key) {
+    if (!TEMPLATES[key]) return;
+    if (doc.shapes.length && !confirm('La plantilla reemplaza el diseño actual (puedes volver con Deshacer). ¿Continuar?')) return;
+    checkpoint();
+    doc = TEMPLATES[key](doc.units, doc.sheet);
+    doc.template = key;
+    sel.clear(); checkpoint(); fullRender(); fitView();
+    const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
+    if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
+  }
   menu.addEventListener('click', e => {
     const b = e.target.closest('[data-template]');
     if (!b || !TEMPLATES[b.dataset.template]) return;
-    if (doc.shapes.length && !confirm('La plantilla reemplaza el diseño actual (puedes volver con Deshacer). ¿Continuar?')) return;
-    checkpoint();
-    doc = TEMPLATES[b.dataset.template](doc.units, doc.sheet);
-    sel.clear(); checkpoint(); fullRender(); fitView();
-    // Las plantillas de cajas se abren directo en 3D, con las opciones a la izquierda
-    const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
-    if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
+    loadTemplate(b.dataset.template);
   });
 
   // Caja cónica en pulgadas: base 5.5", boca 6.5" (alto y grosor se cambian en Parámetros)
