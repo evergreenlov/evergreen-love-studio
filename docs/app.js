@@ -6658,6 +6658,7 @@
         loadDoc(parsed);
         checkpoint(); fullRender(); fitView();
         msg('Diseño abierto: ' + file.name);
+        open3DIfSolid();
       } catch (err) { msg('No se pudo abrir ese archivo.'); }
     };
     reader.readAsText(file);
@@ -6765,6 +6766,11 @@
     } catch (e) { return null; }
   }
 
+  // Si el diseño trae una caja (o maceta, canasta…), se abre directo en el estudio 3D
+  function open3DIfSolid() {
+    const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
+    if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
+  }
   async function importFile(file) {
     let asset;
     const isDxf = /\.dxf$/i.test(file.name), isSvg = /\.svg$/i.test(file.name) || /svg/.test(file.type);
@@ -6775,6 +6781,7 @@
       loadDoc(design);
       checkpoint(); fullRender(); fitView();
       msg('Diseño abierto para editar: ' + file.name);
+      open3DIfSolid();
       return;
     }
     if (isDxf && /^AC10\d\d/.test(text)) throw new Error('este «.dxf» en realidad es un archivo DWG de AutoCAD (formato binario) y la página no lo puede leer. Abre la versión .svg del mismo diseño, o en AutoCAD/LibreCAD guárdalo como DXF de texto');
@@ -6804,11 +6811,11 @@
       if (created) {
         sel = new Set(created.map(c => c.id));
         checkpoint(); fullRender();
-        msg(`Importado: ${file.name} · ${size} · ${created.length} piezas independientes (Deshacer para dejarlas juntas)` + (asset.warning ? ` · ${asset.warning}` : ''));
+        msg(`Importado: ${file.name} · ${size} · ${created.length} piezas. Para verla armada en 3D, toca «Armar como caja en 3D…» a la derecha y elige qué cara es cada pieza.` + (asset.warning ? ` · ${asset.warning}` : ''), 12000);
         return;
       }
     }
-    msg(`Importado: ${file.name} · ${size}` + (asset.kind === 'vector' ? ` · ${asset.polys.length} trazo(s)` : '') + (asset.warning ? ` · ${asset.warning}` : ''));
+    msg(`Importado: ${file.name} · ${size}` + (asset.kind === 'vector' ? ` · ${asset.polys.length} trazo(s)` : '') + (asset.warning ? ` · ${asset.warning}` : '') + ' · Toca «Vista 3D» para verlo con el grosor de la madera.', 9000);
   }
 
   // Normaliza trazos en mm a ancho 1 (para poder escalarlos) y guarda su tamaño real
