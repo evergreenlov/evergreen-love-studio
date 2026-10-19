@@ -7021,7 +7021,44 @@
       }
     } finally { host.remove(); }
     if (!polys.length && !texts.length) throw new Error('no se encontraron figuras');
-    return vectorAsset(polys, name, { texts, ...(skippedText ? { warning: `${skippedText} texto(s) vacíos no se importaron` } : {}) });
+    return vectorAsset(joinOpenPolys(polys), name, { texts, ...(skippedText ? { warning: `${skippedText} texto(s) vacíos no se importaron` } : {}) });
+  }
+  // Algunos programas (CorelDRAW, ciertos DXF) dibujan cada lado de una pieza como una línea suelta.
+  // Aquí se unen las líneas que se tocan punta con punta; si la cadena vuelve al inicio, queda una pieza cerrada.
+  function joinOpenPolys(polys, tol = 0.05) {
+    const open = [], out = [];
+    for (const p of polys) (p.closed || p.pts.length < 2 ? out : open).push(p);
+    if (!open.length) return polys;
+    const key = ([x, y]) => Math.round(x / tol) + ',' + Math.round(y / tol);
+    const ends = new Map(), add = (k, v) => { if (!ends.has(k)) ends.set(k, []); ends.get(k).push(v); };
+    open.forEach((p, i) => { add(key(p.pts[0]), { i, e: 0 }); add(key(p.pts[p.pts.length - 1]), { i, e: 1 }); });
+    const used = new Array(open.length).fill(false);
+    const next = (pt, op) => (ends.get(key(pt)) || []).find(v => !used[v.i] && open[v.i].op === op);
+    for (let i = 0; i < open.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      const op = open[i].op;
+      let chain = open[i].pts.map(q => [q[0], q[1]]);
+      for (let g = 0; g < 100000; g++) {
+        const nx = next(chain[chain.length - 1], op);
+        if (!nx) break;
+        used[nx.i] = true;
+        const pts = nx.e === 0 ? open[nx.i].pts : [...open[nx.i].pts].reverse();
+        chain.push(...pts.slice(1).map(q => [q[0], q[1]]));
+      }
+      for (let g = 0; g < 100000; g++) {
+        const nx = next(chain[0], op);
+        if (!nx) break;
+        used[nx.i] = true;
+        const pts = nx.e === 1 ? open[nx.i].pts : [...open[nx.i].pts].reverse();
+        chain = [...pts.slice(0, -1).map(q => [q[0], q[1]]), ...chain];
+      }
+      const a = chain[0], b = chain[chain.length - 1];
+      const closed = chain.length >= 4 && Math.hypot(a[0] - b[0], a[1] - b[1]) <= 2 * tol;
+      if (closed) chain.pop();
+      out.push({ ...open[i], closed: closed || !!open[i].closed, pts: chain });
+    }
+    return out;
   }
 
   // DXF: líneas, polilíneas (con arcos), círculos, arcos, elipses y splines. Unidades según $INSUNITS.
@@ -7134,7 +7171,7 @@
     }
     // DXF tiene la Y hacia arriba; el lienzo hacia abajo
     const mm = polys.map(pl => ({ ...pl, pts: pl.pts.map(([x, y]) => [x * unit, -y * unit]) }));
-    return vectorAsset(mm, name, skipped ? { warning: `${skipped} elemento(s) no compatibles (textos, bloques o rellenos) no se importaron` } : {});
+    return vectorAsset(joinOpenPolys(mm), name, skipped ? { warning: `${skipped} elemento(s) no compatibles (textos, bloques o rellenos) no se importaron` } : {});
   }
 
   // Agrupa trazos en piezas: cada contorno exterior con los agujeros que tiene adentro
@@ -8397,10 +8434,21 @@
     }
     groups.sort((a, b) => b.lo * b.hi - a.lo * a.hi);
     const out = new Map(pcs.map(p => [p.i, { face: 'none', rot: false }]));
-    const pairs = groups.filter(g => g.items.length >= 2), singles = groups.filter(g => g.items.length === 1);
+    // 4 piezas iguales (caja de planta cuadrada): son dos pares de paredes
+    const pairs = [], singles = [];
+    for (const g of groups) {
+      if (g.items.length >= 4) { pairs.push({ ...g, items: g.items.slice(0, 2) }, { ...g, items: g.items.slice(2, 4) }); for (const it of g.items.slice(4)) singles.push({ ...g, items: [it] }); }
+      else if (g.items.length >= 2) pairs.push(g);
+      else singles.push(g);
+    }
     let base = null, lid = null, walls = [];
     if (pairs.length >= 3) { base = pairs[0].items[0]; lid = pairs[0].items[1]; walls = [pairs[1], pairs[2]]; }
-    else if (pairs.length === 2 && singles.length) { base = singles[0].items[0]; walls = pairs; }
+    else if (pairs.length === 2 && singles.length) {
+      base = singles[0].items[0]; walls = pairs;
+      // una segunda pieza casi del tamaño de la base es la tapa (puede ser un poco más chica si va por dentro)
+      const s2 = singles[1] && singles[1].items[0];
+      if (s2 && Math.abs(Math.max(s2.w, s2.h) - Math.max(base.w, base.h)) <= 0.12 * Math.max(base.w, base.h) && Math.abs(Math.min(s2.w, s2.h) - Math.min(base.w, base.h)) <= 0.12 * Math.min(base.w, base.h)) lid = s2;
+    }
     else if (pairs.length === 2) { walls = pairs; }
     if (!walls.length) return out;
     const bw = base ? Math.max(base.w, base.h) : Math.max(walls[0].hi, walls[1].hi), bd = base ? Math.min(base.w, base.h) : Math.min(walls[0].lo, walls[1].lo);
