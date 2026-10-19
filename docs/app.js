@@ -8696,6 +8696,9 @@
           loadDoc(JSON.parse(JSON.stringify(tpl.doc)));
           checkpoint(); fullRender(); fitView();
           msg(`Plantilla abierta: ${tpl.name}`);
+          // si trae una caja (o maceta, canasta…), se abre directo en el estudio 3D, igual que las plantillas de fábrica
+          const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
+          if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
         } }, ...(typeof tpl.thumbnail === 'string' && tpl.thumbnail.startsWith('data:image/svg+xml,') ? [h('img', { src: tpl.thumbnail, class: 'template-thumb', alt: '', loading: 'lazy' })] : []), h('span', {}, tpl.name)),
         h('button', { class: 'icon-btn del', title: 'Borrar esta plantilla', 'aria-label': 'Borrar ' + tpl.name, onclick: ev => {
           ev.stopPropagation();
