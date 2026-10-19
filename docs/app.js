@@ -8287,7 +8287,104 @@
     v3.raf = requestAnimationFrame(loop3D);
   }
   /* ================= Armar en 3D las piezas planas de un archivo (caja con dedos o pegada) ================= */
-  const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', none: 'No usar' };
+  const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', plate: 'Placa de caja libro (tapa + bisagra + base)', none: 'No usar' };
+  // Contornos de una pieza importada en sus propias medidas (0..w, 0..h), igual que los arma la vista 3D
+  function localPolys(s) {
+    const a = doc.assets && doc.assets[s.p.asset];
+    if (!a || a.kind !== 'vector') return null;
+    const w = Math.abs(len(s, 'w')), aspect = a.h / a.w, hh = s.p.prop === 'no' ? Math.abs(len(s, 'h')) : w * aspect, sy = hh / aspect;
+    if (![w, hh].every(Number.isFinite) || !w || !hh) return null;
+    const cl = a.polys.filter(pl => pl.closed && pl.pts.length >= 3).map(pl => pl.pts.map(([u, v]) => [u * w, v * sy]));
+    if (!cl.length) return null;
+    const outer = cl.reduce((p2, q) => polyArea(q) > polyArea(p2) ? q : p2);
+    return { w, h: hh, outer, holes: cl.filter(c => c !== outer) };
+  }
+  // ¿Tiene cortes de bisagra viva? (muchos huecos finos y largos)
+  const hingeSlitCount = s => { const P = localPolys(s); return P ? P.holes.filter(hl => { const b = ptsBox(hl), mn = Math.min(b.x1 - b.x0, b.y1 - b.y0), mx = Math.max(b.x1 - b.x0, b.y1 - b.y0); return mn < 3 && mx > 4 * mn; }).length : 0; };
+  // Caja libro de un archivo: la placa (tapa + bisagra viva + base) queda abierta y plana, y cada pared se para
+  // en las ranuras de la base que coinciden con sus pestañas (mismo número, mismo ancho y misma separación).
+  function assembleLibro(plateS, wallSs, t) {
+    const P = localPolys(plateS);
+    if (!P) return { err: 'No se pudo leer la placa.' };
+    const tol = Math.max(0.8, 0.3 * t), slots = [], slits = [];
+    for (const hl of P.holes) {
+      const b = ptsBox(hl), dw = b.x1 - b.x0, dh = b.y1 - b.y0, mn = Math.min(dw, dh), mx = Math.max(dw, dh), it = { b, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], vert: dh > dw };
+      if (mx >= 2 * t && mx >= 2.5 * mn && Math.abs(mn - t) <= tol) slots.push(it);
+      else if (mn < 0.75 * t && mx > 4 * mn) slits.push(it);
+    }
+    if (slits.length < 6) return { err: 'No encontré la bisagra viva (los cortes finos) en la placa.' };
+    const vertical = slits.filter(s => s.vert).length >= slits.length / 2;
+    const A = vertical ? 0 : 1, Z = 1 - A, lo = vertical ? 'x0' : 'y0', hi = vertical ? 'x1' : 'y1';
+    const hb0 = Math.min(...slits.map(s => s.b[lo])), hb1 = Math.max(...slits.map(s => s.b[hi]));
+    const onHi = slots.filter(s => s.c[A] > hb1), onLo = slots.filter(s => s.c[A] < hb0);
+    const baseHi = onHi.length >= onLo.length, base = baseHi ? onHi : onLo;
+    if (base.length < 2) return { err: 'No encontré las ranuras de la base en la placa.' };
+    // En 3D la base empieza en x = 0 junto a la bisagra; z sigue a lo largo de la bisagra
+    const sg = baseHi ? 1 : -1, uh = baseHi ? hb1 : hb0, toX = a => sg * (a - uh);
+    const plateAx = { eu: A === 0 ? [sg, 0, 0] : [0, 0, 1], ev: A === 0 ? [0, 0, 1] : [sg, 0, 0], ew: [0, 1, 0], o: [-sg * uh, 0, 0], out: [0, -1, 0] };
+    // Ranuras agrupadas por línea: cada línea es el lugar de una pared
+    const groups = [];
+    for (const s of base) {
+      const major = s.vert ? 1 : 0, alongX = major === A, a0 = s.b[major ? 'y0' : 'x0'], a1 = s.b[major ? 'y1' : 'x1'];
+      const iv = alongX ? [toX(a0), toX(a1)].sort((p2, q) => p2 - q) : [a0, a1];
+      const line = alongX ? s.c[Z] : toX(s.c[A]);
+      let g = groups.find(q => q.alongX === alongX && Math.abs(q.line - line) < t);
+      if (!g) { g = { alongX, line, iv: [] }; groups.push(g); }
+      g.iv.push(iv);
+    }
+    for (const g of groups) g.iv.sort((p2, q) => p2[0] - q[0]);
+    // Cada pared: se buscan sus pestañas en cada borde largo y se comparan con las ranuras de cada línea
+    const cands = [], skipped = [];
+    for (const ws of wallSs) {
+      const W = localPolys(ws);
+      if (!W) { skipped.push(ws.name); continue; }
+      const pts = W.outer, n = pts.length, dims = [W.w, W.h];
+      for (const L of [0, 1]) for (const side of [0, 1]) {
+        const Hx = 1 - L, lineV = side ? dims[Hx] : 0, iv = [];
+        for (let i = 0; i < n; i++) {
+          const p2 = pts[i], q = pts[(i + 1) % n];
+          if (Math.abs(p2[Hx] - lineV) < 0.3 && Math.abs(q[Hx] - lineV) < 0.3 && Math.abs(q[L] - p2[L]) > 0.5) iv.push([Math.min(p2[L], q[L]), Math.max(p2[L], q[L])]);
+        }
+        iv.sort((a2, b2) => a2[0] - b2[0]);
+        const tabs = [];
+        for (const r of iv) { const l2 = tabs[tabs.length - 1]; if (l2 && r[0] <= l2[1] + 0.3) l2[1] = Math.max(l2[1], r[1]); else tabs.push([...r]); }
+        if (!tabs.length) continue;
+        for (const g of groups) {
+          if (g.iv.length !== tabs.length) continue;
+          const sc = g.iv.map(r => (r[0] + r[1]) / 2);
+          for (const dir of [1, -1]) {
+            const tt = dir === 1 ? tabs : [...tabs].reverse(), tc = tt.map(r => (r[0] + r[1]) / 2);
+            const off = sc.reduce((a2, c, i) => a2 + c - dir * tc[i], 0) / sc.length;
+            const err = Math.max(...sc.map((c, i) => Math.abs(c - (dir * tc[i] + off))));
+            const wOk = g.iv.every((r, i) => Math.abs((r[1] - r[0]) - (tt[i][1] - tt[i][0])) <= Math.max(1.5, 0.15 * (r[1] - r[0])));
+            if (wOk && err <= Math.max(1.5, 0.03 * dims[L])) cands.push({ ws, L, side, g, dir, off, err, ext: dims[Hx] });
+          }
+        }
+      }
+    }
+    cands.sort((a2, b2) => a2.err - b2.err);
+    const doneW = new Set(), doneG = new Set(), out = [{ s: plateS, ax: plateAx, name: 'Placa' }];
+    let Hmax = 0;
+    for (const c of cands) {
+      if (doneW.has(c.ws) || doneG.has(c.g)) continue;
+      doneW.add(c.ws); doneG.add(c.g);
+      const { L, side, g, dir, off, ext } = c, Hx = 1 - L, sb = side ? -1 : 1, yb = side ? ext : 0;
+      // las pestañas bajan dentro de la placa (y = 0 a grosor); la pared se para encima, centrada en su ranura
+      const world = (lu, lv) => { const l = [lu, lv][L], q = [lu, lv][Hx], y = sb * q + yb, al = dir * l + off; return g.alongX ? [al, y, g.line] : [g.line, y, al]; };
+      const o0 = world(0, 0), e1 = world(1, 0).map((v, i) => v - o0[i]), e2 = world(0, 1).map((v, i) => v - o0[i]);
+      const ew = g.alongX ? [0, 0, 1] : [1, 0, 0];
+      out.push({ s: c.ws, ax: { eu: e1, ev: e2, ew, o: o0.map((v, i) => v - ew[i] * t / 2), out: g.alongX ? [0, 0, -1] : [-1, 0, 0] }, name: g.alongX ? 'Pared larga' : 'Pared del extremo' });
+      Hmax = Math.max(Hmax, ext);
+    }
+    for (const ws of wallSs) if (!doneW.has(ws) && !skipped.includes(ws.name)) skipped.push(ws.name);
+    // Todo dentro de 0..W, 0..D para centrar la vista
+    const cs = [[0, 0], [P.w, 0], [0, P.h], [P.w, P.h]].map(([u, v]) => [0, 1, 2].map(i => plateAx.o[i] + plateAx.eu[i] * u + plateAx.ev[i] * v));
+    const x0 = Math.min(...cs.map(c => c[0])), x1 = Math.max(...cs.map(c => c[0])), z0 = Math.min(...cs.map(c => c[2])), z1 = Math.max(...cs.map(c => c[2]));
+    for (const r of out) { r.ax.o = [r.ax.o[0] - x0, r.ax.o[1], r.ax.o[2] - z0]; }
+    const Wd = x1 - x0, Dd = z1 - z0;
+    for (const r of out) if (r.name !== 'Placa') { const g = r.ax; if (g.ew[2]) g.out = [0, 0, g.o[2] < Dd / 2 ? -1 : 1]; else g.out = [g.o[0] < (Wd / 2) ? -1 : 1, 0, 0]; }
+    return { out, skipped, W: Wd, D: Dd, H: Math.max(Hmax, t) };
+  }
   function suggestFaces(pcs) {
     const near = (a, b) => Math.abs(a - b) <= Math.max(1.5, 0.02 * Math.max(a, b));
     const same = (a, b) => Math.abs(a - b) <= Math.max(0.6, 0.004 * Math.max(a, b)); // piezas gemelas: casi idénticas
@@ -8446,7 +8543,7 @@
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
     const status = h('p', { class: 'tip', role: 'status' });
     const tIn = h('input', { type: 'number', step: 'any', min: '0.1', value: fmt(tDef / unitMM, isInch() ? 4 : 2) });
-    const styleSel = h('select', { 'aria-label': 'Tipo de unión' }, h('option', { value: 'dedos' }, 'Con dedos (las piezas miden lo mismo que la caja)'), h('option', { value: 'pegada' }, 'Para pegar (las paredes van entre la base y la tapa)'), h('option', { value: 'espigas' }, 'Con espigas y ranuras (los lados y la base entran por ranuras del frente y el atrás)'));
+    const styleSel = h('select', { 'aria-label': 'Tipo de unión' }, h('option', { value: 'dedos' }, 'Con dedos (las piezas miden lo mismo que la caja)'), h('option', { value: 'libro' }, 'Caja libro (placa con bisagra viva y paredes en ranuras)'), h('option', { value: 'pegada' }, 'Para pegar (las paredes van entre la base y la tapa)'), h('option', { value: 'espigas' }, 'Con espigas y ranuras (los lados y la base entran por ranuras del frente y el atrás)'));
     const rows = pcs.map(p => {
       const cv = h('canvas', { width: '90', height: '70', class: 'asm-thumb' });
       const c = cv.getContext('2d'), k = Math.min(80 / Math.max(p.w, 1), 60 / Math.max(p.h, 1));
@@ -8459,6 +8556,25 @@
       const rot = h('input', { type: 'checkbox' }); rot.checked = sug.get(p.i).rot;
       return { p, face, rot, el: h('div', { class: 'asm-row' }, cv, h('div', {}, h('strong', {}, p.s.name), h('div', { class: 'tip' }, `${fmt(p.w / unitMM, isInch() ? 2 : 1)} × ${fmt(p.h / unitMM, isInch() ? 2 : 1)} ${unitLabel()}`)), face, h('label', { class: 'check' }, rot, ' girar 90°')) };
     });
+    // ¿Caja libro? Una pieza con bisagra viva es la placa; las piezas largas son las paredes y las chicas (cierre, adornos) no se usan
+    {
+      const counts = rows.map(r => hingeSlitCount(r.p.s)), best = Math.max(...counts);
+      if (best >= 10) {
+        const pr = rows[counts.indexOf(best)], pd = Math.min(pr.p.w, pr.p.h);
+        styleSel.value = 'libro';
+        // el grosor de la madera se lee del ancho de las ranuras de la placa (las de las pestañas, no los cortes finos)
+        const P = localPolys(pr.p.s);
+        const mns = P ? P.holes.map(hl => { const b = ptsBox(hl), dw = b.x1 - b.x0, dh = b.y1 - b.y0; return [Math.min(dw, dh), Math.max(dw, dh)]; }).filter(([mn, mx]) => mn >= 2 && mn <= 13 && mx >= 2.5 * mn).map(([mn]) => mn).sort((a2, b2) => a2 - b2) : [];
+        if (mns.length >= 2) tIn.value = fmt(mns[Math.floor(mns.length / 2)] / unitMM, isInch() ? 4 : 2);
+        let k2 = 0;
+        for (const r of rows) {
+          r.rot.checked = false;
+          if (r === pr) { r.face.value = 'plate'; continue; }
+          const lg = Math.max(r.p.w, r.p.h), sh = Math.min(r.p.w, r.p.h);
+          r.face.value = lg >= 0.4 * pd && lg >= 2.5 * sh ? ['front', 'back', 'left', 'right'][k2++ % 4] : 'none';
+        }
+      }
+    }
     // Para la unión con espigas: dónde quedan los lados y la base, leído de las ranuras chicas del frente
     const frontRow0 = rows.find(r => r.face.value === 'front');
     const detect = () => {
@@ -8500,6 +8616,22 @@
       if (!(t > 0)) { status.textContent = 'Escribe el grosor de la madera.'; return; }
       const used = rows.filter(r => r.face.value !== 'none');
       const pick = f => used.filter(r => r.face.value === f);
+      if (styleSel.value === 'libro') {
+        const pl = pick('plate')[0];
+        if (!pl) { status.textContent = 'Elige cuál pieza es la «Placa de caja libro».'; return; }
+        const res = assembleLibro(pl.p.s, used.filter(r => r !== pl).map(r => r.p.s), t);
+        if (res.err) { status.textContent = res.err; return; }
+        if (res.out.length < 2) { status.textContent = 'No encontré qué ranuras le tocan a cada pared. Revisa el grosor de la madera.'; return; }
+        const gid = 'o' + uid();
+        for (const r of res.out) { r.s.from = { gid, name: doc.name || 'Caja libro' }; r.s.asm = { name: r.name, ax: JSON.parse(JSON.stringify(r.ax)) }; }
+        for (const r of used) if (!res.out.some(o => o.s === r.p.s)) { delete r.p.s.asm; }
+        doc.origins = doc.origins || {};
+        doc.origins[gid] = { shape: null, asm: { name: doc.name || 'Caja libro', t, W: res.W, H: res.H, D: res.D, wall: false } };
+        close(); checkpoint(); fullRender();
+        open3D(gid);
+        msg(`Caja libro armada: placa y ${res.out.length - 1} pared(es) en sus ranuras.` + (res.skipped.length ? ` Sin lugar: ${res.skipped.join(', ')} (revisa el grosor o márcalas «No usar»).` : ''), 12000);
+        return;
+      }
       const dims = r => r.rot.checked ? [r.p.h, r.p.w] : [r.p.w, r.p.h];
       const fr = pick('front')[0] || pick('back')[0], sd = pick('left')[0] || pick('right')[0], bs = pick('bottom')[0];
       if (!fr || !sd || !bs) { status.textContent = 'Hace falta al menos un frente, un lado y una base.'; return; }
