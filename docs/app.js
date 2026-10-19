@@ -564,7 +564,12 @@
     const bandP = { name: 'Banda de bisagra', w: bw, h: D, place: 'bottom', band: true, holes: slits(0), pts: [[0, 0], [bw, 0], [bw, D], [0, D]], axes: { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-bw, 0, 0], out: [0, -1, 0] } };
     const panels = [baseP, lidP, bandP, plate, endA, endB, lonF, lonK];
     // Plano de corte como el original: la placa al centro, paredes largas arriba y abajo, paredes de los extremos (de pie) a los lados
-    const a = H + t, spin = q => ({ ...q, w: a, h: Le, pts: q.pts.map(([x, y]) => [a - y, x]), holes: [], axes: undefined });
+    const a = H + t, neg = v => v.map(c => -c);
+    // la pieza girada 90° en el plano lleva sus propios ejes 3D, así al desagruparla se arma igual en su lugar
+    const spin = q => ({ ...q, w: a, h: Le, pts: q.pts.map(([x, y]) => [a - y, x]), holes: [],
+      axes: { eu: neg(q.axes.ev), ev: q.axes.eu, ew: q.axes.ew, o: q.axes.o.map((c, i) => c + a * q.axes.ev[i]), out: q.axes.out } });
+    // la placa entera, abierta y plana (tapa a la izquierda, bisagra, base): así se ve armada si se desagrupa
+    plate.axes = { eu: [1, 0, 0], ev: [0, 0, 1], ew: [0, 1, 0], o: [-(W + bw), 0, 0], out: [0, -1, 0] };
     const eA2 = spin(endA), eB2 = spin(endB);
     const PWd = 2 * W + bw, pos = new Map([[lonF, [a + sep, 0]], [plate, [a + sep, a + sep]], [lonK, [a + sep, a + sep + D + sep]], [eA2, [0, a + sep]], [eB2, [a + sep + PWd + sep, a + sep]]]);
     return { W, D, H: H + 2 * t, t, fingers: true, lid: true, slide: false, hinge: true, hingePivot: [0, (Y + t) / 2, 0], hingeShift: bw, hingeAxis: 'z', hingeMax: 180, sep, panels, dividers: [], layout: [[lonF], [eA2, plate, eB2], [lonK]], wall: false, libro: true, libroPos: pos, inner: [Sx, Sz, H] };
@@ -7215,7 +7220,7 @@
     const mdl = modelOf(s, false);
     if (mdl) {
       info.forEach((inf, i) => {
-        const q = inf.outer.name && [...mdl.panels, ...(mdl.dividers || [])].find(x => x.name === inf.outer.name), ax = q && axesOf(mdl, q);
+        const q = inf.outer.name && [...(mdl.layout || []).flat().filter(Boolean), ...mdl.panels, ...(mdl.dividers || [])].find(x => x.name === inf.outer.name), ax = q && axesOf(mdl, q);
         if (ax) created[i].asm = { name: inf.outer.name, ax: JSON.parse(JSON.stringify(ax)) };
       });
     }
