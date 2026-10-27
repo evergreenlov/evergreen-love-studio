@@ -9149,6 +9149,21 @@
   });
 
   new ResizeObserver(() => drawCanvas()).observe(stage);
+  // Flecha para esconder / mostrar el panel de la derecha (Parámetros, Propiedades, Objetos); se recuerda en este aparato
+  {
+    const main = document.querySelector('.main'), btn = $('#btnSideToggle'), KEY = 'evergreen-love-studio:panel-oculto';
+    const setSide = hidden => {
+      main.classList.toggle('side-hidden', hidden);
+      btn.textContent = hidden ? '◀' : '▶';
+      btn.setAttribute('aria-expanded', String(!hidden));
+      btn.title = hidden ? 'Mostrar el panel de Parámetros y Propiedades' : 'Esconder el panel y dar más espacio al lienzo';
+      try { localStorage.setItem(KEY, hidden ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
+      requestAnimationFrame(() => { drawCanvas(); if (v3.open) { resize3D(); } });
+    };
+    btn.onclick = () => setSide(!main.classList.contains('side-hidden'));
+    let saved = false; try { saved = localStorage.getItem(KEY) === '1'; } catch (e) { /* ninguno */ }
+    if (saved) setSide(true);
+  }
 
   /* ================= Inicio ================= */
   let restored = false;
