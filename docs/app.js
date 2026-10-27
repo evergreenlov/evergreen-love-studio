@@ -8862,7 +8862,7 @@
   $('#docName').addEventListener('change', checkpoint);
 
   const menu = $('#menuTemplates');
-  $('#btnTemplates').onclick = e => { e.stopPropagation(); if (menu.hidden) buildUserTemplates(); menu.hidden = !menu.hidden; };
+  $('#btnTemplates').onclick = e => { e.stopPropagation(); if (menu.hidden) { buildUserTemplates(); syncTemplates({ silent: true }); } menu.hidden = !menu.hidden; };
 
   /* ----- Mis plantillas: diseños guardados en este navegador para reusarlos ----- */
   const TPL_KEY = 'evergreen-love-studio:plantillas';
@@ -9161,6 +9161,9 @@
   savedState = JSON.stringify(doc);
   setTimeout(() => syncTemplates({ silent: true }), 1500);
   window.addEventListener('online', () => syncTemplates({ silent: true }));
+  // Lo que guardaste en otro aparato llega solo: al volver a la página (cambiar de app en la iPad) y cada 2 minutos mientras está abierta
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncTemplates({ silent: true }); });
+  setInterval(() => { if (document.visibilityState === 'visible') syncTemplates({ silent: true }); }, 120000);
   setTool('select');
   fullRender();
   fitView();
