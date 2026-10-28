@@ -2093,17 +2093,30 @@
   const layerShapes = $('#layerShapes');
   const layerOverlay = $('#layerOverlay');
 
-  function renderItems(items, parent, clsExtra, withHit) {
+  // Color de vista previa de una figura (no cambia el corte ni lo que exportas)
+  const COLOR_SWATCHES = ['#e63946', '#f4a261', '#f2c94c', '#2a9d8f', '#2f7d4f', '#3a86c8', '#6a4c93', '#e17ab0', '#8a5a3b', '#1d2a21', '#ffffff'];
+  const colorStyle = (c, sel) => c ? `fill:${c};fill-opacity:1;${sel ? '' : `stroke:${c};`}` : null;
+  function colorRow(shapes) {
+    const cur = shapes.every(x => x.color === shapes[0].color) ? shapes[0].color || '' : '';
+    const set = c => { shapes.forEach(x => { if (c) x.color = c; else delete x.color; }); checkpoint(); fullRender(); };
+    const sw = h('div', { class: 'v3sw' }, ...COLOR_SWATCHES.map(c => h('button', { class: 'v3swatch' + (cur === c ? ' on' : ''), style: `background:${c}`, title: c, 'aria-label': 'Color ' + c, onclick: () => set(c) })));
+    const pick = h('input', { type: 'color', class: 'v3swatch v3swatch-custom', title: 'Otro color…', 'aria-label': 'Otro color', value: cur || '#2f7d4f' });
+    pick.onchange = () => set(pick.value);
+    sw.append(pick, h('button', { class: 'v3chip', onclick: () => set(null) }, 'Quitar'));
+    return h('div', { class: 'prop-col' }, h('label', {}, 'Color (solo para ver cómo queda; no cambia el corte)'), sw);
+  }
+  function renderItems(items, parent, clsExtra, withHit, color) {
     for (const it of items) {
       const cls = `shape op-${it.op}${clsExtra}`;
+      const cst = colorStyle(color, clsExtra.includes('selected'));
       if (it.polys.length) {
         const d = pathD(it.polys);
-        svgEl('path', { d, class: cls, 'vector-effect': 'non-scaling-stroke', 'fill-rule': 'evenodd' }, parent);
+        svgEl('path', { d, class: cls, style: cst, 'vector-effect': 'non-scaling-stroke', 'fill-rule': 'evenodd' }, parent);
         if (withHit) svgEl('path', { d, class: 'hit' + (it.polys.every(p => !p.closed) ? ' open' : ''), 'vector-effect': 'non-scaling-stroke', 'fill-rule': 'evenodd' }, parent);
       }
       for (const t of it.texts) {
         const el = svgEl('text', {
-          x: r4(t.x), y: r4(t.y), 'font-size': r4(t.size), 'font-family': fontCss(t.font), class: cls,
+          x: r4(t.x), y: r4(t.y), 'font-size': r4(t.size), 'font-family': fontCss(t.font), class: cls, style: cst,
           'text-anchor': t.anchor === 'middle' ? 'middle' : null,
           transform: t.rot ? `rotate(${r4(t.rot)} ${r4(t.x)} ${r4(t.y)})` : null, 'vector-effect': 'non-scaling-stroke',
         }, parent);
@@ -2156,7 +2169,7 @@
       const r = evalCache.get(s.id);
       if (!r || !r.items.length || s.hidden) continue;
       const grp = svgEl('g', { 'data-id': s.id, style: s.locked ? 'pointer-events:none' : null }, layerShapes);
-      renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true);
+      renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true, s.color);
     }
     drawOverlay();
     drawRulers();
@@ -4297,6 +4310,7 @@
         ...alignmentSection(shapes),
         ...scaleSection(shapes),
         propRow('Operación', selectEl(OPS, shapes.every(s => s.op === shapes[0].op) ? shapes[0].op : '', 'Operación', v => { shapes.forEach(s => { s.op = v; }); checkpoint(); fullRender(); })),
+        colorRow(shapes),
         h('div', { class: 'insp-sub' }, 'Combinar'),
         sameList
           ? h('div', { class: 'btn-grid' },
@@ -4337,6 +4351,7 @@
     }
     const isPlainGroup = s.type === 'group' && (s.p.mode || 'grupo') === 'grupo';
     if (!isPlainGroup) box.append(propRow('Operación', selectEl(s.type === 'import' ? IMPORT_OPS : OPS, s.op, 'Operación', v => { s.op = v; checkpoint(); fullRender(); })));
+    box.append(colorRow([s]));
 
     for (const [key, label0, kind] of TYPES[s.type].props) {
       const label = boxLabel(s, key, label0);
