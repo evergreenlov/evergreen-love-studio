@@ -7806,7 +7806,9 @@
   // Vista 3D de un arte cualquiera (SVG importado, figuras dibujadas…): cada pieza cortada se extruye con el grosor de la madera
   function build3DArt() {
     const T = window.THREE;
-    const { items } = exportItems();
+    exportItems();
+    // cada trazo recuerda el color de vista previa de su figura (solo se ve aquí; no cambia lo que exportas)
+    const items = doc.shapes.filter(sh => !sh.hidden).flatMap(sh => ((evalCache.get(sh.id) || { items: [] }).items).map(it => ({ ...it, _color: sh.color || null })));
     const cuts = items.filter(it => it.op === 'corte'), marks = items.filter(it => it.op !== 'corte');
     const tMM = vars.grosor !== undefined && vars.grosor * unitMM > 0 ? vars.grosor * unitMM : 3;
     const closed = cuts.flatMap(it => it.polys.filter(p => p.closed && p.pts.length >= 3));
@@ -7818,17 +7820,24 @@
     const msgEl = $('#view3dMsg');
     if (!allPts.length) { msgEl.hidden = false; msgEl.textContent = 'No hay dibujo para mostrar en 3D todavía.'; return; }
     const b = ptsBox(allPts), cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2;
-    const groups = splitPieces(closed).slice(0, 400);
     const wood = /walnut|nogal/i.test(doc.wood || '') ? 0x6b4a2f : /mahogany|caoba/i.test(doc.wood || '') ? 0x7a3b25 : /acr/i.test(doc.wood || '') ? 0xbfe3f0 : 0xe0bf8a;
+    const byColor = new Map();
+    for (const it of cuts) {
+      const polys = it.polys.filter(p => p.closed && p.pts.length >= 3);
+      if (polys.length) byColor.set(it._color, [...(byColor.get(it._color) || []), ...polys]);
+    }
+    const groups = [];
+    for (const [col, polys] of byColor) for (const g of splitPieces(polys)) groups.push({ g, col });
+    groups.length = Math.min(groups.length, 400);
     let n = 0;
-    for (const grp of groups) {
+    for (const { g: grp, col } of groups) {
       const outer = grp.reduce((a, c) => shoelace(c.pts) > shoelace(a.pts) ? c : a);
       const shape = new T.Shape(outer.pts.map(([x, y]) => new T.Vector2(x, -y)));
       for (const hl of grp) if (hl !== outer) shape.holes.push(new T.Path(hl.pts.map(([x, y]) => new T.Vector2(x, -y))));
       const geo = new T.ExtrudeGeometry(shape, { depth: tMM, bevelEnabled: false, curveSegments: 1 });
       geo.rotateX(-Math.PI / 2);
       const holder = new T.Group();
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: pickWood(wood), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: col ? parseInt(col.slice(1), 16) : pickWood(wood), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 30), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       holder.add(mesh, edges);
       holder.userData.out = [0, 0, 0];
@@ -7843,7 +7852,7 @@
     const trace = list => { c.beginPath(); for (const p of list) { p.pts.forEach(([x, y], i) => i ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y))); if (p.closed) c.closePath(); } };
     let drawn = 0;
     for (const it of marks) {
-      const col = it.op === 'marcado' ? 'rgba(40,70,140,0.9)' : 'rgba(58,32,14,0.88)';
+      const col = it._color || (it.op === 'marcado' ? 'rgba(40,70,140,0.9)' : 'rgba(58,32,14,0.88)');
       c.fillStyle = c.strokeStyle = col; c.lineWidth = Math.max(1, 0.25 * sc);
       const cl = it.polys.filter(p => p.closed), op = it.polys.filter(p => !p.closed);
       if (cl.length) { trace(cl); if (it.op === 'grabado') c.fill('evenodd'); else c.stroke(); drawn++; }
@@ -8881,6 +8890,8 @@
     if (!gid && id && [...sel].length && ![...sel].map(byId).some(x => x && ['box', 'basket', 'taper', 'cone', 'planter'].includes(x.type)) && [...sel].map(byId).some(x => x && x.type === 'import')) { id = null; art = true; }
     if (!init3D()) return;
     v3.id = id; v3.gid = gid; v3.art = art; v3.open = true; v3.lastR = null;
+    $('#woodCover').closest('label').hidden = !!art || !!gid; // la «cubierta» solo existe en las cajas con cubierta
+    $('#woodMain').closest('label').firstElementChild.textContent = art ? 'Tipo de madera' : 'Madera';
     $('#view3d').hidden = false;
     resize3D();
     evaluateParams();
