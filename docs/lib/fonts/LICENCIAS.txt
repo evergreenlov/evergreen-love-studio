@@ -8,3 +8,8 @@ Montserrat, Bebas Neue, Playfair Display, Cinzel, Amatic SC, Lobster, Pacifico,
 Dancing Script, Kaushan Script, Great Vibes, Sacramento, Allura.
 
 Los derechos de cada fuente pertenecen a sus autores (ver los metadatos de cada archivo .ttf).
+
+Tipografías añadidas después (también de Google Fonts, uso comercial permitido):
+SIL Open Font License 1.1: Courgette, Parisienne, Alex Brush, Bangers, Fredoka, Rubik Mono One, Baloo 2,
+Caveat Brush, Gochi Hand, Abril Fatface, Libre Baskerville, Poppins, Raleway, Oswald, Caveat, Shadows Into Light.
+Apache License 2.0: Satisfy, Yellowtail, Luckiest Guy, Chewy, Homemade Apple.
