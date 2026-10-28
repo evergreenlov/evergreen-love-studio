@@ -3614,19 +3614,25 @@
       const gh = !handle && guideAt(p);
       if (gh) { drag = { mode: 'guide', g: gh, del: false }; return; }
       const hit = e.target.closest && e.target.closest('[data-id]');
-      const id = hit && hit.dataset.id;
+      let id = hit && hit.dataset.id;
+      // Alt (Option) + clic: elige la figura que está debajo de la de arriba, y así en cada clic
+      const stack = stackAt(e);
+      if (id && e.altKey && stack.length > 1) { const cur = stack.findIndex(x => sel.has(x)); id = stack[(cur + 1) % stack.length]; sel = new Set([id]); }
       const dbl = isDoubleClick(e, id);
       if (dbl && enterGroup(id, p)) {
         drag = { mode: 'move', start: p, moved: false, orig: [...sel].map(byId).filter(Boolean).map(s => ({ s, p: { ...s.p } })) };
         return;
       }
       if (dbl && id) { toggleNodes(sel.size === 1 && topOf([...sel][0]) && topOf([...sel][0]).id === id ? [...sel][0] : id); return; }
+      const wasSelected = !!id && sel.has(id);
       if (id) {
         // Si hay un hijo de este grupo seleccionado (desde la lista o con doble clic), se mueve el hijo.
         const insideSel = [...sel].some(sid => sid !== id && topOf(sid) && topOf(sid).id === id);
         if (sh(e)) { sel.has(id) ? sel.delete(id) : sel.add(id); }
         else if (!sel.has(id) && !insideSel) sel = new Set([id]);
-        drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(s => s && !s.locked).map(s => ({ s, p: { ...s.p } })) };
+        // Tocar otra vez una figura que ya estaba elegida (sin arrastrar) pasa a la que está debajo
+        const again = !sh(e) && !e.altKey && sel.size === 1 && sel.has(id) && wasSelected && stack.length > 1;
+        drag = { mode: 'move', start: p, moved: false, bbox0: selectionBox(), orig: [...sel].map(byId).filter(s => s && !s.locked).map(s => ({ s, p: { ...s.p } })), cycle: again ? stack : null };
         buildInspector(); buildObjects(); drawCanvas();
       } else {
         drag = { mode: 'marquee', start: p, cur: p, base: sh(e) ? new Set(sel) : new Set() };
@@ -3661,6 +3667,41 @@
     }
   });
 
+  // Todas las figuras que hay bajo el puntero, de arriba hacia abajo (sin repetir)
+  function stackAt(e) {
+    const out = [];
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      const d = el.closest && el.closest('[data-id]');
+      const id = d && d.dataset.id, s = id && byId(id);
+      if (id && s && !s.hidden && !out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+  // Orden de las figuras (la última de la lista queda arriba): al frente, al fondo, o un paso adelante / atrás
+  function reorderSel(how) {
+    const shapes = [...sel].map(byId).filter(Boolean);
+    if (!shapes.length) return;
+    const lists = new Map();
+    for (const s of shapes) { const l = listOf(s.id); if (!lists.has(l)) lists.set(l, new Set()); lists.get(l).add(s); }
+    let moved = false;
+    for (const [list, set] of lists) {
+      const before = list.map(x => x.id).join();
+      const pick = list.filter(x => set.has(x)), rest = list.filter(x => !set.has(x));
+      let next;
+      if (how === 'front') next = [...rest, ...pick];
+      else if (how === 'back') next = [...pick, ...rest];
+      else {
+        next = [...list];
+        if (how === 'forward') { for (let i = next.length - 2; i >= 0; i--) if (set.has(next[i]) && !set.has(next[i + 1])) [next[i], next[i + 1]] = [next[i + 1], next[i]]; }
+        else { for (let i = 1; i < next.length; i++) if (set.has(next[i]) && !set.has(next[i - 1])) [next[i], next[i - 1]] = [next[i - 1], next[i]]; }
+      }
+      list.splice(0, list.length, ...next);
+      if (list.map(x => x.id).join() !== before) moved = true;
+    }
+    if (!moved) { msg(how === 'front' || how === 'forward' ? 'Ya está arriba de todo.' : 'Ya está hasta el fondo.'); return; }
+    checkpoint(); fullRender();
+    msg({ front: 'Al frente: ahora está encima de todas.', back: 'Al fondo: ahora está detrás de todas.', forward: 'Subió un lugar.', backward: 'Bajó un lugar.' }[how], 3000);
+  }
   // Doble clic sobre un grupo: selecciona el objeto de adentro que está bajo el puntero.
   // (Se detecta a mano: el lienzo se redibuja al primer clic y el navegador no envía "dblclick".)
   let lastDown = { t: 0, x: 0, y: 0, id: null };
@@ -3759,6 +3800,11 @@
       if (b.w * view.s < 4 && b.h * view.s < 4) { if (d.had) { nodeSel.clear(); } else { sel.clear(); nodeHover = null; buildInspector(); buildObjects(); } }
       else { selectNodesIn(b, d.add); if (nodeSel.size) msg(`${nodeSel.size} punto(s) elegido(s), en naranja. Arrastra uno para moverlos juntos, o usa los botones de abajo.`); }
       drawCanvas();
+    }
+    else if (d.mode === 'move' && !d.moved && d.cycle) {
+      const cur = d.cycle.findIndex(x => sel.has(x)), nx = d.cycle[(cur + 1) % d.cycle.length];
+      sel = new Set([nx]); buildInspector(); buildObjects(); drawCanvas();
+      msg(`Elegida: ${(byId(nx) || {}).name || 'figura'} (la de abajo). Vuelve a tocar para ir a la siguiente.`, 3500);
     }
     else if (d.mode === 'move' && d.moved) { checkpoint(); buildInspector(); }
     else if ((d.mode === 'scale' || d.mode === 'rotate') && d.changed) { checkpoint(); buildInspector(); drawCanvas(); }
@@ -8851,6 +8897,8 @@
   $('#btnSelGroup').onclick = () => groupSel('grupo');
   $('#btnSelUngroup').onclick = ungroupSel;
   $('#btnSelDup').onclick = duplicateSel;
+  $('#btnSelBack').onclick = () => reorderSel('back');
+  $('#btnSelFront').onclick = () => reorderSel('front');
   $('#btnSelDel').onclick = deleteSel;
   $('#chkAdd').onchange = e => { addMode = e.target.checked; };
   $('#btnPenDone').onclick = () => { penFinish(false); };
@@ -9096,6 +9144,8 @@
     if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (mod && k === 'y') { e.preventDefault(); redo(); return; }
     if (mod && k === 'd') { e.preventDefault(); duplicateSel(); return; }
+    if (mod && (k === ']' || k === '}')) { e.preventDefault(); reorderSel(e.shiftKey ? 'front' : 'forward'); return; }
+    if (mod && (k === '[' || k === '{')) { e.preventDefault(); reorderSel(e.shiftKey ? 'back' : 'backward'); return; }
     if (mod && k === 'c') { e.preventDefault(); copySel(false); return; }
     if (mod && k === 'x') { e.preventDefault(); copySel(true); return; }
     if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel('grupo'); return; }
