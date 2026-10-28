@@ -8290,7 +8290,9 @@
         h('button', { class: 'primary', onclick: () => withFonts(exportSVG) }, 'SVG'),
         h('button', { class: 'primary', onclick: () => withFonts(exportDXF) }, 'DXF'),
         h('button', { onclick: saveFile }, 'Guardar')),
-      doc.template && TEMPLATES[doc.template] ? h('button', { class: 'v3link', title: 'Vuelve a abrir esta plantilla con sus medidas de fábrica', onclick: () => loadTemplate(doc.template) }, 'Empezar de nuevo') : null);
+      currentUserTpl() ? h('button', { class: 'primary wide', title: 'Guarda lo que cambiaste dentro de tu plantilla', onclick: () => { saveChangesToTemplate(); build3DRight(); } }, `Guardar cambios en «${currentUserTpl().name}»`) : null,
+      currentUserTpl() ? h('button', { class: 'v3link', title: 'Vuelve a abrir tu plantilla como la guardaste', onclick: () => { const t = currentUserTpl(); loadDoc(JSON.parse(JSON.stringify(t.doc))); doc.userTpl = t.id; checkpoint(); fullRender(); fitView(); const so = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type)); if (so) { sel = new Set([so.id]); open3D(so.id); } } }, 'Volver a como la guardé')
+        : doc.template && TEMPLATES[doc.template] ? h('button', { class: 'v3link', title: 'Vuelve a abrir esta plantilla con sus medidas de fábrica', onclick: () => loadTemplate(doc.template) }, 'Empezar de nuevo') : null);
   }
 
   // Pestañas del centro: la caja en 3D o el plano de corte (las piezas planas sobre tu plancha)
@@ -8995,6 +8997,7 @@
           if (doc.shapes.length && !confirm(`Abrir la plantilla "${tpl.name}" reemplaza el diseño actual (puedes volver con Deshacer). ¿Continuar?`)) return;
           checkpoint();
           loadDoc(JSON.parse(JSON.stringify(tpl.doc)));
+          doc.userTpl = tpl.id;   // así los cambios se guardan EN esta plantilla, no en la de fábrica
           checkpoint(); fullRender(); fitView();
           msg(`Plantilla abierta: ${tpl.name}`);
           // si trae una caja (o maceta, canasta…), se abre directo en el estudio 3D, igual que las plantillas de fábrica
@@ -9128,15 +9131,8 @@
     });
     input.click();
   };
-  $('#btnSaveTemplate').onclick = e => {
-    e.stopPropagation();
-    menu.hidden = true;
-    if (!doc.shapes.length) { msg('El diseño está vacío: primero abre, importa o dibuja algo.'); return; }
-    const name = (prompt('Nombre de la plantilla:', doc.name || 'Mi plantilla') || '').trim();
-    if (!name) return;
+  function saveUserTemplate(name, same) {
     const list = readUserTemplates();
-    const same = list.find(x => x.name === name);
-    if (same && !confirm(`Ya tienes una plantilla "${name}". ¿Reemplazarla?`)) return;
     evaluateParams(); evaluateAll();
     const thumbItems = [...evalCache.values()].flatMap(r => r.items);
     const thumbBox = bboxOfItems(thumbItems);
@@ -9148,14 +9144,43 @@
       thumb.querySelectorAll('text').forEach(e => e.setAttribute('fill', '#1d2a21'));
       thumbnail = 'data:image/svg+xml,' + encodeURIComponent(new XMLSerializer().serializeToString(thumb));
     }
-    const entry = { id: same ? same.id : uid(), name, thumbnail, date: new Date().toISOString(), doc: JSON.parse(JSON.stringify({ ...doc, name })) };
+    const id = same ? same.id : uid();
+    const copy = JSON.parse(JSON.stringify({ ...doc, name })); delete copy.userTpl;
+    const entry = { id, name, thumbnail, date: new Date().toISOString(), doc: copy };
     const next = same ? list.map(x => x.id === same.id ? entry : x) : [...list, entry];
-    if (writeUserTemplates(next)) {
-      const dl = readDeleted(); if (dl[name]) { delete dl[name]; writeDeleted(dl); }
-      msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
-      syncTemplates({ silent: true });
-    }
+    if (!writeUserTemplates(next)) return false;
+    doc.userTpl = id;
+    const dl = readDeleted(); if (dl[name]) { delete dl[name]; writeDeleted(dl); }
+    syncTemplates({ silent: true });
+    buildUserTemplates(); updateSaveTplBtn();
+    return true;
+  }
+  const currentUserTpl = () => doc.userTpl ? readUserTemplates().find(x => x.id === doc.userTpl) : null;
+  // «Guardar cambios en la plantilla»: sobrescribe la plantilla que abriste, sin preguntar el nombre
+  function saveChangesToTemplate() {
+    const t = currentUserTpl();
+    if (!t) return;
+    if (saveUserTemplate(t.name, t)) msg(`Cambios guardados en la plantilla "${t.name}".`);
+  }
+  function updateSaveTplBtn() {
+    const b = $('#btnUpdateTemplate'), t = currentUserTpl();
+    if (!b) return;
+    b.hidden = !t;
+    if (t) b.textContent = `💾 Guardar cambios en «${t.name}»`;
+  }
+  $('#btnUpdateTemplate').onclick = e => { e.stopPropagation(); menu.hidden = true; saveChangesToTemplate(); };
+  $('#btnSaveTemplate').onclick = e => {
+    e.stopPropagation();
+    menu.hidden = true;
+    if (!doc.shapes.length) { msg('El diseño está vacío: primero abre, importa o dibuja algo.'); return; }
+    const cur = currentUserTpl();
+    const name = (prompt('Nombre de la plantilla:', cur ? cur.name : doc.name || 'Mi plantilla') || '').trim();
+    if (!name) return;
+    const same = readUserTemplates().find(x => x.name === name);
+    if (same && !confirm(`Ya tienes una plantilla "${name}". ¿Reemplazarla?`)) return;
+    if (saveUserTemplate(name, same)) msg(`Plantilla guardada: "${name}". Está en Plantillas → Mis plantillas.`);
   };
+  $('#btnTemplates') && $('#btnTemplates').addEventListener('click', updateSaveTplBtn);
   document.addEventListener('click', () => { menu.hidden = true; });
   // Abre una plantilla (reemplaza el diseño); las cajas y figuras 3D se abren directo en el estudio 3D
   function loadTemplate(key) {
@@ -9163,7 +9188,7 @@
     if (doc.shapes.length && !confirm('La plantilla reemplaza el diseño actual (puedes volver con Deshacer). ¿Continuar?')) return;
     checkpoint();
     doc = TEMPLATES[key](doc.units, doc.sheet);
-    doc.template = key;
+    doc.template = key; delete doc.userTpl;
     sel.clear(); checkpoint(); fullRender(); fitView();
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
     if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
