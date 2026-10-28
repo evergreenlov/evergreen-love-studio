@@ -8950,7 +8950,7 @@
     $('#unitSelect').value = doc.units;
     for (const b of document.querySelectorAll('#unitSeg button')) { const on = b.dataset.u === doc.units; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
     $('#stCoords').textContent = `x ${fmt(lastPointer.x / unitMM, 3)} · y ${fmt(lastPointer.y / unitMM, 3)} ${unitLabel()}`;
-    drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons();
+    drawCanvas(); buildParams(); buildInspector(); buildObjects(); buildMeasures(); refreshHints(); updateButtons(); updateSaveTplBtn();
     if (v3.open) { if (v3.art || (v3.gid ? allShapes().some(x => x.from && x.from.gid === v3.gid && x.asm) : byId(v3.id))) { build3D(); syncSizes3D(); updateDims3D(); build3DRight(); buildPlan3D(); } else close3D(); }
   }
   function updateButtons() {
@@ -9192,11 +9192,11 @@
     if (saveUserTemplate(t.name, t)) msg(`Cambios guardados en la plantilla "${t.name}".`);
   }
   function updateSaveTplBtn() {
-    const b = $('#btnUpdateTemplate'), t = currentUserTpl();
-    if (!b) return;
-    b.hidden = !t;
-    if (t) b.textContent = `💾 Guardar cambios en «${t.name}»`;
+    const b = $('#btnUpdateTemplate'), top = $('#btnTplSave'), t = currentUserTpl();
+    if (b) { b.hidden = !t; if (t) b.textContent = `💾 Guardar cambios en «${t.name}»`; }
+    if (top) { top.hidden = !t; if (t) top.title = `Guarda lo que cambiaste dentro de tu plantilla «${t.name}»`; }
   }
+  $('#btnTplSave').onclick = saveChangesToTemplate;
   $('#btnUpdateTemplate').onclick = e => { e.stopPropagation(); menu.hidden = true; saveChangesToTemplate(); };
   $('#btnSaveTemplate').onclick = e => {
     e.stopPropagation();

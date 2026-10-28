@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-estudio-25">
+<link rel="stylesheet" href="estilos.css?v=20261019-estudio-26">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#2f7d4f">
@@ -14,7 +14,7 @@
 <script>
 /* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
 (function () {
-  var BUILD = "estudio-25";
+  var BUILD = "estudio-26";
   try {
     fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = (t || '').trim();
@@ -29,7 +29,7 @@
   <div class="brand">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 5 11h3l-4 6h6v5h4v-5h6l-4-6h3z" fill="currentColor"/></svg>
     <span>Evergreen Love Studio</span>
-    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v estudio-25</span>
+    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v estudio-26</span>
   </div>
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="seg" id="unitSeg" role="group" aria-label="Trabajar en milímetros o pulgadas"><button type="button" data-u="mm" title="Trabajar en milímetros">mm</button><button type="button" data-u="in" title="Trabajar en pulgadas">pulgadas</button></div>
@@ -37,6 +37,7 @@
     <button id="btnNew" title="Nuevo diseño">Nuevo</button>
     <button id="btnOpen" title="Abrir un diseño guardado (.json) o importar SVG, DXF, PNG o JPG (Ctrl+O)">Abrir</button>
     <button id="btnImport" title="Importar un archivo SVG, DXF, PNG o JPG para editarlo">Importar</button>
+    <button id="btnTplSave" class="primary" hidden>💾 Guardar en mi plantilla</button>
     <button id="btnSave" title="Guarda un SVG: se abre en xTool y también aquí para seguir editando (Ctrl+S)">Guardar</button>
     <button id="btnSaveJson" title="Copia de seguridad en .json (solo la abre esta aplicación)">.json</button>
     <span class="divider"></span>
@@ -231,7 +232,7 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-estudio-25"></script>
+<script src="app.js?v=20261019-estudio-26"></script>
 <script>
 /* Uso sin internet: se guarda una copia de la aplicación en este aparato (hace falta abrirla una vez con internet). */
 (function () {
