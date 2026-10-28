@@ -7684,11 +7684,11 @@
     ['abedul', 'Contrachapado / abedul claro', 0xe3c79b], ['pino', 'Pino', 0xe8cf94], ['tilo', 'Tilo (basswood)', 0xe6cfa1],
     ['roble', 'Roble', 0xc9a26a], ['cerezo', 'Cerezo', 0xb9714a], ['nogal', 'Nogal', 0x7a5236], ['caoba', 'Caoba', 0x8c4a32],
     ['negro', 'Negro / ébano', 0x2e2a28], ['blanco', 'Blanco pintado', 0xf1efe9], ['mdf', 'MDF', 0xb59a74], ['acrilico', 'Acrílico transparente', 0xcfe6f0],
-    ['rojo', 'Rojo pintado', 0xb3322c], ['verde', 'Verde pintado', 0x4f7d54], ['azul', 'Azul pintado', 0x3f6fa3],
+    ['otro', 'Otro color (elige tú)…', null], ['rojo', 'Rojo pintado', 0xb3322c], ['verde', 'Verde pintado', 0x4f7d54], ['azul', 'Azul pintado', 0x3f6fa3],
   ];
   const WOOD_KEY = 'evergreen-love-studio:madera3d';
   const woodPick = (() => { try { return { main: 'auto', cover: 'auto', ...(JSON.parse(localStorage.getItem(WOOD_KEY) || '{}') || {}) }; } catch (e) { return { main: 'auto', cover: 'auto' }; } })();
-  const woodHex = id => { const t = WOOD_TYPES.find(w => w[0] === id); return t ? t[2] : null; };
+  const woodHex = id => { if (id === 'otro') return woodPick.custom != null ? woodPick.custom : 0xdcb887; const t = WOOD_TYPES.find(w => w[0] === id); return t ? t[2] : null; };
   const shade = (hex, f) => { const r = Math.min(255, Math.round(((hex >> 16) & 255) * f)), g = Math.min(255, Math.round(((hex >> 8) & 255) * f)), b = Math.min(255, Math.round((hex & 255) * f)); return (r << 16) | (g << 8) | b; };
   // Color final de una pieza en 3D: el elegido (con un poco de sombra según la cara) o el de siempre
   function pickWood(orig, place) {
@@ -7979,7 +7979,7 @@
     const sc = Math.min(8, 2048 / Math.max(p.L, p.H)), cv = document.createElement('canvas');
     cv.width = Math.max(2, Math.round(p.L * sc)); cv.height = Math.max(2, Math.round(p.H * sc));
     const cx2 = cv.getContext('2d');
-    cx2.fillStyle = '#dcb887'; cx2.fillRect(0, 0, cv.width, cv.height);
+    cx2.fillStyle = '#' + pickWood(0xdcb887).toString(16).padStart(6, '0'); cx2.fillRect(0, 0, cv.width, cv.height);
     cx2.strokeStyle = '#4a2f16'; cx2.lineWidth = Math.max(1, 0.35 * sc); cx2.lineCap = 'round';
     cx2.beginPath();
     for (const [a, b] of p.hl) { cx2.moveTo(a[0] * sc, a[1] * sc); cx2.lineTo(b[0] * sc, b[1] * sc); }
@@ -8910,11 +8910,14 @@
   {
     const fill = (sel, cur) => { for (const [id, nm] of WOOD_TYPES) sel.append(h('option', { value: id }, nm)); sel.value = cur; };
     fill($('#woodMain'), woodPick.main); fill($('#woodCover'), woodPick.cover);
+    const cc = $('#woodCustom');
     const onPick = () => {
       woodPick.main = $('#woodMain').value; woodPick.cover = $('#woodCover').value;
+      if (cc) { woodPick.custom = parseInt(cc.value.slice(1), 16); cc.hidden = woodPick.main !== 'otro'; }
       try { localStorage.setItem(WOOD_KEY, JSON.stringify(woodPick)); } catch (e) { /* sin almacenamiento */ }
       if (v3.open) build3D();
     };
+    if (cc) { cc.value = '#' + (woodPick.custom != null ? woodPick.custom : 0xdcb887).toString(16).padStart(6, '0'); cc.hidden = woodPick.main !== 'otro'; cc.addEventListener('input', onPick); }
     $('#woodMain').addEventListener('change', onPick); $('#woodCover').addEventListener('change', onPick);
   }
   $('#v3Home').onclick = () => setCam3D('home');
