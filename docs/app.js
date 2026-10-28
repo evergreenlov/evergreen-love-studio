@@ -4243,6 +4243,7 @@
     bar.hidden = !shapes.length || tool === 'pen' || tool === 'measure';
     $('#btnSelGroup').hidden = !can;
     $('#btnSelUngroup').hidden = !canUn;
+    $('#btnSelWeld').hidden = !(shapes.length === 1 && shapes[0].type === 'text');
   }
   function buildInspectorFields() {
     const box = $('#inspector');
@@ -6080,7 +6081,12 @@
   async function openWeldTool(s) {
     if (!s || s.type !== 'text') return;
     const fid = s.p.fuente || 'arial';
-    if (fid === 'arial') { msg('Para soldar las letras elige una de las tipografías de la lista (no «Arial del sistema»): así se pueden convertir en curvas.'); return; }
+    if (fid === 'arial') {
+      // Arial del sistema no se puede convertir en curvas: se pasa a Montserrat (la forma de las letras casi no cambia)
+      s.p.fuente = 'montserrat'; fullRender();
+      msg('«Arial del sistema» no se puede soldar: cambié la tipografía a Montserrat para poder unir las letras.');
+      return openWeldTool(s);
+    }
     try { await loadFont(fid); } catch (e) { msg('No se pudo cargar la tipografía.'); return; }
     evaluateParams(); evaluateAll();
     const r = evalCache.get(s.id);
@@ -7655,6 +7661,12 @@
     const f = { front: 1.04, back: 1.04, left: 0.94, right: 0.94, bottom: 0.9, top: 1 }[place];
     return shade(base, f === undefined ? 1 : f);
   }
+  // Color propio de una pieza (elegido en «3 · Colores»); null si no tiene
+  function partColor(s, q) {
+    const c = s && s.colors && (s.colors[q.name] ?? s.colors['*']);
+    if (c == null) return null;
+    return shade(c, { front: 1.04, back: 1.04, left: 0.94, right: 0.94, bottom: 0.9, top: 1 }[q.place] || 1);
+  }
   function pickCover(orig) { const base = woodHex(woodPick.cover); return base == null ? orig : base; }
   function placeOrigin(m, q) {
     const { W, D, H, t, fingers } = m;
@@ -7882,7 +7894,7 @@
       holder.userData.slide = !!q.drawer;
       holder.userData.band = !!q.band;
       holder.userData.lid = !!m.hinge && (q.name === 'Tapa' || q.name === 'Cubierta de la tapa' || q.name === 'Cubierta Tapa');
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: partColor(s, q) ?? (q.color ? pickCover(q.color) : pickWood(WOOD[q.place] || 0xe2bf8d, q.place)), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
       const parts = [mesh, edges];
       if (engQs.has(q) || ovs.has(q)) {
@@ -8169,6 +8181,33 @@
         card('Cubierta de otra madera', cv === 'si' ? 'Con cubierta' : 'Sin cubierta').append(h('div', { class: 'v3row' },
           ...[['no', 'Sin cubierta'], ['si', 'Con cubierta']].map(([k, label]) => h('button', { class: 'v3chip' + (cv === k ? ' active' : ''), onclick: () => apply(() => { s.p.cubierta = k; }) }, label))));
       }
+    }
+    // Colores por pieza (solo la vista 3D; no cambia el corte)
+    const names = [...new Set([...m.panels, ...m.dividers].filter(q => !q.only2d).map(q => q.name))];
+    if (names.length && !m.cone && !m.planter) {
+      part(3, 'Colores');
+      const cols = s.colors || {}, hex = n => '#' + (n & 0xffffff).toString(16).padStart(6, '0');
+      const target = v3.paint && (v3.paint === '*' || names.includes(v3.paint)) ? v3.paint : '*';
+      const c = card('Pintar piezas', target === '*' ? 'Todas' : target);
+      const setColor = col => apply(() => {
+        s.colors = { ...(s.colors || {}) };
+        if (target === '*') { s.colors = col == null ? {} : { '*': col }; } else if (col == null) delete s.colors[target]; else s.colors[target] = col;
+        if (!Object.keys(s.colors).length) delete s.colors;
+      });
+      const sw = h('div', { class: 'v3sw' });
+      for (const [id, nm, col] of WOOD_TYPES) {
+        if (col == null) continue;
+        sw.append(h('button', { class: 'v3swatch', style: `background:${hex(col)}`, title: nm, 'aria-label': nm, onclick: () => setColor(col) }));
+      }
+      const pick = h('input', { type: 'color', class: 'v3swatch v3swatch-custom', title: 'Otro color…', 'aria-label': 'Otro color', value: hex(target === '*' ? (cols['*'] ?? 0xdcb887) : (cols[target] ?? cols['*'] ?? 0xdcb887)) });
+      pick.onchange = () => setColor(parseInt(pick.value.slice(1), 16));
+      sw.append(pick, h('button', { class: 'v3chip', onclick: () => setColor(null) }, target === '*' ? 'Quitar colores' : 'Quitar'));
+      const list = h('div', { class: 'v3row v3pieces' }, ...[['*', 'Todas'], ...names.map(n => [n, n])].map(([k, label]) => {
+        const cc = k === '*' ? cols['*'] : cols[k];
+        return h('button', { class: 'v3chip' + (target === k ? ' active' : ''), onclick: () => { v3.paint = k; build3DLeft(); } },
+          cc != null ? h('i', { class: 'v3dot', style: `background:${hex(cc)}` }) : null, label);
+      }));
+      c.append(list, sw);
     }
     resize3D();
   }
@@ -8897,6 +8936,7 @@
   $('#btnSelGroup').onclick = () => groupSel('grupo');
   $('#btnSelUngroup').onclick = ungroupSel;
   $('#btnSelDup').onclick = duplicateSel;
+  $('#btnSelWeld').onclick = () => { const t = [...sel].map(byId).find(x => x && x.type === 'text'); if (t) withFonts(() => openWeldTool(t)); };
   $('#btnSelBack').onclick = () => reorderSel('back');
   $('#btnSelFront').onclick = () => reorderSel('front');
   $('#btnSelDel').onclick = deleteSel;
