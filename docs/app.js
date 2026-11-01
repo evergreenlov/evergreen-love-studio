@@ -7836,10 +7836,14 @@
       const w = Math.abs(len(x, 'w')), aspect = a.h / a.w, hh = x.p.prop === 'no' ? Math.abs(len(x, 'h')) : w * aspect, sy = hh / aspect;
       if (![w, hh].every(Number.isFinite) || !w || !hh) continue;
       kSum += w / a.realW + hh / a.realH; kN += 2;
-      const cuts = a.polys.filter(pl => pl.closed && pl.pts.length >= 3 && (pl.op || 'corte') === 'corte').map(pl => pl.pts.map(([u, v]) => [u * w, v * sy]));
+      // Un adorno (torre, silueta…) se extruye por su contorno aunque esté marcado como grabado; solo los cortes de adentro son huecos
+      const orn = x.asm.name === 'Adorno';
+      const cl = a.polys.filter(pl => pl.closed && pl.pts.length >= 3).map(pl => ({ op: pl.op || 'corte', pts: pl.pts.map(([u, v]) => [u * w, v * sy]) }));
+      const cuts = (orn ? cl : cl.filter(c => c.op === 'corte')).map(c => c.pts);
       if (!cuts.length) continue;
       const outer = cuts.reduce((p, q) => polyArea(q) > polyArea(p) ? q : p);
-      items.push({ x, outer, holes: cuts.filter(c => c !== outer && inPoly(c[0], outer)) });
+      const holeSrc = orn ? cl.filter(c => c.op === 'corte').map(c => c.pts) : cuts;
+      items.push({ x, outer, holes: holeSrc.filter(c => c !== outer && inPoly(c[0], outer)) });
     }
     if (!info || !items.length) { $('#view3dMsg').hidden = false; $('#view3dMsg').textContent = 'Ya no quedan piezas de esa caja. Usa «Volver a la caja con parámetros» o Deshacer.'; return; }
     $('#view3dMsg').hidden = true;
@@ -8799,10 +8803,46 @@
   }
   async function openAssembleDialog(shapesIn) {
     evaluateParams(); evaluateAll();
-    // Piezas que ya vienen de una caja de la app (o ya fueron armadas): se abren directo en 3D, sin preguntar nada
+    // Piezas que ya vienen de una caja de la app (o ya fueron armadas) saben cómo se arman: no se vuelve a adivinar nada.
+    // Lo que se haya añadido (una torre, un adorno…) se pega a la pared sobre la que está en el lienzo, en el mismo lugar.
     {
-      const gids = new Set(shapesIn.filter(Boolean).map(x => x.from && x.asm ? x.from.gid : null));
-      if (gids.size === 1 && [...gids][0] && doc.origins && doc.origins[[...gids][0]]) { open3D([...gids][0]); msg('Estas piezas ya saben cómo se arman: aquí está la caja en 3D.'); return; }
+      const list = shapesIn.filter(Boolean), cnt = new Map();
+      for (const x of list) if (x.from && x.asm && doc.origins && doc.origins[x.from.gid]) cnt.set(x.from.gid, (cnt.get(x.from.gid) || 0) + 1);
+      const [gid0, n0] = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+      if (gid0 && n0 >= 4) {
+        const known = list.filter(x => x.from && x.asm && x.from.gid === gid0), extra = list.filter(x => !known.includes(x) && x.type === 'import' && doc.assets[x.p.asset] && doc.assets[x.p.asset].kind === 'vector');
+        const og = doc.origins[gid0], tt = og.asm ? og.asm.t : 3;
+        evaluateParams(); evaluateAll();
+        const bb = x => { const r = evalCache.get(x.id); return r && r.bbox; };
+        const walls = known.filter(x => /^(Frente|Atrás|Lado izquierdo|Lado derecho)$/.test(x.asm.name) && bb(x));
+        let placedN = 0;
+        if (extra.length && walls.length) {
+          const eb = extra.map(bb).filter(Boolean);
+          if (eb.length) {
+            const E = { x: Math.min(...eb.map(b => b.x)), y: Math.min(...eb.map(b => b.y)), x1: Math.max(...eb.map(b => b.x + b.w)), y1: Math.max(...eb.map(b => b.y + b.h)) };
+            let tw = null, best = -Infinity;
+            for (const w of walls) {
+              const b = bb(w), ov = Math.max(0, Math.min(E.x1, b.x + b.w) - Math.max(E.x, b.x)) * Math.max(0, Math.min(E.y1, b.y + b.h) - Math.max(E.y, b.y));
+              const sc = ov > 0 ? ov : -Math.hypot((E.x + E.x1) / 2 - (b.x + b.w / 2), (E.y + E.y1) / 2 - (b.y + b.h / 2));
+              if (sc > best) { best = sc; tw = w; }
+            }
+            const wb = bb(tw), ax = tw.asm.ax, onWall = best > 0;
+            const u0 = onWall ? E.x - wb.x : (wb.w - (E.x1 - E.x)) / 2, v0 = onWall ? E.y - wb.y : Math.max(0, wb.h - (E.y1 - E.y));
+            extra.forEach((x, k) => {
+              const b = bb(x); if (!b) return;
+              const u = u0 + (b.x - E.x), v = v0 + (b.y - E.y);
+              const o = [0, 1, 2].map(i => ax.o[i] + ax.eu[i] * u + ax.ev[i] * v + ax.out[i] * tt);
+              x.from = { gid: gid0, name: og.asm ? og.asm.name : 'Caja' };
+              x.asm = { name: 'Adorno', ax: { eu: ax.eu, ev: ax.ev, ew: ax.ew, o, out: ax.out } };
+              x.name = 'Adorno' + (extra.length > 1 ? ' ' + (k + 1) : '');
+              placedN++;
+            });
+            if (placedN) msg(`El adorno quedó pegado por fuera de «${tw.asm.name}», en el mismo lugar donde lo pusiste.`);
+          }
+        }
+        if (placedN) { checkpoint(); fullRender(); }
+        if (!extra.length || placedN) { open3D(gid0); if (!placedN) msg('Estas piezas ya saben cómo se arman: aquí está la caja en 3D.'); return; }
+      }
     }
     // Un solo archivo con varias piezas: se separa primero
     let shapes = shapesIn.filter(Boolean);
