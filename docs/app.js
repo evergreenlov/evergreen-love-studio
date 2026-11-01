@@ -8586,7 +8586,7 @@
     const hb0 = Math.min(...slits.map(s => s.b[lo])), hb1 = Math.max(...slits.map(s => s.b[hi]));
     const onHi = slots.filter(s => s.c[A] > hb1), onLo = slots.filter(s => s.c[A] < hb0);
     const baseHi = onHi.length >= onLo.length, base = baseHi ? onHi : onLo;
-    if (base.length < 2) return { err: 'No encontré las ranuras de la base en la placa.' };
+    if (base.length < 2) return { err: 'La app cree que esta pieza es la placa de una «caja libro», pero no encontró dónde entra la base. Si tu caja no es de tipo libro, abre «Madera y tipo de unión» y elige «Con dedos» o «Para pegar».' };
     // En 3D la base empieza en x = 0 junto a la bisagra; z sigue a lo largo de la bisagra
     const sg = baseHi ? 1 : -1, uh = baseHi ? hb1 : hb0, toX = a => sg * (a - uh);
     const plateAx = { eu: A === 0 ? [sg, 0, 0] : [0, 0, 1], ev: A === 0 ? [0, 0, 1] : [sg, 0, 0], ew: [0, 1, 0], o: [-sg * uh, 0, 0], out: [0, -1, 0] };
@@ -8852,7 +8852,9 @@
     });
     // ¿Caja libro? Una pieza con bisagra viva es la placa; las piezas largas son las paredes y las chicas (cierre, adornos) no se usan
     {
-      const counts = rows.map(r => hingeSlitCount(r.p.s)), best = Math.max(...counts);
+      // solo piezas rectangulares cuentan como placa: los adornos (una torre con ladrillos, por ejemplo) tienen muchas rayitas parecidas a bisagra
+      const named = rows.some(r => /frente|atr[aá]s|lado (izq|der)/i.test(r.p.s.name)); // si las piezas ya se llaman Frente, Atrás… no es una caja libro
+      const counts = rows.map(r => named || ornaments.includes(r.p) || fillOf(r.p) < 0.85 ? 0 : hingeSlitCount(r.p.s)), best = Math.max(...counts);
       if (best >= 10) {
         const pr = rows[counts.indexOf(best)], pd = Math.min(pr.p.w, pr.p.h);
         styleSel.value = 'libro';
