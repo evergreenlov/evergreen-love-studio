@@ -8555,7 +8555,7 @@
     v3.raf = requestAnimationFrame(loop3D);
   }
   /* ================= Armar en 3D las piezas planas de un archivo (caja con dedos o pegada) ================= */
-  const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', plate: 'Placa de caja libro (tapa + bisagra + base)', none: 'No usar' };
+  const FACES = { front: 'Frente', back: 'Atrás', left: 'Lado izquierdo', right: 'Lado derecho', bottom: 'Base', top: 'Tapa', plate: 'Placa de caja libro (tapa + bisagra + base)', ad_left: 'Adorno pegado al lado izquierdo', ad_right: 'Adorno pegado al lado derecho', ad_front: 'Adorno pegado al frente', ad_back: 'Adorno pegado atrás', none: 'No usar' };
   // Contornos de una pieza importada en sus propias medidas (0..w, 0..h), igual que los arma la vista 3D
   function localPolys(s) {
     const a = doc.assets && doc.assets[s.p.asset];
@@ -8820,7 +8820,11 @@
     if (shapes.length < 4) { msg('Elige al menos 4 piezas planas (por ejemplo todo el archivo con Cmd+A) para armarlas como caja.'); return; }
     evaluateParams(); evaluateAll();
     const pcs = shapes.map((s, i) => { const r = evalCache.get(s.id), b = r && r.bbox; return b ? { i, s, w: b.w, h: b.h, items: r.items } : null; }).filter(Boolean);
-    const sug = suggestFaces(pcs);
+    // Las piezas que no son rectángulos (una torre, una silueta…) son adornos: no cuentan como paredes de la caja
+    const fillOf = p => { const cl = p.items.flatMap(it => it.polys).filter(q => q.closed && q.pts.length >= 3); if (!cl.length) return 1; return Math.max(...cl.map(q => Math.abs(shoelace(q.pts)))) / Math.max(1e-6, p.w * p.h); };
+    const ornaments = pcs.filter(p => fillOf(p) < 0.72);
+    const sug = suggestFaces(pcs.length - ornaments.length >= 4 ? pcs.filter(p => !ornaments.includes(p)) : pcs);
+    if (pcs.length - ornaments.length >= 4) for (const p of ornaments) sug.set(p.i, { face: 'ad_left', rot: false });
     // Si las piezas ya traen su nombre (Frente, Atrás, Lado izquierdo…) y no se repiten, el nombre manda sobre el tamaño
     {
       const byName = pc => { const n = pc.s.name.toLowerCase(); return /lado izq|izquierd/.test(n) ? 'left' : /lado der|derech/.test(n) ? 'right' : /frente/.test(n) ? 'front' : /atr[aá]s/.test(n) ? 'back' : /base|fondo/.test(n) ? 'bottom' : /tapa/.test(n) ? 'top' : null; };
@@ -8922,6 +8926,8 @@
         msg(`Caja libro armada: placa y ${res.out.length - 1} pared(es) en sus ranuras.` + (res.skipped.length ? ` Sin lugar: ${res.skipped.join(', ')} (revisa el grosor o márcalas «No usar»).` : ''), 12000);
         return;
       }
+      const orn = used.filter(r => r.face.value.startsWith('ad_'));
+      for (let q = used.length - 1; q >= 0; q--) if (orn.includes(used[q])) used.splice(q, 1);
       const dims = r => r.rot.checked ? [r.p.h, r.p.w] : [r.p.w, r.p.h];
       const fr = pick('front')[0] || pick('back')[0], sd = pick('left')[0] || pick('right')[0], bs = pick('bottom')[0];
       if (!fr || !sd || !bs) { status.textContent = 'Hace falta al menos un frente, un lado y una base.'; return; }
@@ -8957,6 +8963,23 @@
         s.from = { gid, name: doc.name || 'Caja' };
         s.asm = { name: names[f], ax: JSON.parse(JSON.stringify(ax)) };
         s.name = names[f] + (pick(f).length > 1 ? ' ' + (pick(f).indexOf(r) + 1) : '');
+      }
+      // Adornos (la torre…): se pegan por fuera de la pared elegida, centrados y apoyados abajo
+      for (const side of ['front', 'back', 'left', 'right']) {
+        const grp = orn.filter(r => r.face.value === 'ad_' + side);
+        if (!grp.length) continue;
+        const bbs = grp.map(r => evalCache.get(r.p.s.id).bbox);
+        const sx0 = Math.min(...bbs.map(b => b.x)), sy0 = Math.min(...bbs.map(b => b.y)), sx1 = Math.max(...bbs.map(b => b.x + b.w)), sy1 = Math.max(...bbs.map(b => b.y + b.h));
+        const fb = side === 'front' || side === 'back', ref = fb ? fr : sd;
+        const wq = { name: 'pared', place: side, w: fb ? dims(fr)[0] : dims(sd)[0], h: dims(ref)[1] }, wax = axesOf(m, wq);
+        const wallW = fb ? W : Dd, du0 = (wallW - (sx1 - sx0)) / 2, dv0 = Math.max(0, wq.h - (sy1 - sy0));
+        grp.forEach((r, k) => {
+          const b = bbs[k], u = du0 + (b.x - sx0), v = dv0 + (b.y - sy0);
+          const o = [0, 1, 2].map(i => wax.o[i] + wax.eu[i] * u + wax.ev[i] * v + wax.out[i] * t);
+          r.p.s.from = { gid, name: doc.name || 'Caja' };
+          r.p.s.asm = { name: 'Adorno', ax: { eu: wax.eu, ev: wax.ev, ew: wax.ew, o, out: wax.out } };
+          r.p.s.name = 'Adorno' + (grp.length > 1 ? ' ' + (k + 1) : '');
+        });
       }
       doc.origins = doc.origins || {};
       doc.origins[gid] = { shape: null, asm: { name: doc.name || 'Caja', t, W, H: Hh, D: Dd, wall: false } };
