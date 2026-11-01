@@ -530,3 +530,10 @@ input.v3size-val { width: 64px; min-width: 0; padding: 4px 6px; text-align: righ
 .v3swatch.on{outline:2px solid var(--sel);outline-offset:1px}
 
 .piece-name{fill:#6b4a2b;opacity:.8;text-anchor:middle;dominant-baseline:middle;pointer-events:none;font-family:inherit;font-weight:600}
+
+.asm-summary{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
+.asm-chip{padding:4px 10px;border-radius:999px;font-size:13px;border:1px solid var(--border)}
+.asm-chip.ok{background:#e4f3e9;color:#1f5a35;border-color:#9fd0b0}
+.asm-chip.no{background:#fde8e6;color:#8a2a22;border-color:#e6a8a2}
+.asm-more{margin:10px 0;border-top:1px solid var(--border);padding-top:8px}
+.asm-more>summary{cursor:pointer;font-weight:600;padding:6px 0}

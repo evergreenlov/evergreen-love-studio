@@ -8799,6 +8799,11 @@
   }
   async function openAssembleDialog(shapesIn) {
     evaluateParams(); evaluateAll();
+    // Piezas que ya vienen de una caja de la app (o ya fueron armadas): se abren directo en 3D, sin preguntar nada
+    {
+      const gids = new Set(shapesIn.filter(Boolean).map(x => x.from && x.asm ? x.from.gid : null));
+      if (gids.size === 1 && [...gids][0] && doc.origins && doc.origins[[...gids][0]]) { open3D([...gids][0]); msg('Estas piezas ya saben cómo se arman: aquí está la caja en 3D.'); return; }
+    }
     // Un solo archivo con varias piezas: se separa primero
     let shapes = shapesIn.filter(Boolean);
     if (shapes.length === 1 && shapes[0].type === 'import') {
@@ -8816,6 +8821,12 @@
     evaluateParams(); evaluateAll();
     const pcs = shapes.map((s, i) => { const r = evalCache.get(s.id), b = r && r.bbox; return b ? { i, s, w: b.w, h: b.h, items: r.items } : null; }).filter(Boolean);
     const sug = suggestFaces(pcs);
+    // Si las piezas ya traen su nombre (Frente, Atrás, Lado izquierdo…) y no se repiten, el nombre manda sobre el tamaño
+    {
+      const byName = pc => { const n = pc.s.name.toLowerCase(); return /lado izq|izquierd/.test(n) ? 'left' : /lado der|derech/.test(n) ? 'right' : /frente/.test(n) ? 'front' : /atr[aá]s/.test(n) ? 'back' : /base|fondo/.test(n) ? 'bottom' : /tapa/.test(n) ? 'top' : null; };
+      const faces = pcs.map(byName), uniq = faces.every((f, i) => !f || faces.indexOf(f) === i);
+      if (uniq && faces.filter(Boolean).length >= 4) pcs.forEach((pc, i) => { const cur = sug.get(pc.i); sug.set(pc.i, { face: faces[i] || 'none', rot: faces[i] ? ['front', 'back'].includes(faces[i]) ? pc.w < pc.h : cur.rot : false }); });
+    }
     const tDef = vars.grosor !== undefined && vars.grosor * unitMM > 0 ? vars.grosor * unitMM : 3;
     const dialog = h('dialog', { class: 'batch-dialog imgtool-dialog', 'aria-label': 'Armar en 3D' });
     const close = () => { dialog.close(); dialog.remove(); };
@@ -8953,16 +8964,27 @@
       open3D(gid);
       msg(`Caja armada: ${fmt(W / unitMM, isInch() ? 2 : 1)} × ${fmt(Dd / unitMM, isInch() ? 2 : 1)} × ${fmt(Hh / unitMM, isInch() ? 2 : 1)} ${unitLabel()}.`);
     };
+    const summary = h('p', { class: 'asm-summary', role: 'status' });
+    const refresh = () => {
+      const have = f => rows.some(r => r.face.value === f), n = f => rows.filter(r => r.face.value === f).length;
+      const chip = (label, ok) => `<span class="asm-chip ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} ${label}</span>`;
+      const lib = rows.some(r => r.face.value === 'plate');
+      summary.innerHTML = lib ? chip('Placa de caja libro', true) + rows.filter(r => !['plate', 'none'].includes(r.face.value)).length + ' paredes'
+        : chip('Frente' + (n('front') > 1 ? ' ×' + n('front') : ''), have('front')) + chip('Atrás', have('back')) + chip('Lado izq.', have('left')) + chip('Lado der.', have('right')) + chip('Base', have('bottom')) + chip('Tapa (opcional)', true).replace('✓', have('top') ? '✓' : '–');
+    };
+    for (const r of rows) { r.face.addEventListener('change', refresh); }
+    refresh();
+    const det = (title, ...kids) => h('details', { class: 'asm-more' }, h('summary', {}, title), ...kids);
     dialog.append(h('h2', {}, 'Armar la caja en 3D'),
-      h('p', { class: 'tip' }, 'La app propone qué cara es cada pieza según su tamaño. Corrige las que no coincidan y, si una pieza está acostada, marca «girar 90°». Funciona con cajas rectas (con tapa o sin ella).'),
-      h('div', { class: 'nest-grid' }, h('label', {}, `Grosor de la madera (${unitLabel()})`, tIn), h('label', {}, 'Tipo de unión', styleSel)),
-      espRow,
-      h('div', { class: 'asm-list' }, ...rows.map(r => r.el)),
-      h('div', { class: 'insp-sub' }, 'Agrandar la caja (opcional)'),
-      h('p', { class: 'tip' }, 'Suma una medida a cada cara de la caja. Los dedos y las ranuras no cambian de tamaño; el contorno y el adorno crecen parejo por los dos lados.'),
-      h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, iW), h('label', {}, `Sumar al fondo (${unitLabel()})`, iD), h('label', {}, `Sumar al alto (${unitLabel()})`, iH)),
-      status,
-      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), grow, go));
+      h('p', { class: 'tip' }, 'La app ya adivinó qué es cada pieza. Si abajo todo está en verde, pulsa «Armar en 3D».'),
+      summary, status,
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go),
+      det('Corregir qué es cada pieza', h('p', { class: 'tip' }, 'Cambia la cara de las piezas que no coincidan. Si una pieza está acostada, marca «girar 90°».'), h('div', { class: 'asm-list' }, ...rows.map(r => r.el))),
+      det('Madera y tipo de unión', h('div', { class: 'nest-grid' }, h('label', {}, `Grosor de la madera (${unitLabel()})`, tIn), h('label', {}, 'Tipo de unión', styleSel)), espRow),
+      det('Agrandar la caja (opcional)',
+        h('p', { class: 'tip' }, 'Suma una medida a cada cara de la caja. Los dedos y las ranuras no cambian de tamaño; el contorno y el adorno crecen parejo por los dos lados.'),
+        h('div', { class: 'nest-grid' }, h('label', {}, `Sumar al ancho (${unitLabel()})`, iW), h('label', {}, `Sumar al fondo (${unitLabel()})`, iD), h('label', {}, `Sumar al alto (${unitLabel()})`, iH)),
+        h('div', { class: 'dialog-actions' }, grow)));
     document.body.append(dialog); dialog.showModal();
   }
 
