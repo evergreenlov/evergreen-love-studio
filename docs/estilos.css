@@ -528,3 +528,5 @@ input.v3size-val { width: 64px; min-width: 0; padding: 4px 6px; text-align: righ
 .prop-col{display:flex;flex-direction:column;gap:6px;margin:6px 0}
 .prop-col>label{font-size:12px;opacity:.8}
 .v3swatch.on{outline:2px solid var(--sel);outline-offset:1px}
+
+.piece-name{fill:#6b4a2b;opacity:.8;text-anchor:middle;dominant-baseline:middle;pointer-events:none;font-family:inherit;font-weight:600}

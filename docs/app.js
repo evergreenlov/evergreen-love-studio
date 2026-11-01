@@ -844,6 +844,11 @@
   }
 
   window.__evergreen = { model: id => modelOf(byId(id), true) }; // para pruebas
+  // «Nombres»: etiqueta cada pieza de las cajas (Frente, Atrás, Lado izquierdo…) en el lienzo y en el 3D; solo para ver, no se exporta
+  const NAMES_KEY = 'evergreen-love-studio:nombres-piezas';
+  const showNames = (() => { try { return localStorage.getItem(NAMES_KEY) !== 'no'; } catch (e) { return true; } })();
+  const names = { on: showNames };
+  const setNames = on => { names.on = on; try { localStorage.setItem(NAMES_KEY, on ? 'si' : 'no'); } catch (e) { /* sin almacenamiento */ } };
   const modelOf = (s, forView) => !s ? null
     : s.type === 'basket' ? basketModel(s, forView)
     : s.type === 'taper' ? taperModel(s, forView)
@@ -2170,6 +2175,18 @@
       if (!r || !r.items.length || s.hidden) continue;
       const grp = svgEl('g', { 'data-id': s.id, style: s.locked ? 'pointer-events:none' : null }, layerShapes);
       renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true, s.color);
+      if (names.on && ['box', 'taper', 'basket'].includes(s.type)) {
+        let m = null;
+        try { m = modelOf(s, true); } catch (e) { m = null; }
+        if (m && m.layout) {
+          const fs = 12 / view.s;
+          for (const [q, [px, py]] of boxPlacement(s, m)) {
+            if (!q.name || q.w * view.s < 40 || q.h * view.s < 18) continue;
+            const t = svgEl('text', { x: px + q.w / 2, y: py + q.h / 2, 'font-size': fs, class: 'piece-name' }, grp);
+            t.textContent = q.name;
+          }
+        }
+      }
     }
     drawOverlay();
     drawRulers();
@@ -7989,11 +8006,34 @@
         if (decal) parts.push(decal);
       }
       for (const obj of parts) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
+      if (names.on && q.name) {
+        const xs = q.pts.map(p => p[0]), ys = q.pts.map(p => p[1]), th = q.th || m.t;
+        const c = new T.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, th / 2).applyMatrix4(mat4);
+        const out = holder.userData.out, k = Math.hypot(m.W, m.H, m.D) * 0.02;
+        c.add(new T.Vector3(out[0], out[1], out[2]).multiplyScalar(k));
+        holder.add(nameSprite(q.name, c, Math.hypot(m.W, m.H, m.D)));
+      }
       v3.group.add(holder);
     }
     v3.group.position.set(-m.W / 2, -m.H / 2, -m.D / 2);
     v3.pivot.rotation.x = m.wall ? -Math.PI / 2 : 0; // bandeja de pared: el frente abierto mira hacia ti
     applyExplode();
+  }
+  // Etiqueta con el nombre de la pieza, siempre de frente a la cámara
+  function nameSprite(text, pos, R) {
+    const T = window.THREE, cv = document.createElement('canvas'), fs = 44;
+    const c = cv.getContext('2d');
+    c.font = `600 ${fs}px sans-serif`;
+    cv.width = Math.ceil(c.measureText(text).width) + 28; cv.height = fs + 22;
+    c.font = `600 ${fs}px sans-serif`; c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(255,255,255,0.88)'; c.beginPath(); c.roundRect ? c.roundRect(0, 0, cv.width, cv.height, 16) : c.rect(0, 0, cv.width, cv.height); c.fill();
+    c.fillStyle = '#2b2118'; c.fillText(text, 14, cv.height / 2 + 2);
+    const tex = new T.CanvasTexture(cv);
+    const sp = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    const h = R * 0.07;
+    sp.scale.set(h * cv.width / cv.height, h, 1);
+    sp.position.copy(pos); sp.renderOrder = 10;
+    return sp;
   }
   // Maceta: pared curva (cilindro o medio cilindro con pared recta), base con pestañas, refuerzo y aros
   function build3DPlanter(m, T) {
@@ -8962,6 +9002,10 @@
     if (cc) { cc.value = '#' + (woodPick.custom != null ? woodPick.custom : 0xdcb887).toString(16).padStart(6, '0'); cc.hidden = woodPick.main !== 'otro'; cc.addEventListener('input', onPick); }
     $('#woodMain').addEventListener('change', onPick); $('#woodCover').addEventListener('change', onPick);
   }
+  $('#v3Names').classList.toggle('active', names.on);
+  $('#v3Names').onclick = e => { setNames(!names.on); e.currentTarget.classList.toggle('active', names.on); $('#chkNames').checked = names.on; if (v3.open) build3D(); drawCanvas(); };
+  $('#chkNames').checked = names.on;
+  $('#chkNames').onchange = e => { setNames(e.target.checked); $('#v3Names').classList.toggle('active', names.on); drawCanvas(); if (v3.open) build3D(); };
   $('#v3Home').onclick = () => setCam3D('home');
   $('#v3Top').onclick = () => setCam3D('top');
   $('#v3Front').onclick = () => setCam3D('front');

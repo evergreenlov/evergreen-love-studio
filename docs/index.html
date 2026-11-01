@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evergreen Love Studio</title>
-<link rel="stylesheet" href="estilos.css?v=20261019-estudio-28">
+<link rel="stylesheet" href="estilos.css?v=20261019-estudio-29">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#2f7d4f">
@@ -14,7 +14,7 @@
 <script>
 /* Si Safari guardó una copia vieja de esta página, se vuelve a cargar con la versión nueva. */
 (function () {
-  var BUILD = "estudio-28";
+  var BUILD = "estudio-29";
   try {
     fetch('version.txt?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = (t || '').trim();
@@ -29,7 +29,7 @@
   <div class="brand">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 5 11h3l-4 6h6v5h4v-5h6l-4-6h3z" fill="currentColor"/></svg>
     <span>Evergreen Love Studio</span>
-    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v estudio-28</span>
+    <span id="buildTag" class="build-tag" title="Versión de la página que estás usando">v estudio-29</span>
   </div>
   <input id="docName" class="doc-name" value="Mi diseño" aria-label="Nombre del diseño" spellcheck="false">
   <div class="seg" id="unitSeg" role="group" aria-label="Trabajar en milímetros o pulgadas"><button type="button" data-u="mm" title="Trabajar en milímetros">mm</button><button type="button" data-u="in" title="Trabajar en pulgadas">pulgadas</button></div>
@@ -143,7 +143,7 @@
         <strong id="view3dTitle">Vista 3D</strong>
         <label class="range"><span>Madera</span> <select id="woodMain" aria-label="Color de la madera en 3D"></select> <input type="color" id="woodCustom" title="Elige el color de la madera" aria-label="Color propio de la madera" hidden></label>
         <label class="range"><span>Cubierta</span> <select id="woodCover" aria-label="Color de la cubierta en 3D"></select></label>
-        <span class="v3cam"><button id="v3Home" title="Vista inicial">Inicio</button><button id="v3Top" title="Desde arriba">Arriba</button><button id="v3Front" title="De frente">Frente</button><button id="v3Spin" title="Girar sola">Girar</button><button id="v3Img" title="Guarda una imagen PNG de lo que ves">Guardar imagen</button></span>
+        <span class="v3cam"><button id="v3Home" title="Vista inicial">Inicio</button><button id="v3Top" title="Desde arriba">Arriba</button><button id="v3Front" title="De frente">Frente</button><button id="v3Spin" title="Girar sola">Girar</button><button id="v3Names" title="Muestra el nombre de cada pieza: frente, atrás, lado izquierdo…">Nombres</button><button id="v3Img" title="Guarda una imagen PNG de lo que ves">Guardar imagen</button></span>
         <button id="btnView3dFit">Centrar</button>
         <button id="btnView3dClose" class="primary">Cerrar</button>
       </div>
@@ -196,6 +196,7 @@
       <button id="btnFit" title="Ver todo (0)">Ver todo</button>
       <label class="check" title="Para elegir varias piezas o puntos con el dedo, sin Shift"><input type="checkbox" id="chkAdd"> Sumar</label>
       <label class="check"><input type="checkbox" id="chkSnap" checked> Imán</label>
+      <label class="check" title="Escribe el nombre de cada pieza de la caja (Frente, Atrás, Lados…) sobre el dibujo; no se exporta"><input type="checkbox" id="chkNames" checked> Nombres</label>
       <select id="unitSelect" aria-label="Unidades" title="Unidades de medida">
         <option value="mm">mm</option>
         <option value="in">pulgadas</option>
@@ -232,7 +233,7 @@
 <script src="lib/three.min.js"></script>
 <script src="lib/OrbitControls.js"></script>
 <script src="lib/opentype.min.js"></script>
-<script src="app.js?v=20261019-estudio-28"></script>
+<script src="app.js?v=20261019-estudio-29"></script>
 <script>
 /* Uso sin internet: se guarda una copia de la aplicación en este aparato (hace falta abrirla una vez con internet). */
 (function () {
