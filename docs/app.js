@@ -4544,6 +4544,7 @@
         if (a.kind === 'vector' && a.polys.length > 1 && a.polys.length <= 300) {
           box.append(h('button', { class: 'wide', onclick: () => explodeImport(s, true) }, `Separar cada trazo (${a.polys.length})`));
         }
+        if (a.kind === 'vector') box.append(...importOpsSection(s, a));
         if (a.kind === 'image') {
           box.append(h('div', { class: 'insp-sub' }, 'Editar la imagen'),
             h('div', { class: 'btn-grid' },
@@ -4665,6 +4666,42 @@
     basket: ['ancho', 'alto', 'profundo', 'radio', 'asaAlto', 'asaArco', 'asaAncho', 'marco'],
   };
   const SCALABLE = new Set(['group', 'import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge', ...Object.keys(SCALE_BOX_SIZE)]);
+
+  // Corte, grabado y marcado dentro de una misma imagen: cambia la operación de cada grupo de trazos o separa contorno e interior
+  function importOpsSection(s, a) {
+    const cnt = {};
+    for (const pl of a.polys) { const o = pl.op || 'corte'; cnt[o] = (cnt[o] || 0) + 1; }
+    for (const t of a.texts || []) { const o = t.op || 'grabado'; cnt[o] = (cnt[o] || 0) + 1; }
+    const apply = fn => { fn(); const ops = new Set([...a.polys.map(p => p.op || 'corte'), ...(a.texts || []).map(t => t.op || 'grabado')]); s.op = ops.size === 1 ? [...ops][0] : 'archivo'; checkpoint(); fullRender(); };
+    const rows = Object.entries(cnt).map(([op, n]) => propRow(`${OPS[op] || op} (${n})`, selectEl(OPS, op, 'Cambiar ' + op, v => apply(() => {
+      for (const pl of a.polys) if ((pl.op || 'corte') === op) pl.op = v;
+      for (const t of a.texts || []) if ((t.op || 'grabado') === op) t.op = v;
+    }))));
+    const setAll = op => apply(() => { for (const pl of a.polys) pl.op = op; for (const t of a.texts || []) t.op = op; });
+    const closed = a.polys.filter(p => p.closed && p.pts.length >= 3);
+    const outerCutInnerEngrave = () => apply(() => {
+      for (const pl of a.polys) {
+        const inner = pl.closed && closed.some(q => q !== pl && inPoly(pl.pts[0], q.pts));
+        pl.op = pl.closed && !inner ? 'corte' : 'grabado';
+      }
+      for (const t of a.texts || []) t.op = 'grabado';
+    });
+    const boxShape = allShapes().find(x => x.type === 'box');
+    return [
+      h('div', { class: 'insp-sub' }, 'Corte y grabado en esta imagen'),
+      h('p', { class: 'tip' }, 'Cada grupo de trazos puede tener su propia operación. Cambia el grupo con la lista, o usa un atajo:'),
+      ...rows,
+      h('div', { class: 'btn-grid' },
+        h('button', { onclick: outerCutInnerEngrave, title: 'El contorno exterior de cada pieza se corta y todo lo de adentro se graba' }, 'Contorno = corte, adentro = grabado'),
+        h('button', { onclick: () => setAll('grabado') }, 'Todo grabado'),
+        h('button', { onclick: () => setAll('corte') }, 'Todo corte')),
+      boxShape ? h('button', { class: 'wide primary', title: 'Graba esta imagen en una cara de la caja y la abre en 3D para que veas cómo queda', onclick: () => {
+        boxShape.p.grabadoLogo = s.p.asset; boxShape.p.grabadoEn = boxShape.p.grabadoEn || 'auto';
+        s.hidden = true; sel = new Set([boxShape.id]); checkpoint(); fullRender(); open3D(boxShape.id);
+        msg('Imagen puesta como grabado de la caja. Cambia la cara en «Grabado (nombre o logo)». Para quitarla usa «Quitar» ahí.');
+      } }, `Ponerla en la caja «${boxShape.name}» y verla en 3D`) : null,
+    ].filter(Boolean);
+  }
 
   function scaleSection(shapes) {
     const ok = shapes.filter(s => SCALABLE.has(s.type));
