@@ -8824,7 +8824,21 @@
     const fillOf = p => { const cl = p.items.flatMap(it => it.polys).filter(q => q.closed && q.pts.length >= 3); if (!cl.length) return 1; return Math.max(...cl.map(q => Math.abs(shoelace(q.pts)))) / Math.max(1e-6, p.w * p.h); };
     const ornaments = pcs.filter(p => fillOf(p) < 0.72);
     const sug = suggestFaces(pcs.length - ornaments.length >= 4 ? pcs.filter(p => !ornaments.includes(p)) : pcs);
-    if (pcs.length - ornaments.length >= 4) for (const p of ornaments) sug.set(p.i, { face: 'ad_left', rot: false });
+    // El adorno se pega al lado sobre el que lo pusiste en el lienzo (el que más se le encima; si no toca ninguno, el más cercano)
+    if (ornaments.length && pcs.length - ornaments.length >= 4) {
+      const bbOf = p => evalCache.get(p.s.id).bbox;
+      const ob = ornaments.map(bbOf), O = { x: Math.min(...ob.map(b => b.x)), y: Math.min(...ob.map(b => b.y)), x1: Math.max(...ob.map(b => b.x + b.w)), y1: Math.max(...ob.map(b => b.y + b.h)) };
+      let best = null, bs = -Infinity;
+      for (const p of pcs) {
+        const f = (sug.get(p.i) || {}).face;
+        if (!['front', 'back', 'left', 'right'].includes(f)) continue;
+        const b = bbOf(p), ov = Math.max(0, Math.min(O.x1, b.x + b.w) - Math.max(O.x, b.x)) * Math.max(0, Math.min(O.y1, b.y + b.h) - Math.max(O.y, b.y));
+        const d = Math.hypot((O.x + O.x1) / 2 - (b.x + b.w / 2), (O.y + O.y1) / 2 - (b.y + b.h / 2));
+        const score = ov > 0 ? ov : -d;
+        if (score > bs) { bs = score; best = f; }
+      }
+      for (const p of ornaments) sug.set(p.i, { face: 'ad_' + (best || 'left'), rot: false });
+    }
     // Si las piezas ya traen su nombre (Frente, Atrás, Lado izquierdo…) y no se repiten, el nombre manda sobre el tamaño
     {
       const byName = pc => { const n = pc.s.name.toLowerCase(); return /lado izq|izquierd/.test(n) ? 'left' : /lado der|derech/.test(n) ? 'right' : /frente/.test(n) ? 'front' : /atr[aá]s/.test(n) ? 'back' : /base|fondo/.test(n) ? 'bottom' : /tapa/.test(n) ? 'top' : null; };
@@ -8964,6 +8978,7 @@
         }
         s.from = { gid, name: doc.name || 'Caja' };
         s.asm = { name: names[f], ax: JSON.parse(JSON.stringify(ax)) };
+        r.done = s;
         s.name = names[f] + (pick(f).length > 1 ? ' ' + (pick(f).indexOf(r) + 1) : '');
       }
       // Adornos (la torre…): se pegan por fuera de la pared elegida, centrados y apoyados abajo
@@ -8973,8 +8988,11 @@
         const bbs = grp.map(r => evalCache.get(r.p.s.id).bbox);
         const sx0 = Math.min(...bbs.map(b => b.x)), sy0 = Math.min(...bbs.map(b => b.y)), sx1 = Math.max(...bbs.map(b => b.x + b.w)), sy1 = Math.max(...bbs.map(b => b.y + b.h));
         const fb = side === 'front' || side === 'back', ref = fb ? fr : sd;
-        const wq = { name: 'pared', place: side, w: fb ? dims(fr)[0] : dims(sd)[0], h: dims(ref)[1] }, wax = axesOf(m, wq);
-        const wallW = fb ? W : Dd, du0 = (wallW - (sx1 - sx0)) / 2, dv0 = Math.max(0, wq.h - (sy1 - sy0));
+        // Si el adorno está sobre la pieza de esa pared en el lienzo, queda en el mismo lugar de la pared; si no, centrado y apoyado abajo
+        const wr = pick(side)[0], wbb = wr && !wr.rot.checked && wr.done && evalCache.get(wr.p.s.id) && evalCache.get(wr.p.s.id).bbox;
+        const onWall = wbb && Math.min(sx1, wbb.x + wbb.w) > Math.max(sx0, wbb.x) && Math.min(sy1, wbb.y + wbb.h) > Math.max(sy0, wbb.y);
+        const wq = { name: 'pared', place: side, w: fb ? dims(fr)[0] : dims(sd)[0], h: dims(ref)[1] }, wax = onWall ? wr.done.asm.ax : axesOf(m, wq);
+        const wallW = fb ? W : Dd, du0 = onWall ? sx0 - wbb.x : (wallW - (sx1 - sx0)) / 2, dv0 = onWall ? sy0 - wbb.y : Math.max(0, wq.h - (sy1 - sy0));
         grp.forEach((r, k) => {
           const b = bbs[k], u = du0 + (b.x - sx0), v = dv0 + (b.y - sy0);
           const o = [0, 1, 2].map(i => wax.o[i] + wax.eu[i] * u + wax.ev[i] * v + wax.out[i] * t);
