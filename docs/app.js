@@ -3402,6 +3402,8 @@
     const ts = handleTargets(), b = selectionBox();
     if (!b) return null;
     const orig = ts.map(s => ({ s, p: { ...s.p } })), params = doc.params.map(q => q.expr);
+    const kids = []; const walk = s => { for (const k of s.children || []) { kids.push({ s: k, p: { ...k.p } }); walk(k); } }; ts.forEach(walk);
+    orig.kids = kids;
     const C = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     if (kind === 'rot') {
       // Centro de cada objeto (para girar varios juntos alrededor del centro común)
@@ -3414,6 +3416,7 @@
   }
   function applyHandleDrag(d, p, e) {
     for (const o of d.orig) o.s.p = { ...o.p };
+    for (const o of d.orig.kids || []) o.s.p = { ...o.p };
     if (d.params) d.params.forEach((ex, i) => { if (doc.params[i]) doc.params[i].expr = ex; });
     if (d.mode === 'scale') {
       const v0 = { x: d.start.x - d.A.x, y: d.start.y - d.A.y }, v = { x: p.x - d.A.x, y: p.y - d.A.y };
@@ -4661,7 +4664,7 @@
     planter: ['d', 'alto'],
     basket: ['ancho', 'alto', 'profundo', 'radio', 'asaAlto', 'asaArco', 'asaAncho', 'marco'],
   };
-  const SCALABLE = new Set(['import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge', ...Object.keys(SCALE_BOX_SIZE)]);
+  const SCALABLE = new Set(['group', 'import', 'rect', 'circle', 'polygon', 'line', 'text', 'hinge', ...Object.keys(SCALE_BOX_SIZE)]);
 
   function scaleSection(shapes) {
     const ok = shapes.filter(s => SCALABLE.has(s.type));
@@ -4698,7 +4701,7 @@
         h('button', { title: 'Cambia el tamaño de todas las piezas a la vez, manteniendo sus posiciones', onclick: () => scaleShapes(ok, parseFloat(pct.value)) }, 'Escalar juntas'),
         h('button', { title: 'Conecta las piezas al parámetro "escala": cambias ese número y todo se ajusta a la vez', onclick: () => linkScale(ok) }, hasParam ? 'Vincular a "escala"' : 'Crear parámetro "escala"')),
       h('p', { class: 'tip' }, 'Ojo: en figuras sueltas y piezas importadas también cambian las ranuras (madera de 3 mm al 150 % = 4.5 mm). Las cajas de plantilla solo cambian sus medidas y conservan el grosor de tu madera.'
-        + (shapes.length > ok.length ? ' Los grupos no se escalan aquí: cámbialos con sus propias medidas.' : '')),
+       ),
     ];
   }
 
@@ -4745,6 +4748,8 @@
     };
     const scaledParams = new Set();
     for (const s of shapes) {
+      // Grupo: sus piezas están medidas desde la esquina del grupo, así que se escalan desde (0, 0)
+      if (s.type === 'group' && s.children && s.children.length) rewriteScale(s.children, factorText, 0, 0, kNum);
       for (const key of SCALE_POS_X) if (key in s.p) s.p[key] = pos(s.p[key], X0);
       for (const key of SCALE_POS_Y) if (key in s.p) s.p[key] = pos(s.p[key], Y0);
       for (const key of SCALE_BOX_SIZE[s.type] || SCALE_SIZE) {
