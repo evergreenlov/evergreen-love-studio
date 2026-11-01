@@ -8810,11 +8810,11 @@
       for (const x of list) if (x.from && x.asm && doc.origins && doc.origins[x.from.gid]) cnt.set(x.from.gid, (cnt.get(x.from.gid) || 0) + 1);
       const [gid0, n0] = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
       if (gid0 && n0 >= 4) {
-        const known = list.filter(x => x.from && x.asm && x.from.gid === gid0), extra = list.filter(x => !known.includes(x) && x.type === 'import' && doc.assets[x.p.asset] && doc.assets[x.p.asset].kind === 'vector');
+        const known = list.filter(x => x.from && x.asm && x.from.gid === gid0 && x.asm.name !== 'Adorno'), extra = list.filter(x => !known.includes(x) && x.type === 'import' && doc.assets[x.p.asset] && doc.assets[x.p.asset].kind === 'vector');
         const og = doc.origins[gid0], tt = og.asm ? og.asm.t : 3;
         evaluateParams(); evaluateAll();
         const bb = x => { const r = evalCache.get(x.id); return r && r.bbox; };
-        const walls = known.filter(x => /^(Frente|Atrás|Lado izquierdo|Lado derecho)$/.test(x.asm.name) && bb(x));
+        const walls = known.filter(x => /^(Cubierta )?(Frente|Atrás|Lado izquierdo|Lado derecho)$/i.test(x.asm.name) && bb(x));
         let placedN = 0;
         if (extra.length && walls.length) {
           const eb = extra.map(bb).filter(Boolean);
@@ -8827,7 +8827,7 @@
               if (sc > best) { best = sc; tw = w; }
             }
             const wb = bb(tw), ax = tw.asm.ax, onWall = best > 0;
-            const u0 = onWall ? E.x - wb.x : (wb.w - (E.x1 - E.x)) / 2, v0 = onWall ? E.y - wb.y : Math.max(0, wb.h - (E.y1 - E.y));
+            const u0 = onWall ? E.x - wb.x : (wb.w - (E.x1 - E.x)) / 2, v0 = onWall ? E.y - wb.y : wb.h - (E.y1 - E.y); // sin tocar la pared: centrado y apoyado abajo (si es más alto, sobresale por arriba)
             extra.forEach((x, k) => {
               const b = bb(x); if (!b) return;
               const u = u0 + (b.x - E.x), v = v0 + (b.y - E.y);
@@ -9032,7 +9032,7 @@
         const wr = pick(side)[0], wbb = wr && !wr.rot.checked && wr.done && evalCache.get(wr.p.s.id) && evalCache.get(wr.p.s.id).bbox;
         const onWall = wbb && Math.min(sx1, wbb.x + wbb.w) > Math.max(sx0, wbb.x) && Math.min(sy1, wbb.y + wbb.h) > Math.max(sy0, wbb.y);
         const wq = { name: 'pared', place: side, w: fb ? dims(fr)[0] : dims(sd)[0], h: dims(ref)[1] }, wax = onWall ? wr.done.asm.ax : axesOf(m, wq);
-        const wallW = fb ? W : Dd, du0 = onWall ? sx0 - wbb.x : (wallW - (sx1 - sx0)) / 2, dv0 = onWall ? sy0 - wbb.y : Math.max(0, wq.h - (sy1 - sy0));
+        const wallW = fb ? W : Dd, du0 = onWall ? sx0 - wbb.x : (wallW - (sx1 - sx0)) / 2, dv0 = onWall ? sy0 - wbb.y : wq.h - (sy1 - sy0);
         grp.forEach((r, k) => {
           const b = bbs[k], u = du0 + (b.x - sx0), v = dv0 + (b.y - sy0);
           const o = [0, 1, 2].map(i => wax.o[i] + wax.eu[i] * u + wax.ev[i] * v + wax.out[i] * t);
