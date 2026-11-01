@@ -2175,6 +2175,13 @@
       if (!r || !r.items.length || s.hidden) continue;
       const grp = svgEl('g', { 'data-id': s.id, style: s.locked ? 'pointer-events:none' : null }, layerShapes);
       renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true, s.color);
+      if (names.on && s.type === 'import' && s.from && s.name) {
+        const bb = bboxOfItems(worldCache.get(s.id) || []), lab = s.asm ? s.asm.name : s.name.replace(/^.*· /, '');
+        if (bb && lab && bb.w * view.s >= 40 && bb.h * view.s >= 18) {
+          const t = svgEl('text', { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2, 'font-size': 12 / view.s, class: 'piece-name' }, grp);
+          t.textContent = lab;
+        }
+      }
       if (names.on && ['box', 'taper', 'basket'].includes(s.type)) {
         let m = null;
         try { m = modelOf(s, true); } catch (e) { m = null; }
@@ -7391,8 +7398,19 @@
     }
     const created = [];
     let n = 0;
-    for (const inf of info) {
-      created.push(importObject(inf.outer.name ? `${s.name} · ${inf.outer.name}` : `${s.name} ${++n}`, inf.polys, inf.texts));
+    // Modelo de la caja: de ahí salen el nombre (Frente, Atrás, Lado izquierdo…) y la posición 3D de cada pieza
+    const mdl = modelOf(s, false), placed0 = mdl && mdl.layout ? boxPlacement(s, mdl) : null;
+    const nameAt = outer => {
+      if (outer.name) return outer.name;
+      if (!placed0) return '';
+      const bb = ptsBoxAll([outer]), c = [(bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2];
+      let best = '', ba = Infinity;
+      for (const [q, [px, py]] of placed0) { const ol = q.pts.map(([u, v]) => [u + px, v + py]); const a = polyArea(ol); if (q.name && a < ba && inPoly(c, ol)) { best = q.name; ba = a; } }
+      return best;
+    };
+    const pname = info.map(inf => nameAt(inf.outer));
+    for (const [i, inf] of info.entries()) {
+      created.push(importObject(pname[i] ? `${s.name} · ${pname[i]}` : `${s.name} ${++n}`, inf.polys, inf.texts));
     }
     for (const inf of info) for (const g of inf.images || []) created.push(imageObject(`${s.name} · logo`, g));
     if (lose.polys.length || lose.texts.length) created.push(importObject(`${s.name} · grabado`, lose.polys, lose.texts));
@@ -7401,11 +7419,10 @@
     const gid = 'o' + uid();
     doc.origins = doc.origins || {};
     // Cómo se arma cada pieza en 3D (posición y orientación), para poder verlas armadas aunque ya estén sueltas
-    const mdl = modelOf(s, false);
     if (mdl) {
       info.forEach((inf, i) => {
-        const q = inf.outer.name && [...(mdl.layout || []).flat().filter(Boolean), ...mdl.panels, ...(mdl.dividers || [])].find(x => x.name === inf.outer.name), ax = q && axesOf(mdl, q);
-        if (ax) created[i].asm = { name: inf.outer.name, ax: JSON.parse(JSON.stringify(ax)) };
+        const q = pname[i] && [...(mdl.layout || []).flat().filter(Boolean), ...mdl.panels, ...(mdl.dividers || [])].find(x => x.name === pname[i]), ax = q && axesOf(mdl, q);
+        if (ax) created[i].asm = { name: pname[i], ax: JSON.parse(JSON.stringify(ax)) };
       });
     }
     doc.origins[gid] = { shape: JSON.parse(JSON.stringify(s)), asm: mdl ? { name: s.name, t: mdl.t, W: mdl.W, H: mdl.H, D: mdl.D, wall: !!mdl.wall } : null };
