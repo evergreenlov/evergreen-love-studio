@@ -843,7 +843,7 @@
     for (const x of xs) base.holes.push(Array.from({ length: 24 }, (_, i) => [x + (r - k) * Math.cos(i * Math.PI / 12), v + (r - k) * Math.sin(i * Math.PI / 12)]));
   }
 
-  window.__evergreen = { model: id => modelOf(byId(id), true) }; // para pruebas
+  window.__evergreen = { model: id => modelOf(byId(id), true), test: () => ({ doc, byId, allShapes, separateMany, openAssembleDialog, importObject, evaluateParams, evaluateAll, evalCache, loadTemplate, fullRender, setSel: ids => { sel = new Set(ids); }, build3DPieces, v3 }) }; // para pruebas
   // «Nombres»: etiqueta cada pieza de las cajas (Frente, Atrás, Lado izquierdo…) en el lienzo y en el 3D; solo para ver, no se exporta
   const NAMES_KEY = 'evergreen-love-studio:nombres-piezas';
   const showNames = (() => { try { return localStorage.getItem(NAMES_KEY) !== 'no'; } catch (e) { return true; } })();
@@ -8841,7 +8841,18 @@
           }
         }
         if (placedN) { checkpoint(); fullRender(); }
-        if (!extra.length || placedN) { open3D(gid0); if (!placedN) msg('Estas piezas ya saben cómo se arman: aquí está la caja en 3D.'); return; }
+        if (!extra.length || placedN) {
+          open3D(gid0);
+          if (!placedN) msg('Estas piezas ya saben cómo se arman: aquí está la caja en 3D.');
+          else if (v3.model && v3.camera && v3.controls) {
+            // la cámara se pone de frente al lado donde quedó el adorno (si no, podría quedar del lado que no se ve)
+            const out = extra[0].asm.ax.out, R = Math.hypot(v3.model.W, v3.model.H, v3.model.D), tg = v3.controls.target;
+            v3.controls.autoRotate = false;
+            v3.camera.position.set(tg.x + out[0] * R * 1.6 + (out[0] || out[2] ? 0 : R * 0.6), tg.y + R * 0.3, tg.z + out[2] * R * 1.6 + (out[0] || out[2] ? 0 : R * 0.6));
+            v3.controls.update();
+          }
+          return;
+        }
       }
     }
     // Un solo archivo con varias piezas: se separa primero
