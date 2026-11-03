@@ -15,6 +15,7 @@ const FILES = [
  "lib/three.min.js",
  "lib/OrbitControls.js",
  "lib/opentype.min.js",
+ "lib/qrcode.js",
  "lib/fonts/Allura.ttf",
  "lib/fonts/AbrilFatface.ttf",
  "lib/fonts/AlexBrush.ttf",

@@ -8943,13 +8943,14 @@
     const prev = h('div', { class: 'cw-preview dm-preview' });
     const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked, clip: clipSel.value, score: score.checked });
     const refresh = () => {
-      const shapes = drinkTagShapes(opts(), 0, 0), paths = [], marks = [];
+      const before = new Set(Object.keys(doc.assets || {})), shapes = drinkTagShapes(opts(), 0, 0), paths = [], marks = [];
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const s of shapes) {
         const r = evalShape(s); if (!r || !r.bbox) continue;
         x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
         for (const it of r.items) for (const p of it.polys) if (p.closed) (it.op === 'marcado' ? marks : paths).push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
       }
+      for (const k of Object.keys(doc.assets || {})) if (!before.has(k)) delete doc.assets[k];
       if (!paths.length) { prev.textContent = 'Escribe al menos un nombre.'; return; }
       const pad = 4, w = x1 - x0;
       prev.innerHTML = `<svg viewBox="${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${y1 - y0 + 2 * pad}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/><path d="${marks.join('')}" fill="none" stroke="#36c" stroke-width="${Math.max(0.2, w / 700)}"/></svg>`;
@@ -9133,13 +9134,14 @@
     const prev = h('div', { class: 'cw-preview dm-preview' });
     const opts = () => ({ name: name.value, month: month.value, day: day.value, year: year.value, weight: weight.value, length: length.value, time: time.value, d: Math.max(30, (parseFloat(dia.value) || 0) * unitMM), nameFont: nameFont.value, tileFont: tileFont.value, bow: bow.checked });
     const refresh = () => {
-      const shapes = shakerShapes(opts(), 0, 0), paths = [];
+      const before = new Set(Object.keys(doc.assets || {})), shapes = shakerShapes(opts(), 0, 0), paths = [];
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const s of shapes) {
         const r = evalShape(s); if (!r || !r.bbox) continue;
         x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
         for (const it of r.items) for (const p of it.polys) if (p.closed) paths.push('M' + p.pts.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join('L') + 'Z');
       }
+      for (const k of Object.keys(doc.assets || {})) if (!before.has(k)) delete doc.assets[k];
       const w = x1 - x0;
       prev.innerHTML = `<svg viewBox="${x0 - 3} ${y0 - 3} ${w + 6} ${y1 - y0 + 6}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 500)}"/></svg>`;
     };
@@ -9169,6 +9171,115 @@
     refresh();
   }
   $('#btnShaker').onclick = e => { e.stopPropagation(); menu.hidden = true; openShakerDialog(); };
+
+  /* ================= Letrero arco con códigos QR ================= */
+  // Contorno de un arco (rectángulo con la parte de arriba en medio círculo) con una lengüeta abajo que entra en la base
+  function archPoly(x0, y0, w, h, tabW, tabH) {
+    const cx = x0 + w / 2, cy = y0 + w / 2, r = w / 2, pts = [[x0, y0 + h], [x0, cy]];
+    for (let i = 1; i <= 60; i++) { const a = Math.PI + Math.PI * i / 60; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+    pts.push([x0 + w, y0 + h], [cx + tabW / 2, y0 + h], [cx + tabW / 2, y0 + h + tabH], [cx - tabW / 2, y0 + h + tabH], [cx - tabW / 2, y0 + h]);
+    return pts;
+  }
+  // Cuadritos del QR unidos por filas para que haya menos trazos
+  function qrPolys(url, x0, y0, size) {
+    if (typeof qrcode !== 'function') return [];
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    const n = qr.getModuleCount(), cs = size / n, polys = [];
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (!qr.isDark(r, c)) continue;
+      let e = c; while (e + 1 < n && qr.isDark(r, e + 1)) e++;
+      const x = x0 + c * cs, y = y0 + r * cs, x1 = x0 + (e + 1) * cs, y1 = y + cs;
+      polys.push({ closed: true, op: 'grabado', pts: [[x, y], [x1, y], [x1, y1], [x, y1]] });
+      c = e;
+    }
+    return polys;
+  }
+  function qrSignShapes(o, ox, oy) {
+    const f = mm => fmt(mm / unitMM), W = o.w, t = o.t, m = W * 0.12, Ph = W * 1.22, Wb = W + 2 * m, Hb = Ph + m, tabW = W * 0.4, tabH = W * 0.08, gap = W * 0.12, out = [];
+    const text = (str, cx, y, size, font, extra = {}) => ({ id: uid(), type: 'text', name: str, op: 'grabado', p: { texto: str, fuente: font, x: f(cx - measureTextWidth(str, size, font) / 2), y: f(y), tam: f(size), rot: '0', ...extra } });
+    // Arco trasero con el texto curvo en la franja de arriba
+    const back = [importObject('Arco trasero', [{ closed: true, op: 'corte', pts: archPoly(ox, oy, Wb, Hb, tabW, tabH) }], [])];
+    if (o.side.trim()) {
+      const R = Wb / 2 - m * 0.72, sz = m * 0.7, str = o.side.trim();
+      back.push(text(str, ox + Wb / 2, oy + Wb / 2 - R, sz, o.font2, { curva: 'arriba', radioC: f(R) }));
+    }
+    out.push({ id: uid(), type: 'group', name: 'Arco trasero', op: 'corte', p: { mode: 'grupo', x: '0', y: '0', rot: '0' }, children: back });
+    // Panel frontal (queda centrado sobre el arco trasero, con la lengüeta abajo)
+    const px = ox + Wb + gap, py = oy;
+    const front = [importObject('Panel frontal', [{ closed: true, op: 'corte', pts: archPoly(px, py, W, Ph, tabW, tabH) }], [])];
+    if (o.title.trim()) front.push(text(o.title.trim(), px + W / 2, py + W * 0.5, W * 0.12, o.font1));
+    const qrs = o.qrs.filter(q => q.url.trim()).slice(0, 3), n = qrs.length;
+    if (n) {
+      const g2 = W * 0.05, q = Math.min(W * 0.28, (W * 0.86 - g2 * (n - 1)) / n), total = n * q + (n - 1) * g2, qy = py + W * 0.74;
+      qrs.forEach((c, i) => {
+        const qx = px + (W - total) / 2 + i * (q + g2), fm = q * 0.07;
+        if (c.label.trim()) front.push(text(c.label.trim(), qx + q / 2, qy - fm - W * 0.025, W * 0.05, o.font2));
+        front.push({ id: uid(), type: 'rect', name: 'Marco QR', op: 'marcado', p: { x: f(qx - fm), y: f(qy - fm), w: f(q + 2 * fm), h: f(q + 2 * fm), r: f(q * 0.06), rot: '0' } });
+        const polys = qrPolys(c.url.trim(), qx, qy, q);
+        if (polys.length) front.push(importObject('QR ' + (c.label.trim() || (i + 1)), polys, []));
+      });
+    }
+    if (o.sub.trim()) front.push(text(o.sub.trim(), px + W / 2, py + Ph - W * 0.06, W * 0.055, o.font2));
+    out.push({ id: uid(), type: 'group', name: 'Panel frontal con QR', op: 'corte', p: { mode: 'grupo', x: '0', y: '0', rot: '0' }, children: front });
+    // Base: un rectángulo con la ranura donde entran las dos lengüetas
+    const fy = oy + Hb + tabH + gap, FD = W * 0.28, sw = 2 * t, sl = tabW + 0.2;
+    out.push({ id: uid(), type: 'group', name: 'Base', op: 'corte', p: { mode: 'restar', x: '0', y: '0', rot: '0' }, children: [
+      { id: uid(), type: 'rect', name: 'Base', op: 'corte', p: { x: f(ox), y: f(fy), w: f(Wb), h: f(FD), r: f(Math.min(6, FD / 6)), rot: '0' } },
+      { id: uid(), type: 'rect', name: 'Ranura', op: 'corte', p: { x: f(ox + Wb / 2 - sl / 2), y: f(fy + FD / 2 - sw / 2), w: f(sl), h: f(sw), r: '0', rot: '0' } }] });
+    return out;
+  }
+  async function openQrSignDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:letrero-qr') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Letrero con códigos QR' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const inp = (k, d, ph) => h('input', { type: 'text', value: saved[k] !== undefined ? saved[k] : d, placeholder: ph || '' });
+    const side = inp('side', 'Let\'s connect'), title = inp('title', 'Mi negocio'), sub = inp('sub', ''), w = h('input', { type: 'number', step: 'any', min: '40', value: saved.w || (isInch() ? '4' : '100') }), t = h('input', { type: 'number', step: 'any', min: '0.5', value: saved.t || (isInch() ? '0.12' : '3') });
+    const labs = [0, 1, 2].map(i => inp('l' + i, ['Facebook', 'Instagram', 'Google'][i], 'Etiqueta')), urls = [0, 1, 2].map(i => inp('u' + i, ['https://facebook.com/', 'https://instagram.com/', 'https://google.com/'][i], 'https://…'));
+    const fsel = (k, d) => { const e = h('select', {}, ...FONTS.map(x => h('option', { value: x.id }, x.name))); e.value = saved[k] || d; return e; };
+    const font1 = fsel('font1', 'greatvibes'), font2 = fsel('font2', 'montserrat');
+    const prev = h('div', { class: 'cw-preview dm-preview' });
+    const opts = () => ({ side: side.value, title: title.value, sub: sub.value, w: Math.max(40, (parseFloat(w.value) || 0) * unitMM), t: Math.max(0.5, (parseFloat(t.value) || 0) * unitMM), font1: font1.value, font2: font2.value, qrs: [0, 1, 2].map(i => ({ label: labs[i].value, url: urls[i].value })) });
+    const refresh = () => {
+      const before = new Set(Object.keys(doc.assets || {})), shapes = qrSignShapes(opts(), 0, 0), paths = [], marks = [];
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of shapes) {
+        const r = evalShape(s); if (!r || !r.bbox) continue;
+        x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
+        for (const it of r.items) for (const p of it.polys) if (p.closed) (it.op === 'corte' ? paths : marks).push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
+      }
+      for (const k of Object.keys(doc.assets || {})) if (!before.has(k)) delete doc.assets[k];
+      const ww = x1 - x0;
+      prev.innerHTML = `<svg viewBox="${x0 - 3} ${y0 - 3} ${ww + 6} ${y1 - y0 + 6}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.25, ww / 500)}"/><path d="${marks.join('')}" fill="#222" fill-rule="evenodd" stroke="#36c" stroke-width="${Math.max(0.1, ww / 1200)}"/></svg>`;
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await Promise.all([loadFont(font1.value), loadFont(font2.value)]); } catch (e) { } refresh(); }, 250); };
+    const all = [side, title, sub, w, t, font1, font2, ...labs, ...urls]; all.forEach(el => el.addEventListener('input', later));
+    const go = h('button', { class: 'primary' }, 'Crear el letrero');
+    go.onclick = async () => {
+      const o = opts();
+      try { await Promise.all([loadFont(o.font1), loadFont(o.font2)]); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:letrero-qr', JSON.stringify({ side: side.value, title: title.value, sub: sub.value, w: w.value, t: t.value, font1: o.font1, font2: o.font2, ...Object.fromEntries([0, 1, 2].flatMap(i => [['l' + i, labs[i].value], ['u' + i, urls[i].value]])) })); } catch (e) { }
+      evaluateParams(); evaluateAll();
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const made = qrSignShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
+      doc.shapes.push(...made); sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg('Letrero creado: arco trasero, panel frontal con los QR grabados y la base con su ranura. Prueba los QR con tu celular en un trozo de prueba antes de cortar todo.');
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Letrero con códigos QR'),
+      h('p', { class: 'tip' }, 'Un arco con tu nombre y hasta tres códigos QR (redes, tienda, pagos). Los QR se graban y funcionan en cuanto los escanees. Los íconos no se dibujan: cada código lleva una etiqueta de texto.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Texto curvo del arco', side), row('Título', title), row('Texto de abajo (teléfono…)', sub),
+          ...[0, 1, 2].map(i => h('div', {}, row('Etiqueta del QR ' + (i + 1), labs[i]), row('Enlace del QR ' + (i + 1) + ' (vacío = no se pone)', urls[i]))),
+          row(`Ancho del panel (${unitLabel()})`, w), row(`Grosor del material (${unitLabel()})`, t), row('Letra del título', font1), row('Letra de los textos', font2)),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await Promise.all([loadFont(font1.value), loadFont(font2.value)]); } catch (e) { }
+    refresh();
+  }
+  $('#btnQrSign').onclick = e => { e.stopPropagation(); menu.hidden = true; openQrSignDialog(); };
 
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
