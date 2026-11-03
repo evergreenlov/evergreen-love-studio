@@ -8753,6 +8753,139 @@
     list.splice(i, 1, o);
     return o;
   }
+  /* ================= Adorno crucigrama ================= */
+  // Puntos de cada letra (como en el juego de fichas de letras)
+  const TILE_POINTS = { A: 1, E: 1, I: 1, O: 1, U: 1, L: 1, N: 1, R: 1, S: 1, T: 1, D: 2, G: 2, B: 3, C: 3, M: 3, P: 3, F: 4, H: 4, V: 4, W: 4, Y: 4, K: 5, J: 8, X: 8, Q: 10, Z: 10 };
+  const cleanWord = w => w.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+  // Acomoda las palabras como un crucigrama: cada una cruza a otra por una letra que comparten
+  function crosswordLayout(words) {
+    const grid = new Map(), key = (x, y) => x + ',' + y, at = (x, y) => grid.get(key(x, y));
+    const placed = [];
+    const fits = (w, x, y, dx, dy) => {
+      let cross = 0;
+      if (at(x - dx, y - dy) || at(x + dx * w.length, y + dy * w.length)) return -1;
+      for (let i = 0; i < w.length; i++) {
+        const cx = x + dx * i, cy = y + dy * i, c = at(cx, cy);
+        if (c) { if (c !== w[i]) return -1; cross++; continue; }
+        if (at(cx + dy, cy + dx) || at(cx - dy, cy - dx)) return -1;   // no pegada a otra palabra de lado
+      }
+      return cross;
+    };
+    const put = (w, x, y, dx, dy) => { for (let i = 0; i < w.length; i++) grid.set(key(x + dx * i, y + dy * i), w[i]); placed.push({ w, x, y, dx, dy }); };
+    const box = () => { const ks = [...grid.keys()].map(k => k.split(',').map(Number)); return { x0: Math.min(...ks.map(k => k[0])), x1: Math.max(...ks.map(k => k[0])), y0: Math.min(...ks.map(k => k[1])), y1: Math.max(...ks.map(k => k[1])) }; };
+    const list = words.slice().sort((a, b) => b.length - a.length);
+    if (!list.length) return null;
+    put(list[0], 0, 0, 1, 0);
+    for (const w of list.slice(1)) {
+      let best = null;
+      for (const p of placed) for (let i = 0; i < p.w.length; i++) for (let j = 0; j < w.length; j++) {
+        if (p.w[i] !== w[j]) continue;
+        const dx = p.dy ? 1 : 0, dy = p.dx ? 1 : 0;                 // perpendicular a la palabra que cruza
+        const x = p.x + p.dx * i - dx * j, y = p.y + p.dy * i - dy * j;
+        const c = fits(w, x, y, dx, dy);
+        if (c < 1) continue;
+        const b = box(), nx0 = Math.min(b.x0, x, x + dx * (w.length - 1)), nx1 = Math.max(b.x1, x, x + dx * (w.length - 1)), ny0 = Math.min(b.y0, y, y + dy * (w.length - 1)), ny1 = Math.max(b.y1, y, y + dy * (w.length - 1));
+        const wd = nx1 - nx0 + 1, ht = ny1 - ny0 + 1, score = c * 10 - Math.max(wd, ht) * 3 - Math.abs(wd - ht) - wd * ht * 0.2;
+        if (!best || score > best.score) best = { score, x, y, dx, dy };
+      }
+      if (best) put(w, best.x, best.y, best.dx, best.dy);
+      else { const b = box(); put(w, b.x0, b.y1 + 2, 1, 0); }      // si no cruza con nada, va debajo
+    }
+    const b = box();
+    return { cells: [...grid.entries()].map(([k, ch]) => { const [x, y] = k.split(',').map(Number); return { x: x - b.x0, y: y - b.y0, ch }; }), cols: b.x1 - b.x0 + 1, rows: b.y1 - b.y0 + 1 };
+  }
+  // Todas las piezas del adorno en mm, con el centro en (0,0)
+  function crosswordParts(o) {
+    const words = o.names.split(/[\n,;]+/).map(cleanWord).filter(Boolean).slice(0, 12);
+    const lay = crosswordLayout(words), D = o.width, R = D / 2, out = [];
+    const famY = R * 0.62, hasFam = !!o.family.trim(), hasYear = !!String(o.year).trim();
+    out.push({ k: 'circle', x: 0, y: 0, d: D, op: 'corte', role: 'aro' });
+    if (o.loop) out.push({ k: 'circle', x: 0, y: -R - D * 0.03, d: D * 0.1, op: 'corte', role: 'aro' }, { k: 'circle', x: 0, y: -R - D * 0.03, d: D * 0.04, op: 'corte', role: 'hueco' });
+    if (o.ring) out.push({ k: 'circle', x: 0, y: 0, d: D * 0.92, op: 'grabado', role: 'marco' });
+    if (lay) {
+      const availW = D * 0.74, availH = hasFam ? D * 0.5 : D * 0.7;
+      let cell = Math.min(availW / lay.cols, availH / lay.rows, D * 0.12);
+      const cy0 = hasFam ? -D * 0.07 : 0;
+      const gx = -lay.cols * cell / 2, gy = cy0 - lay.rows * cell / 2, gap = cell * 0.06;
+      for (const c of lay.cells) {
+        const x = gx + c.x * cell, y = gy + c.y * cell, s = cell - gap, ls = cell * 0.62;
+        out.push({ k: 'rect', x: x + gap / 2, y: y + gap / 2, w: s, h: s, r: cell * 0.08, op: o.tilesOp, role: 'ficha' });
+        out.push({ k: 'text', x: x + cell / 2, y: y + cell / 2 + ls * 0.36, size: ls, str: c.ch, font: o.letterFont, op: 'grabado', center: true, role: 'ficha' });
+        if (o.points) out.push({ k: 'text', x: x + cell * 0.8, y: y + cell * 0.9, size: cell * 0.2, str: String(TILE_POINTS[c.ch] || 1), font: o.letterFont, op: 'grabado', center: true, role: 'ficha' });
+      }
+    }
+    if (hasFam) out.push({ k: 'text', x: 0, y: famY, size: D * 0.13, str: o.family.trim(), font: o.familyFont, op: 'grabado', center: true, role: 'texto' });
+    if (hasYear) out.push({ k: 'text', x: 0, y: famY + D * 0.11, size: D * 0.065, str: String(o.year).trim(), font: o.letterFont, op: 'grabado', center: true, role: 'texto' });
+    return out;
+  }
+  async function openCrosswordDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:crucigrama') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Adorno crucigrama' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const names = h('textarea', { rows: '5', spellcheck: 'false', placeholder: 'Un nombre por línea' }, saved.names || 'Sarah\nJordan\nChris\nDavid');
+    const family = h('input', { type: 'text', value: saved.family || 'Los Martínez' }), year = h('input', { type: 'text', value: saved.year || String(new Date().getFullYear()) });
+    const width = h('input', { type: 'number', step: 'any', min: '30', value: saved.width || (isInch() ? '4.5' : '115') });
+    const fontSel = id => { const e = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); e.value = id; return e; };
+    const famFont = fontSel(saved.familyFont || 'greatvibes'), letFont = fontSel(saved.letterFont || 'montserrat');
+    const mkCheck = (on, label) => { const c = h('input', { type: 'checkbox' }); c.checked = on; return [c, h('label', { class: 'check' }, c, ' ' + label)]; };
+    const [points, pointsL] = mkCheck(saved.points !== false, 'Mostrar los puntos de cada letra'), [loop, loopL] = mkCheck(saved.loop !== false, 'Agujero para colgar'), [ring, ringL] = mkCheck(saved.ring !== false, 'Marco grabado');
+    const tilesSel = h('select', {}, h('option', { value: 'corte' }, 'Cortar cada ficha (se pegan sobre el aro)'), h('option', { value: 'grabado' }, 'Solo grabar el contorno de las fichas')); tilesSel.value = saved.tilesOp === 'grabado' ? 'grabado' : 'corte';
+    const prev = h('div', { class: 'cw-preview' });
+    const opts = () => ({ names: names.value, family: family.value, year: year.value, width: Math.max(30, (parseFloat(width.value) || 0) * unitMM), familyFont: famFont.value, letterFont: letFont.value, points: points.checked, loop: loop.checked, ring: ring.checked, tilesOp: tilesSel.value });
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const textX = (p, o) => p.x - (measureTextWidth(p.str, p.size, p.font) / 2);
+    const refresh = () => {
+      const o = opts(), parts = crosswordParts(o), R = o.width / 2, pad = R * 0.1;
+      const col = { corte: 'var(--cut, #d33)', grabado: 'var(--engrave, #246)' };
+      prev.innerHTML = `<svg viewBox="${-R - pad} ${-R * 1.2 - pad} ${o.width + 2 * pad} ${o.width * 1.1 + 2 * pad + R * 0.2}" width="100%" height="100%">` + parts.map(p => {
+        if (p.k === 'circle') return `<circle cx="${p.x}" cy="${p.y}" r="${p.d / 2}" fill="none" stroke="${p.op === 'corte' ? '#d33' : '#999'}" stroke-width="${o.width / 250}"/>`;
+        if (p.k === 'rect') return `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.r}" fill="#fff" stroke="${p.op === 'corte' ? '#d33' : '#999'}" stroke-width="${o.width / 400}"/>`;
+        return `<text x="${textX(p, o)}" y="${p.y}" font-size="${p.size}" style="font-family:${fontCss(p.font)}" fill="#222">${esc(p.str)}</text>`;
+      }).join('') + '</svg>';
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await Promise.all([loadFont(famFont.value), loadFont(letFont.value)]); } catch (e) { } refresh(); }, 120); };
+    for (const el of [names, family, year, width, famFont, letFont, points, loop, ring, tilesSel]) el.addEventListener('input', later);
+    const go = h('button', { class: 'primary' }, 'Crear el adorno');
+    go.onclick = async () => {
+      const o = opts();
+      if (!crosswordLayout(o.names.split(/[\n,;]+/).map(cleanWord).filter(Boolean))) { msg('Escribe al menos un nombre.'); return; }
+      try { localStorage.setItem('evergreen-love-studio:crucigrama', JSON.stringify({ names: names.value, family: family.value, year: year.value, width: width.value, familyFont: o.familyFont, letterFont: o.letterFont, points: o.points, loop: o.loop, ring: o.ring, tilesOp: o.tilesOp })); } catch (e) { }
+      await Promise.all([loadFont(o.familyFont), loadFont(o.letterFont)]).catch(() => { });
+      const parts = crosswordParts(o);
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const ox = b ? b.x + b.w + 10 + o.width / 2 : o.width / 2, oy = b ? b.y + o.width / 2 + o.width * 0.05 : o.width / 2 + o.width * 0.05;
+      const f = mm => fmt(mm / unitMM);
+      const mk = p => {
+        if (p.k === 'circle') return { id: uid(), type: 'circle', name: p.role === 'hueco' ? 'Agujero' : p.role === 'marco' ? 'Marco' : 'Aro', op: p.op, p: { x: f(ox + p.x), y: f(oy + p.y), d: f(p.d), rot: '0' } };
+        if (p.k === 'rect') return { id: uid(), type: 'rect', name: 'Ficha', op: p.op, p: { x: f(ox + p.x), y: f(oy + p.y), w: f(p.w), h: f(p.h), r: f(p.r), rot: '0' } };
+        return { id: uid(), type: 'text', name: p.str.length > 2 ? p.str : 'Letra', op: p.op, p: { texto: p.str, fuente: p.font, x: f(ox + textX(p, o)), y: f(oy + p.y), tam: f(p.size), rot: '0' } };
+      };
+      const grp = (name, kids, mode) => ({ id: uid(), type: 'group', name, op: kids[0].op, p: { mode, x: '0', y: '0', rot: '0' }, children: kids });
+      const by = r => parts.filter(p => p.role === r).map(mk);
+      const made = [];
+      const aro = by('aro'), hueco = by('hueco');
+      made.push(grp('Aro del adorno', aro, 'unir'), ...hueco, ...by('marco'));
+      const fichas = by('ficha'); if (fichas.length) made.push(grp('Fichas del crucigrama', fichas, 'grupo'));
+      made.push(...by('texto'));
+      doc.shapes.push(...made);
+      sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg('Adorno creado. Puedes cambiar los colores de cada parte, ver las piezas o exportar. Para otro nombre o año, vuelve a abrir «Adorno crucigrama» y bórrala antes.');
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Adorno crucigrama'),
+      h('p', { class: 'tip' }, 'Escribe los nombres de la familia: la app los cruza como en un crucigrama y le pone ficha a cada letra, con el apellido y el año debajo.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Nombres', names), row('Apellido', family), row('Año', year), row(`Ancho (${unitLabel()})`, width), row('Letra del apellido', famFont), row('Letra de las fichas', letFont), row('Fichas', tilesSel), pointsL, loopL, ringL),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await Promise.all([loadFont(famFont.value), loadFont(letFont.value)]); } catch (e) { }
+    refresh();
+  }
+  $('#btnCrossword').onclick = e => { e.stopPropagation(); menu.hidden = true; openCrosswordDialog(); };
+
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
     const close = () => { dialog.close(); dialog.remove(); };
