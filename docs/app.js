@@ -8957,6 +8957,104 @@
   }
   $('#btnDrinkTags').onclick = e => { e.stopPropagation(); menu.hidden = true; openDrinkTagDialog(); };
 
+  /* ================= Rompecabezas de nombre ================= */
+  // Geometría en mm con la esquina del tablero en (0,0): tablero con el hueco de cada letra, fondo con agujeros para empujar, y las letras sueltas
+  function namePuzzleGeometry(o, name) {
+    const S = o.size, tmp = { id: 'pz-tmp', type: 'text', name: '', op: 'corte', p: { texto: name, fuente: o.font, x: '0', y: '0', tam: fmt(S / unitMM), rot: '0' } };
+    const r = evalShape(tmp);
+    const polys = r ? r.items.flatMap(it => it.polys).filter(p => p.closed && p.pts.length >= 3) : [];
+    if (!polys.length || !r.bbox) return null;
+    const bb = r.bbox, m = o.margin, dx = m - bb.x, dy = m - bb.y, W = bb.w + 2 * m, H = bb.h + 2 * m;
+    const mv = (pl, ex = 0, ey = 0) => ({ closed: true, pts: pl.pts.map(([x, y]) => [x + dx + ex, y + dy + ey]) });
+    const box = pl => { const xs = pl.pts.map(p => p[0]), ys = pl.pts.map(p => p[1]); return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; };
+    const area = pl => { const b = box(pl); return (b.x1 - b.x0) * (b.y1 - b.y0); };
+    const inside = (pt, pl) => { let c = false; const p = pl.pts; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > pt[1]) !== (p[j][1] > pt[1]) && pt[0] < (p[j][0] - p[i][0]) * (pt[1] - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c; return c; };
+    const letters = splitPieces(polys).map(pcs => {
+      const outer = pcs.reduce((a, c) => area(c) > area(a) ? c : a, pcs[0]), b = box(outer), cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+      let best = null;
+      for (let i = 0; i <= 14; i++) for (let j = 0; j <= 14; j++) {
+        const pt = [b.x0 + (b.x1 - b.x0) * i / 14, b.y0 + (b.y1 - b.y0) * j / 14];
+        if (pcs.filter(pl => inside(pt, pl)).length % 2 !== 1) continue;
+        const d = Math.hypot(pt[0] - cx, pt[1] - cy); if (!best || d < best.d) best = { d, pt };
+      }
+      return { outer, pcs, hole: best ? best.pt : [cx, cy], x: cx };
+    }).sort((a, c) => a.x - c.x);
+    const gap = o.gap, push = Math.min(o.push, S * 0.3);
+    return { W, H, gap, push, bb, mv, letters, dx, dy };
+  }
+  function namePuzzleShapes(o, ox, oy) {
+    const f = mm => fmt(mm / unitMM), out = [];
+    let y = oy;
+    for (const name of o.names.split(/\n+/).map(n => n.trim()).filter(Boolean).slice(0, 8).map(n => o.upper ? n.toUpperCase() : n)) {
+      const g = namePuzzleGeometry(o, name); if (!g) continue;
+      const rect = (nm, yy) => ({ id: uid(), type: 'rect', name: nm, op: 'corte', p: { x: f(ox), y: f(yy), w: f(g.W), h: f(g.H), r: f(Math.min(10, g.H / 6)), rot: '0' } });
+      const cav = g.letters.map(l => importObject('Hueco ' + name, [{ ...g.mv(l.outer, ox, y), op: 'corte' }], []));
+      const cavG = { id: uid(), type: 'group', name: 'Huecos de las letras', op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(o.clear) }, children: cav };
+      out.push({ id: uid(), type: 'group', name: 'Tablero: ' + name, op: 'corte', p: { mode: 'restar', x: '0', y: '0', rot: '0' }, children: [rect('Tablero', y), cavG] });
+      if (o.back) {
+        const by = y + g.H + g.gap;
+        const holes = g.letters.map(l => ({ id: uid(), type: 'circle', name: 'Agujero', op: 'corte', p: { x: f(ox + l.hole[0] + g.dx), y: f(by + l.hole[1] + g.dy), d: f(g.push), rot: '0' } }));
+        out.push({ id: uid(), type: 'group', name: 'Fondo: ' + name, op: 'corte', p: { mode: 'restar', x: '0', y: '0', rot: '0' }, children: [rect('Fondo', by), ...holes] });
+        y = by;
+      }
+      const ly = y + g.H + g.gap;
+      g.letters.forEach((l, i) => out.push(importObject('Letra ' + (i + 1) + ' de ' + name, l.pcs.map(pl => ({ ...g.mv(pl, ox, ly), op: 'corte' })), [])));
+      y = ly + g.H + g.gap * 2;
+    }
+    return out;
+  }
+  async function openNamePuzzleDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:rompecabezas') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Rompecabezas de nombre' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const names = h('textarea', { rows: '3', spellcheck: 'false', placeholder: 'Un nombre por línea' }, saved.names || 'Elijah');
+    const num = (v, d) => h('input', { type: 'number', step: 'any', min: '0', value: saved[v] || (isInch() ? fmt(d / 25.4, 3) : String(d)) });
+    const size = num('size', 50), margin = num('margin', 10), clear = num('clear', 0.15), push = num('push', 8);
+    const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'fredoka';
+    const mkCheck = (on, label) => { const c = h('input', { type: 'checkbox' }); c.checked = on; return [c, h('label', { class: 'check' }, c, ' ' + label)]; };
+    const [up, upL] = mkCheck(saved.upper !== false, 'Todo en mayúsculas'), [back, backL] = mkCheck(saved.back !== false, 'Con fondo y agujeros para empujar las letras');
+    const prev = h('div', { class: 'cw-preview dm-preview' });
+    const opts = () => ({ names: names.value, size: Math.max(10, (parseFloat(size.value) || 0) * unitMM), margin: Math.max(2, (parseFloat(margin.value) || 0) * unitMM), clear: Math.max(0, (parseFloat(clear.value) || 0) * unitMM), push: Math.max(3, (parseFloat(push.value) || 0) * unitMM), gap: 6, font: font.value, upper: up.checked, back: back.checked });
+    const refresh = () => {
+      const o = opts(), first = o.names.split(/\n+/).map(n => n.trim()).filter(Boolean)[0];
+      const g = first && namePuzzleGeometry(o, o.upper ? first.toUpperCase() : first);
+      if (!g) { prev.textContent = 'Escribe un nombre.'; return; }
+      const d = pl => 'M' + pl.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z', rows = o.back ? 3 : 2, st = g.H + g.gap, sw = Math.max(0.3, g.W / 500);
+      const rect = yy => `<rect x="0" y="${yy}" width="${g.W}" height="${g.H}" rx="${Math.min(10, g.H / 6)}" fill="#fff" stroke="#d33" stroke-width="${sw}"/>`;
+      let s = rect(0) + `<path d="${g.letters.map(l => d(g.mv(l.outer))).join('')}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>`;
+      if (o.back) s += rect(st) + g.letters.map(l => `<circle cx="${l.hole[0] + g.dx}" cy="${l.hole[1] + g.dy + st}" r="${g.push / 2}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>`).join('');
+      s += `<path d="${g.letters.flatMap(l => l.pcs.map(pl => d(g.mv(pl, 0, (rows - 1) * st)))).join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${sw}"/>`;
+      prev.innerHTML = `<svg viewBox="-2 -2 ${g.W + 4} ${rows * st + 2}" width="100%">${s}</svg>`;
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
+    for (const el of [names, size, margin, clear, push, font, up, back]) el.addEventListener('input', later);
+    const go = h('button', { class: 'primary' }, 'Crear el rompecabezas');
+    go.onclick = async () => {
+      const o = opts();
+      try { await loadFont(o.font); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, size: size.value, margin: margin.value, clear: clear.value, push: push.value, font: o.font, upper: o.upper, back: o.back })); } catch (e) { }
+      evaluateParams(); evaluateAll();
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const made = namePuzzleShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
+      if (!made.length) { msg('Escribe al menos un nombre.'); return; }
+      doc.shapes.push(...made); sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg('Rompecabezas creado: el tablero con los huecos, el fondo y las letras sueltas. Pinta cada letra de un color en «Color» para verlo.');
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Rompecabezas de nombre'),
+      h('p', { class: 'tip' }, 'Un tablero con el hueco de cada letra, un fondo, y las letras sueltas que encajan. Cada letra se pinta de un color distinto.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Nombre (uno por línea)', names), row('Tipografía (mejor gruesa)', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Margen del tablero (${unitLabel()})`, margin), row(`Holgura de los huecos (${unitLabel()})`, clear), row(`Agujero para empujar (${unitLabel()})`, push), upL, backL),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await loadFont(font.value); } catch (e) { }
+    refresh();
+  }
+  $('#btnNamePuzzle').onclick = e => { e.stopPropagation(); menu.hidden = true; openNamePuzzleDialog(); };
+
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
     const close = () => { dialog.close(); dialog.remove(); };
