@@ -9034,7 +9034,7 @@
     return out;
   }
   async function openNamePuzzleDialog() {
-    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:rompecabezas') || '{}'); } catch (e) { return {}; } })();
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:rompecabezas2') || '{}'); } catch (e) { return {}; } })();
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Rompecabezas de nombre' });
     const close = () => { dialog.close(); dialog.remove(); };
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
@@ -9063,7 +9063,7 @@
     go.onclick = async () => {
       const o = opts();
       try { await loadFont(o.font); } catch (e) { }
-      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, sizeMm: o.size, marginMm: o.margin, clearMm: o.clear, pushMm: o.push, font: o.font, upper: o.upper, back: o.back, guide: o.guide, notch: o.notch })); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:rompecabezas2', JSON.stringify({ names: names.value, sizeMm: o.size, marginMm: o.margin, clearMm: o.clear, pushMm: o.push, font: o.font, upper: o.upper, back: o.back, guide: o.guide, notch: o.notch })); } catch (e) { }
       evaluateParams(); evaluateAll();
       const b = unionBox([...evalCache.values()].map(r => r.bbox));
       const made = namePuzzleShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
