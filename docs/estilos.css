@@ -545,3 +545,4 @@ input.v3size-val { width: 64px; min-width: 0; padding: 4px 6px; text-align: righ
 .cw-row textarea, .cw-row input, .cw-row select { width: 100%; box-sizing: border-box; }
 .cw-preview { position: sticky; top: 0; aspect-ratio: 1 / 1.1; background: var(--panel, #fff); border: 1px solid var(--line, #ccc); border-radius: 8px; padding: 6px; min-width: 0; }
 @media (max-width: 640px) { .cw-grid { grid-template-columns: 1fr; } }
+.dm-preview { aspect-ratio: auto; min-height: 120px; }

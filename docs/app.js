@@ -8886,6 +8886,77 @@
   }
   $('#btnCrossword').onclick = e => { e.stopPropagation(); menu.hidden = true; openCrosswordDialog(); };
 
+  /* ================= Marcadores para copas (nombre con clip) ================= */
+  // Cada marcador: el nombre con una barra debajo que se dobla en U; el vidrio de la copa entra entre las dos barras
+  function drinkTagShapes(o, ox, oy) {
+    const f = mm => fmt(mm / unitMM), S = o.size, bt = Math.max(1.8, S * 0.14), g = o.glass, ofs = Math.max(0.5, S * 0.03);
+    const names = o.names.split(/\n+/).map(n => n.trim()).filter(Boolean).slice(0, 40).map(n => o.upper ? n.toUpperCase() : n);
+    const out = [];
+    let x = 0, y = 0, rowH = 0;
+    const barY = S * 0.62, H = barY + 2 * bt + g;
+    for (const name of names) {
+      const nw = measureTextWidth(name, S, o.font), W = bt + nw + bt, clip = Math.min(Math.max(nw * 0.7, S * 1.5), W);
+      if (x > 0 && x + W > o.rowW) { x = 0; y += rowH + 6; rowH = 0; }
+      const mkRect = (rx, ry, w, h) => ({ id: uid(), type: 'rect', name: 'Barra', op: 'corte', p: { x: f(ox + x + rx), y: f(oy + y + ry), w: f(w), h: f(h), r: f(Math.min(bt / 2, h / 2)), rot: '0' } });
+      const txt = { id: uid(), type: 'text', name: name, op: 'corte', p: { texto: name, fuente: o.font, x: f(ox + x + bt), y: f(oy + y + S * 0.74), tam: f(S), rot: '0' } };
+      out.push({ id: uid(), type: 'group', name: 'Marcador ' + name, op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(ofs) },
+        children: [txt, mkRect(0, barY, W, bt), mkRect(0, barY, bt, 2 * bt + g), mkRect(0, barY + bt + g, clip, bt)] });
+      x += W + 6; rowH = Math.max(rowH, H);
+    }
+    return out;
+  }
+  async function openDrinkTagDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:marcadores') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Marcadores para copas' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const names = h('textarea', { rows: '7', spellcheck: 'false', placeholder: 'Un nombre por línea' }, saved.names || 'Jake\nHenry\nQuincy\nSusie\nStephanie\nAmanda\nYves');
+    const size = h('input', { type: 'number', step: 'any', min: '5', value: saved.size || (isInch() ? '0.6' : '15') });
+    const glass = h('input', { type: 'number', step: 'any', min: '0.5', value: saved.glass || (isInch() ? '0.12' : '3') });
+    const rowW = h('input', { type: 'number', step: 'any', min: '40', value: saved.rowW || (isInch() ? '8' : '200') });
+    const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'bebas';
+    const up = h('input', { type: 'checkbox' }); up.checked = saved.upper !== false;
+    const prev = h('div', { class: 'cw-preview dm-preview' });
+    const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked });
+    const refresh = () => {
+      const shapes = drinkTagShapes(opts(), 0, 0), paths = [];
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of shapes) {
+        const r = evalShape(s); if (!r || !r.bbox) continue;
+        x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
+        for (const it of r.items) for (const p of it.polys) if (p.closed) paths.push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
+      }
+      if (!paths.length) { prev.textContent = 'Escribe al menos un nombre.'; return; }
+      const pad = 4, w = x1 - x0;
+      prev.innerHTML = `<svg viewBox="${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${y1 - y0 + 2 * pad}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/></svg>`;
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
+    for (const el of [names, size, glass, rowW, font, up]) el.addEventListener('input', later);
+    const go = h('button', { class: 'primary' }, 'Crear los marcadores');
+    go.onclick = async () => {
+      const o = opts();
+      try { await loadFont(o.font); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:marcadores', JSON.stringify({ names: names.value, size: size.value, glass: glass.value, rowW: rowW.value, font: o.font, upper: o.upper })); } catch (e) { }
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const made = drinkTagShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
+      if (!made.length) { msg('Escribe al menos un nombre.'); return; }
+      doc.shapes.push(...made); sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg(`${made.length} marcador(es) creados. Para otra lista, bórralos y vuelve a abrir «Marcadores para copas».`);
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Marcadores para copas'),
+      h('p', { class: 'tip' }, 'Cada nombre queda como una sola pieza con un clip debajo: el borde de la copa entra entre las dos barras.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Nombres (uno por línea)', names), row('Tipografía', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del vidrio (${unitLabel()})`, glass), row(`Ancho de la fila (${unitLabel()})`, rowW), h('label', { class: 'check' }, up, ' Todo en mayúsculas')),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await loadFont(font.value); } catch (e) { }
+    refresh();
+  }
+  $('#btnDrinkTags').onclick = e => { e.stopPropagation(); menu.hidden = true; openDrinkTagDialog(); };
+
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
     const close = () => { dialog.close(); dialog.remove(); };
