@@ -4284,6 +4284,7 @@
     $('#btnSelGroup').hidden = !can;
     $('#btnSelUngroup').hidden = !canUn;
     $('#btnSelWeld').hidden = !(shapes.length === 1 && shapes[0].type === 'text');
+    $('#btnSelWeldScore').hidden = !can;
   }
   function buildInspectorFields() {
     const box = $('#inspector');
@@ -4342,6 +4343,7 @@
         sameList
           ? h('div', { class: 'btn-grid' },
             h('button', { onclick: () => groupSel('unir'), title: 'Une las figuras en una sola silueta' }, 'Unir'),
+            h('button', { onclick: () => withFonts(weldAndScore), title: 'Une las figuras y textos en una sola silueta que se corta, y deja el contorno de cada una marcado por dentro (Weld and Score)' }, 'Unir y marcar'),
             h('button', { onclick: () => groupSel('restar'), title: 'A la figura de más abajo en la lista le quita las demás (ej. agujeros)' }, 'Restar'),
             h('button', { onclick: () => groupSel('intersectar'), title: 'Deja solo la parte donde se cruzan' }, 'Intersectar'),
             h('button', { onclick: () => groupSel('excluir'), title: 'Deja todo menos la parte donde se cruzan' }, 'Excluir'),
@@ -6485,6 +6487,24 @@
     checkpoint(); fullRender();
     if (moved) msg('Se agruparon figuras que estaban en distintos niveles: las que estaban dentro de otro grupo salieron de él.');
     if (mode === 'restar') msg(`"${members[0].name}" es la pieza; las demás figuras se recortan de ella.`);
+  }
+  // Unir y marcar (Weld and Score): el contorno de la unión se corta, y el contorno de cada figura o letra queda marcado por dentro
+  function weldAndScore() {
+    const shapes = [...sel].map(byId).filter(Boolean);
+    if (shapes.length < 2) { msg('Selecciona al menos dos figuras (por ejemplo un marco y un texto).'); return; }
+    const list = listOf(shapes[0].id), members = list.filter(s => sel.has(s.id));
+    if (members.length !== shapes.length) { msg('Para unir y marcar, las figuras deben estar en el mismo nivel (no una dentro de un grupo).'); return; }
+    if (members.every(s => TYPES[s.type].open)) { msg('Funciona con figuras cerradas y texto (no con líneas).'); return; }
+    const mark = x => { x.op = 'marcado'; (x.children || []).forEach(mark); };
+    const scores = members.map(m => { const c = cloneShape(m); c.name = 'Marcado: ' + (m.name || m.type); mark(c); return c; });
+    const at = Math.min(...members.map(m => list.indexOf(m)));
+    for (const m of members) list.splice(list.indexOf(m), 1);
+    const weld = { id: uid(), type: 'group', name: nextName('Unión'), op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0' }, children: members };
+    const g = { id: uid(), type: 'group', name: nextName('Unión y marcado'), op: 'corte', p: { mode: 'grupo', x: '0', y: '0', rot: '0' }, children: [weld, ...scores] };
+    list.splice(Math.min(at, list.length), 0, g);
+    sel = new Set([g.id]);
+    checkpoint(); fullRender();
+    msg('Unido: el contorno de afuera se corta y cada figura o letra queda marcada por dentro. Las letras de texto necesitan su tipografía cargada (si no se ven, espera un segundo).');
   }
   function ungroupSel() {
     const boxes = [...sel].map(byId).filter(s => s && SEPARABLE.has(s.type));
@@ -9740,6 +9760,7 @@
   $('#btnSelGroup').onclick = () => groupSel('grupo');
   $('#btnSelUngroup').onclick = ungroupSel;
   $('#btnSelDup').onclick = duplicateSel;
+  $('#btnSelWeldScore').onclick = () => withFonts(weldAndScore);
   $('#btnSelWeld').onclick = () => { const t = [...sel].map(byId).find(x => x && x.type === 'text'); if (t) withFonts(() => openWeldTool(t)); };
   $('#btnSelBack').onclick = () => reorderSel('back');
   $('#btnSelFront').onclick = () => reorderSel('front');
