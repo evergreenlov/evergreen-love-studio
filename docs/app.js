@@ -8896,6 +8896,18 @@
     const barY = S * 0.62, H = barY + 2 * bt + g;
     for (const name of names) {
       // Clip curvo: una U con el doblez redondeado (el vidrio entra por la ranura entre las dos barras)
+      const ribbon = (W, clip) => {                       // cinta con un rulo a la izquierda y una cola ondulada, como un garabato
+        const r = (bt + g) / 2, cu = r + bt / 2, X0 = ox + x, Y0 = oy + y + barY + bt / 2, A = S * 0.28, c = [];
+        c.push([X0 + W, Y0], [X0 + cu, Y0]);
+        for (let i = 1; i <= 24; i++) { const a = -Math.PI / 2 - Math.PI * i / 24; c.push([X0 + cu + r * Math.cos(a), Y0 + r + r * Math.sin(a)]); }
+        const L = clip - cu, n = 40;
+        for (let i = 1; i <= n; i++) { const t = i / n; c.push([X0 + cu + L * t, Y0 + 2 * r - A * Math.sin(t * Math.PI * 1.5) * t * 0.9 - A * 0.0]); }
+        const nrm = i => { const a = c[Math.max(0, i - 1)], b = c[Math.min(c.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; };
+        const left = c.map((q, i) => { const m = nrm(i); return [q[0] + m[0] * bt / 2, q[1] + m[1] * bt / 2]; }), right = c.map((q, i) => { const m = nrm(i); return [q[0] - m[0] * bt / 2, q[1] - m[1] * bt / 2]; });
+        const cap = (q, m, sgn) => { const t = [m[1], -m[0]], pts = []; for (let i = 1; i < 8; i++) { const a = Math.PI * i / 8; pts.push([q[0] + sgn * (m[0] * Math.cos(a) * bt / 2 + t[0] * Math.sin(a) * bt / 2), q[1] + sgn * (m[1] * Math.cos(a) * bt / 2 + t[1] * Math.sin(a) * bt / 2)]); } return pts; };
+        const e = c.length - 1, ne = nrm(e);
+        return [...left, ...cap(c[e], ne, 1), ...right.reverse()];
+      };
       const clipU = (W, clip) => {
         const Ro = bt + g / 2, Ri = g / 2, cu = Ro, X0 = ox + x, Y0 = oy + y + barY, pts = [[X0 + W, Y0], [X0 + cu, Y0]];
         for (let i = 1; i <= 20; i++) { const a = -Math.PI / 2 - Math.PI * i / 20; pts.push([X0 + cu + Ro * Math.cos(a), Y0 + Ro + Ro * Math.sin(a)]); }
@@ -8909,8 +8921,9 @@
       const mkRect = (rx, ry, w, h) => ({ id: uid(), type: 'rect', name: 'Barra', op: 'corte', p: { x: f(ox + x + rx), y: f(oy + y + ry), w: f(w), h: f(h), r: f(Math.min(bt / 2, h / 2)), rot: '0' } });
       const txt = { id: uid(), type: 'text', name: name, op: 'corte', p: { texto: name, fuente: o.font, x: f(ox + x + bt), y: f(oy + y + S * 0.74), tam: f(S), rot: '0' } };
       out.push({ id: uid(), type: 'group', name: 'Marcador ' + name, op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(ofs) },
-        children: o.clip === 'curvo' ? [txt, importObject('Clip', [{ closed: true, op: 'corte', pts: clipU(W, clip) }], [])] : [txt, mkRect(0, barY, W, bt), mkRect(0, barY, bt, 2 * bt + g), mkRect(0, barY + bt + g, clip, bt)] });
-      x += W + 6; rowH = Math.max(rowH, H);
+        children: o.clip === 'ondulado' ? [txt, importObject('Clip', [{ closed: true, op: 'corte', pts: ribbon(W, clip) }], [])] : o.clip === 'curvo' ? [txt, importObject('Clip', [{ closed: true, op: 'corte', pts: clipU(W, clip) }], [])] : [txt, mkRect(0, barY, W, bt), mkRect(0, barY, bt, 2 * bt + g), mkRect(0, barY + bt + g, clip, bt)] });
+      if (o.score) out.push({ id: uid(), type: 'text', name: 'Score ' + name, op: 'marcado', p: { ...txt.p, texto: name } });
+      x += W + 6; rowH = Math.max(rowH, H + (o.clip === 'ondulado' ? S * 0.3 : 0));
     }
     return out;
   }
@@ -8925,28 +8938,29 @@
     const rowW = h('input', { type: 'number', step: 'any', min: '40', value: saved.rowW || (isInch() ? '8' : '200') });
     const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'bebas';
     const up = h('input', { type: 'checkbox' }); up.checked = saved.upper !== false;
-    const clipSel = h('select', {}, h('option', { value: 'recto' }, 'Recto (esquinas cuadradas)'), h('option', { value: 'curvo' }, 'Curvo (doblez redondeado)')); clipSel.value = saved.clip || 'recto';
+    const clipSel = h('select', {}, h('option', { value: 'ondulado' }, 'Ondulado (rulo y cola curva)'), h('option', { value: 'curvo' }, 'Curvo (U redondeada)'), h('option', { value: 'recto' }, 'Recto (esquinas cuadradas)')); clipSel.value = saved.clip || 'ondulado';
+    const score = h('input', { type: 'checkbox' }); score.checked = saved.score !== false;
     const prev = h('div', { class: 'cw-preview dm-preview' });
-    const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked, clip: clipSel.value });
+    const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked, clip: clipSel.value, score: score.checked });
     const refresh = () => {
-      const shapes = drinkTagShapes(opts(), 0, 0), paths = [];
+      const shapes = drinkTagShapes(opts(), 0, 0), paths = [], marks = [];
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const s of shapes) {
         const r = evalShape(s); if (!r || !r.bbox) continue;
         x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
-        for (const it of r.items) for (const p of it.polys) if (p.closed) paths.push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
+        for (const it of r.items) for (const p of it.polys) if (p.closed) (it.op === 'marcado' ? marks : paths).push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
       }
       if (!paths.length) { prev.textContent = 'Escribe al menos un nombre.'; return; }
       const pad = 4, w = x1 - x0;
-      prev.innerHTML = `<svg viewBox="${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${y1 - y0 + 2 * pad}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/></svg>`;
+      prev.innerHTML = `<svg viewBox="${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${y1 - y0 + 2 * pad}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/><path d="${marks.join('')}" fill="none" stroke="#36c" stroke-width="${Math.max(0.2, w / 700)}"/></svg>`;
     };
     let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
-    for (const el of [names, size, glass, rowW, font, up, clipSel]) el.addEventListener('input', later);
+    for (const el of [names, size, glass, rowW, font, up, clipSel, score]) el.addEventListener('input', later);
     const go = h('button', { class: 'primary' }, 'Crear los marcadores');
     go.onclick = async () => {
       const o = opts();
       try { await loadFont(o.font); } catch (e) { }
-      try { localStorage.setItem('evergreen-love-studio:marcadores', JSON.stringify({ names: names.value, size: size.value, glass: glass.value, rowW: rowW.value, font: o.font, upper: o.upper, clip: o.clip })); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:marcadores', JSON.stringify({ names: names.value, size: size.value, glass: glass.value, rowW: rowW.value, font: o.font, upper: o.upper, clip: o.clip, score: o.score })); } catch (e) { }
       const b = unionBox([...evalCache.values()].map(r => r.bbox));
       const made = drinkTagShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
       if (!made.length) { msg('Escribe al menos un nombre.'); return; }
@@ -8958,7 +8972,7 @@
     dialog.append(h('h2', {}, 'Marcadores para copas'),
       h('p', { class: 'tip' }, 'Cada nombre queda como una sola pieza con un clip debajo: el borde de la copa entra entre las dos barras.'),
       h('div', { class: 'cw-grid' },
-        h('div', { class: 'cw-form' }, row('Nombres (uno por línea)', names), row('Tipografía', font), row('Forma del clip', clipSel), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del vidrio (${unitLabel()})`, glass), row(`Ancho de la fila (${unitLabel()})`, rowW), h('label', { class: 'check' }, up, ' Todo en mayúsculas')),
+        h('div', { class: 'cw-form' }, row('Nombres (uno por línea)', names), row('Tipografía', font), row('Forma del clip', clipSel), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del vidrio (${unitLabel()})`, glass), row(`Ancho de la fila (${unitLabel()})`, rowW), h('label', { class: 'check' }, up, ' Todo en mayúsculas'), h('label', { class: 'check' }, score, ' Score: marcar el contorno de las letras para que se distingan')),
         prev),
       h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
     document.body.append(dialog); dialog.showModal();
