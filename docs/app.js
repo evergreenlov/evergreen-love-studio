@@ -9055,6 +9055,97 @@
   }
   $('#btnNamePuzzle').onclick = e => { e.stopPropagation(); menu.hidden = true; openNamePuzzleDialog(); };
 
+  /* ================= Adorno agitable de bebé ================= */
+  // Cuatro capas (borde, tapa transparente con el nombre, espaciador y fondo) más las fichitas con los datos del nacimiento, copos y lazo opcional
+  function shakerShapes(o, ox, oy) {
+    const f = mm => fmt(mm / unitMM), D = o.d, out = [];
+    const circ = (nm, x, y, d, op = 'corte') => ({ id: uid(), type: 'circle', name: nm, op, p: { x: f(ox + x), y: f(oy + y), d: f(d), rot: '0' } });
+    const grp = (nm, mode, kids, extra = {}) => ({ id: uid(), type: 'group', name: nm, op: kids[0].op, p: { mode, x: '0', y: '0', rot: '0', ...extra }, children: kids });
+    const text = (str, x, y, size, font, op = 'grabado') => ({ id: uid(), type: 'text', name: str, op, p: { texto: str, fuente: font, x: f(ox + x - measureTextWidth(str, size, font) / 2), y: f(oy + y), tam: f(size), rot: '0' } });
+    const loopD = D * 0.16, loopY = -D / 2 - loopD * 0.2;
+    const layer = (nm, cx, cy, inner) => {
+      const kids = [grp('Contorno', 'unir', [circ('Disco', cx, cy, D), circ('Argolla', cx, cy + loopY, loopD)]), circ('Agujero', cx, cy + loopY, loopD * 0.4)];
+      if (inner) kids.push(circ('Hueco', cx, cy, D * 0.8));
+      return grp(nm, 'restar', kids);
+    };
+    const gap = D * 0.22, X = [0, D + gap], Y = [D * 0.12, D * 1.22 + gap];
+    out.push(layer('Borde frontal', X[0] + D / 2, Y[0] + D / 2, true), layer('Tapa transparente', X[1] + D / 2, Y[0] + D / 2, false), layer('Espaciador', X[0] + D / 2, Y[1] + D / 2, true), layer('Fondo', X[1] + D / 2, Y[1] + D / 2, false));
+    const lines = o.name.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 3), ns = D * (lines.length > 2 ? 0.11 : 0.15), ncx = X[1] + D / 2, ncy = Y[0] + D / 2;
+    lines.forEach((l, i) => out.push(text(l, ncx, ncy + (i - (lines.length - 1) / 2) * ns * 1.15 + ns * 0.3, ns, o.nameFont)));
+    // Fichitas con los datos
+    const cx0 = 2 * D + 2 * gap, tile = (nm, w, h, x, y, ls) => {
+      out.push({ id: uid(), type: 'rect', name: nm, op: 'corte', p: { x: f(ox + x), y: f(oy + y), w: f(w), h: f(h), r: f(Math.min(w, h) * 0.18), rot: '0' } });
+      const tot = ls.reduce((a, l) => a + l[1] * 1.2, 0); let yy = y + (h - tot) / 2;
+      for (const [str, size] of ls) { yy += size * 1.2; out.push(text(str, x + w / 2, yy - size * 0.2, size, o.tileFont)); }
+    };
+    const dateLines = [[o.month, D * 0.06], [o.day, D * 0.16], [o.year, D * 0.05]].filter(l => String(l[0]).trim());
+    const wl = o.weight.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    let ty = 0;
+    if (dateLines.length) { tile('Fecha', D * 0.34, D * 0.34, cx0, ty, dateLines); ty += D * 0.34 + D * 0.06; }
+    if (wl.length) { tile('Peso', D * 0.34, D * 0.1 + wl.length * D * 0.07, cx0, ty, wl.map(s => [s, D * 0.06])); ty += D * 0.1 + wl.length * D * 0.07 + D * 0.06; }
+    if (o.length.trim()) { tile('Largo', D * 0.4, D * 0.16, cx0, ty, [[o.length.trim(), D * 0.075]]); ty += D * 0.22; }
+    if (o.time.trim()) { tile('Hora', D * 0.34, D * 0.18, cx0, ty, [[o.time.trim(), D * 0.09]]); ty += D * 0.24; }
+    for (let i = 0; i < 5; i++) out.push({ id: uid(), type: 'polygon', name: 'Copo', op: 'corte', p: { x: f(ox + cx0 + D * 0.5 + (i % 2) * D * 0.16), y: f(oy + D * 0.08 + i * D * 0.17), d: f(D * 0.14), n: '6', forma: 'estrella', profEst: '38', rot: '0' } });
+    if (o.bow) {
+      const bx = X[0] + D / 2, by = Y[1] + D + gap * 0.9 + D * 0.15, w = D * 0.42, hh = D * 0.24;
+      const wing = s => [[0, 0], [s * w * 0.95, -hh * 0.5], [s * w, -hh * 0.2], [s * w, hh * 0.2], [s * w * 0.95, hh * 0.5]].map(([x, y]) => [ox + bx + x, oy + by + y]);
+      const mk = (nm, pts) => importObject(nm, [{ closed: true, op: 'corte', pts }], []);
+      out.push(grp('Lazo', 'unir', [mk('Ala izquierda', wing(-1)), mk('Ala derecha', wing(1)), circ('Nudo', bx, by, D * 0.13)]));
+    }
+    return out;
+  }
+  async function openShakerDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:agitable') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Adorno agitable de bebé' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const inp = (k, d) => h('input', { type: 'text', value: saved[k] !== undefined ? saved[k] : d });
+    const ta = (k, d, r) => h('textarea', { rows: String(r), spellcheck: 'false' }, saved[k] !== undefined ? saved[k] : d);
+    const name = ta('name', 'Georgia\nQuinn', 2), month = inp('month', 'August'), day = inp('day', '7'), year = inp('year', '2018'), weight = ta('weight', '6 lbs\n6 oz', 2), length = inp('length', '19.7 in'), time = inp('time', '2:42');
+    const dia = h('input', { type: 'number', step: 'any', min: '30', value: saved.d || (isInch() ? '3.5' : '90') });
+    const fsel = (k, d) => { const e = h('select', {}, ...FONTS.map(x => h('option', { value: x.id }, x.name))); e.value = saved[k] || d; return e; };
+    const nameFont = fsel('nameFont', 'greatvibes'), tileFont = fsel('tileFont', 'montserrat');
+    const bow = h('input', { type: 'checkbox' }); bow.checked = saved.bow !== false;
+    const prev = h('div', { class: 'cw-preview dm-preview' });
+    const opts = () => ({ name: name.value, month: month.value, day: day.value, year: year.value, weight: weight.value, length: length.value, time: time.value, d: Math.max(30, (parseFloat(dia.value) || 0) * unitMM), nameFont: nameFont.value, tileFont: tileFont.value, bow: bow.checked });
+    const refresh = () => {
+      const shapes = shakerShapes(opts(), 0, 0), paths = [];
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of shapes) {
+        const r = evalShape(s); if (!r || !r.bbox) continue;
+        x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
+        for (const it of r.items) for (const p of it.polys) if (p.closed) paths.push('M' + p.pts.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join('L') + 'Z');
+      }
+      const w = x1 - x0;
+      prev.innerHTML = `<svg viewBox="${x0 - 3} ${y0 - 3} ${w + 6} ${y1 - y0 + 6}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 500)}"/></svg>`;
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await Promise.all([loadFont(nameFont.value), loadFont(tileFont.value)]); } catch (e) { } refresh(); }, 200); };
+    for (const el of [name, month, day, year, weight, length, time, dia, nameFont, tileFont, bow]) el.addEventListener('input', later);
+    const go = h('button', { class: 'primary' }, 'Crear el adorno');
+    go.onclick = async () => {
+      const o = opts();
+      try { await Promise.all([loadFont(o.nameFont), loadFont(o.tileFont)]); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:agitable', JSON.stringify({ name: name.value, month: month.value, day: day.value, year: year.value, weight: weight.value, length: length.value, time: time.value, d: dia.value, nameFont: o.nameFont, tileFont: o.tileFont, bow: o.bow })); } catch (e) { }
+      evaluateParams(); evaluateAll();
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const made = shakerShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
+      doc.shapes.push(...made); sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg('Adorno agitable creado: 4 capas (borde, tapa con el nombre, espaciador y fondo), las fichitas y los copos. Las fichitas van dentro del espacio entre la tapa y el fondo.');
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Adorno agitable de bebé'),
+      h('p', { class: 'tip' }, 'Cuatro capas que se pegan: borde, tapa transparente con el nombre grabado, espaciador y fondo. Dentro van las fichitas con los datos del nacimiento.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Nombre (hasta 3 líneas)', name), row('Mes', month), row('Día', day), row('Año', year), row('Peso (una línea por dato)', weight), row('Largo', length), row('Hora', time), row(`Diámetro (${unitLabel()})`, dia), row('Letra del nombre', nameFont), row('Letra de las fichitas', tileFont), h('label', { class: 'check' }, bow, ' Lazo decorativo')),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await Promise.all([loadFont(nameFont.value), loadFont(tileFont.value)]); } catch (e) { }
+    refresh();
+  }
+  $('#btnShaker').onclick = e => { e.stopPropagation(); menu.hidden = true; openShakerDialog(); };
+
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
     const close = () => { dialog.close(); dialog.remove(); };
