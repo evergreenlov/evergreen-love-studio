@@ -9306,6 +9306,78 @@
   }
   $('#btnQrSign').onclick = e => { e.stopPropagation(); menu.hidden = true; openQrSignDialog(); };
 
+  /* ================= Llavero con contorno ================= */
+  // El nombre se graba; el contorno que lo rodea (y la argolla del agujero) se corta
+  function keychainShapes(o, ox, oy) {
+    const f = mm => fmt(mm / unitMM), out = [];
+    let y = oy;
+    for (const raw of o.names.split(/\n+/).map(n => n.trim()).filter(Boolean).slice(0, 20)) {
+      const name = o.upper ? raw.toUpperCase() : raw;
+      const probe = evalShape({ id: 'kc-tmp', type: 'text', name: '', op: 'grabado', p: { texto: name, fuente: o.font, x: '0', y: '0', tam: f(o.size), rot: '0' } });
+      if (!probe || !probe.bbox) continue;
+      const bb = probe.bbox, pad = o.outline + o.holeD * 0.9, tx = ox + pad - bb.x, ty = y + pad - bb.y;
+      const left = tx + bb.x, top = ty + bb.y, hx = left + o.hx, hy = top + o.hy;
+      const mkText = op => ({ id: uid(), type: 'text', name, op, p: { texto: name, fuente: o.font, x: f(tx), y: f(ty), tam: f(o.size), rot: '0' } });
+      const circ = (nm, d) => ({ id: uid(), type: 'circle', name: nm, op: 'corte', p: { x: f(hx), y: f(hy), d: f(d), rot: '0' } });
+      const weld = { id: uid(), type: 'group', name: 'Contorno', op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(o.outline) }, children: [mkText('corte'), circ('Argolla', o.holeD)] };
+      out.push({ id: uid(), type: 'group', name: 'Llavero ' + name, op: 'corte', p: { mode: 'restar', x: '0', y: '0', rot: '0' }, children: [weld, circ('Agujero', o.holeD)] }, mkText('grabado'));
+      y += bb.h + 2 * pad + 8;
+    }
+    return out;
+  }
+  async function openKeychainDialog() {
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:llavero2') || '{}'); } catch (e) { return {}; } })();
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Llavero con contorno' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const names = h('textarea', { rows: '3', spellcheck: 'false', placeholder: 'Un nombre por línea' }, saved.names || 'Jaxi');
+    const num = (k, d) => h('input', { type: 'number', step: 'any', value: saved[k + 'Mm'] !== undefined ? fmt(saved[k + 'Mm'] / unitMM, 3) : (isInch() ? fmt(d / 25.4, 3) : String(d)) });
+    const size = num('size', 40), outline = num('outline', 3), holeD = num('holeD', 5), hx = num('hx', -2), hy = num('hy', 3);
+    const font = h('select', {}, ...FONTS.map(x => h('option', { value: x.id }, x.name))); font.value = saved.font || 'chewy';
+    const up = h('input', { type: 'checkbox' }); up.checked = saved.upper === true;
+    const prev = h('div', { class: 'cw-preview dm-preview' });
+    const mm = el => (parseFloat(el.value) || 0) * unitMM;
+    const opts = () => ({ names: names.value, size: Math.max(8, mm(size)), outline: Math.max(0.5, mm(outline)), holeD: Math.max(1.5, mm(holeD)), hx: mm(hx), hy: mm(hy), font: font.value, upper: up.checked });
+    const refresh = () => {
+      const shapes = keychainShapes(opts(), 0, 0), cut = [], eng = [];
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of shapes) {
+        const r = evalShape(s); if (!r || !r.bbox) continue;
+        x0 = Math.min(x0, r.bbox.x); y0 = Math.min(y0, r.bbox.y); x1 = Math.max(x1, r.bbox.x + r.bbox.w); y1 = Math.max(y1, r.bbox.y + r.bbox.h);
+        for (const it of r.items) for (const p of it.polys) if (p.closed) (it.op === 'corte' ? cut : eng).push('M' + p.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z');
+      }
+      if (!cut.length) { prev.textContent = 'Escribe un nombre.'; return; }
+      const w = x1 - x0;
+      prev.innerHTML = `<svg viewBox="${x0 - 3} ${y0 - 3} ${w + 6} ${y1 - y0 + 6}" width="100%"><path d="${cut.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/><path d="${eng.join('')}" fill="#8a4fd8" fill-rule="evenodd"/></svg>`;
+    };
+    let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
+    for (const el of [names, size, outline, holeD, hx, hy, font, up]) el.addEventListener('input', later);
+    const go = h('button', { class: 'primary' }, 'Crear el llavero');
+    go.onclick = async () => {
+      const o = opts();
+      try { await loadFont(o.font); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:llavero2', JSON.stringify({ names: names.value, sizeMm: o.size, outlineMm: o.outline, holeDMm: o.holeD, hxMm: o.hx, hyMm: o.hy, font: o.font, upper: o.upper })); } catch (e) { }
+      evaluateParams(); evaluateAll();
+      const b = unionBox([...evalCache.values()].map(r => r.bbox));
+      const made = keychainShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
+      if (!made.length) { msg('Escribe un nombre.'); return; }
+      doc.shapes.push(...made); sel = new Set(made.map(s => s.id));
+      close(); checkpoint(); fullRender(); fitView();
+      msg('Llavero creado: el nombre se graba y el contorno con la argolla se corta. Para cambiar el color de las letras, usa «Color» en el panel.');
+    };
+    const row = (label, el) => h('label', { class: 'cw-row' }, h('span', {}, label), el);
+    dialog.append(h('h2', {}, 'Llavero con contorno'),
+      h('p', { class: 'tip' }, 'El nombre se graba y se corta un contorno alrededor, con una argolla y su agujero. Mejor con letras gruesas y redondeadas.'),
+      h('div', { class: 'cw-grid' },
+        h('div', { class: 'cw-form' }, row('Nombre (uno por línea)', names), row('Tipografía', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del contorno (${unitLabel()})`, outline), row(`Diámetro del agujero (${unitLabel()})`, holeD), row(`Agujero: mover a la derecha (${unitLabel()}; negativo = izquierda)`, hx), row(`Agujero: mover hacia abajo (${unitLabel()})`, hy), h('label', { class: 'check' }, up, ' Todo en mayúsculas')),
+        prev),
+      h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+    try { await loadFont(font.value); } catch (e) { }
+    refresh();
+  }
+  $('#btnKeychain2').onclick = e => { e.stopPropagation(); menu.hidden = true; openKeychainDialog(); };
+
   function openStretchDialog(s) {
     const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Agrandar pieza' });
     const close = () => { dialog.close(); dialog.remove(); };
