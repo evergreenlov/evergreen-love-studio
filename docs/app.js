@@ -9039,11 +9039,11 @@
     const close = () => { dialog.close(); dialog.remove(); };
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
     const names = h('textarea', { rows: '3', spellcheck: 'false', placeholder: 'Un nombre por línea' }, saved.names || 'Elijah');
-    const num = (v, d) => h('input', { type: 'number', step: 'any', min: '0', value: saved[v] || (isInch() ? fmt(d / 25.4, 3) : String(d)) });
+    const num = (v, d) => h('input', { type: 'number', step: 'any', min: '0', value: saved[v + 'Mm'] ? fmt(saved[v + 'Mm'] / unitMM, 3) : (isInch() ? fmt(d / 25.4, 3) : String(d)) });   // lo guardado va en mm, así no se descuadra al cambiar de unidad
     const size = num('size', 50), margin = num('margin', 10), clear = num('clear', 0.15), push = num('push', 8);
     const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'fredoka';
     const mkCheck = (on, label) => { const c = h('input', { type: 'checkbox' }); c.checked = on; return [c, h('label', { class: 'check' }, c, ' ' + label)]; };
-    const [notch, notchL] = mkCheck(saved.notch !== false, 'Muescas redondas arriba de cada letra para levantarla'), [guide, guideL] = mkCheck(saved.guide !== false, 'Marcar en el fondo dónde va cada letra (para ubicar los agujeros)'), [up, upL] = mkCheck(saved.upper !== false, 'Todo en mayúsculas'), [back, backL] = mkCheck(saved.back !== false, 'Con fondo y agujeros para empujar las letras');
+    const [notch, notchL] = mkCheck(saved.notch !== false, 'Muescas redondas arriba de cada letra para levantarla'), [guide, guideL] = mkCheck(saved.guide !== false, 'Marcar en el fondo dónde va cada letra (para ubicar los agujeros)'), [up, upL] = mkCheck(saved.upper !== false, 'Todo en mayúsculas'), [back, backL] = mkCheck(saved.back === true, 'Agregar un fondo con agujeros para empujar las letras por detrás (opcional)');
     const prev = h('div', { class: 'cw-preview dm-preview' });
     const opts = () => ({ names: names.value, size: Math.max(10, (parseFloat(size.value) || 0) * unitMM), margin: Math.max(2, (parseFloat(margin.value) || 0) * unitMM), clear: Math.max(0, (parseFloat(clear.value) || 0) * unitMM), push: Math.max(3, (parseFloat(push.value) || 0) * unitMM), guide: guide.checked, notch: notch.checked, gap: 6, font: font.value, upper: up.checked, back: back.checked });
     const refresh = () => {
@@ -9063,7 +9063,7 @@
     go.onclick = async () => {
       const o = opts();
       try { await loadFont(o.font); } catch (e) { }
-      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, size: size.value, margin: margin.value, clear: clear.value, push: push.value, font: o.font, upper: o.upper, back: o.back, guide: o.guide, notch: o.notch })); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, sizeMm: o.size, marginMm: o.margin, clearMm: o.clear, pushMm: o.push, font: o.font, upper: o.upper, back: o.back, guide: o.guide, notch: o.notch })); } catch (e) { }
       evaluateParams(); evaluateAll();
       const b = unionBox([...evalCache.values()].map(r => r.bbox));
       const made = namePuzzleShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
