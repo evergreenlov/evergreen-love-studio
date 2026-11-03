@@ -9002,7 +9002,8 @@
         if (pcs.filter(pl => inside(pt, pl)).length % 2 !== 1) continue;
         const d = Math.hypot(pt[0] - cx, pt[1] - cy); if (!best || d < best.d) best = { d, pt };
       }
-      return { outer, pcs, hole: best ? best.pt : [cx, cy], x: cx };
+      const ymin = Math.min(...outer.pts.map(q => q[1])), top = outer.pts.filter(q => q[1] < ymin + (b.y1 - b.y0) * 0.03);
+      return { outer, pcs, hole: best ? best.pt : [cx, cy], x: cx, top: [top.reduce((a, q) => a + q[0], 0) / top.length, ymin] };
     }).sort((a, c) => a.x - c.x);
     const gap = o.gap, push = Math.min(o.push, S * 0.3);
     return { W, H, gap, push, bb, mv, letters, dx, dy };
@@ -9014,7 +9015,9 @@
       const g = namePuzzleGeometry(o, name); if (!g) continue;
       const rect = (nm, yy) => ({ id: uid(), type: 'rect', name: nm, op: 'corte', p: { x: f(ox), y: f(yy), w: f(g.W), h: f(g.H), r: f(Math.min(10, g.H / 6)), rot: '0' } });
       const cav = g.letters.map(l => importObject('Hueco ' + name, [{ ...g.mv(l.outer, ox, y), op: 'corte' }], []));
-      const cavG = { id: uid(), type: 'group', name: 'Huecos de las letras', op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(o.clear) }, children: cav };
+      // Muesca redonda en el borde de arriba de cada letra: con el dedo se levanta la pieza para sacarla o ponerla
+      const notch = o.notch ? g.letters.map(l => ({ id: uid(), type: 'circle', name: 'Muesca', op: 'corte', p: { x: f(ox + l.top[0] + g.dx), y: f(y + l.top[1] + g.dy - g.push * 0.1), d: f(g.push), rot: '0' } })) : [];
+      const cavG = { id: uid(), type: 'group', name: 'Huecos de las letras', op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(o.clear) }, children: [...cav, ...notch] };
       out.push({ id: uid(), type: 'group', name: 'Tablero: ' + name, op: 'corte', p: { mode: 'restar', x: '0', y: '0', rot: '0' }, children: [rect('Tablero', y), cavG] });
       if (o.back) {
         const by = y + g.H + g.gap;
@@ -9040,27 +9043,27 @@
     const size = num('size', 50), margin = num('margin', 10), clear = num('clear', 0.15), push = num('push', 8);
     const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'fredoka';
     const mkCheck = (on, label) => { const c = h('input', { type: 'checkbox' }); c.checked = on; return [c, h('label', { class: 'check' }, c, ' ' + label)]; };
-    const [guide, guideL] = mkCheck(saved.guide !== false, 'Marcar en el fondo dónde va cada letra (para ubicar los agujeros)'), [up, upL] = mkCheck(saved.upper !== false, 'Todo en mayúsculas'), [back, backL] = mkCheck(saved.back !== false, 'Con fondo y agujeros para empujar las letras');
+    const [notch, notchL] = mkCheck(saved.notch !== false, 'Muescas redondas arriba de cada letra para levantarla'), [guide, guideL] = mkCheck(saved.guide !== false, 'Marcar en el fondo dónde va cada letra (para ubicar los agujeros)'), [up, upL] = mkCheck(saved.upper !== false, 'Todo en mayúsculas'), [back, backL] = mkCheck(saved.back !== false, 'Con fondo y agujeros para empujar las letras');
     const prev = h('div', { class: 'cw-preview dm-preview' });
-    const opts = () => ({ names: names.value, size: Math.max(10, (parseFloat(size.value) || 0) * unitMM), margin: Math.max(2, (parseFloat(margin.value) || 0) * unitMM), clear: Math.max(0, (parseFloat(clear.value) || 0) * unitMM), push: Math.max(3, (parseFloat(push.value) || 0) * unitMM), guide: guide.checked, gap: 6, font: font.value, upper: up.checked, back: back.checked });
+    const opts = () => ({ names: names.value, size: Math.max(10, (parseFloat(size.value) || 0) * unitMM), margin: Math.max(2, (parseFloat(margin.value) || 0) * unitMM), clear: Math.max(0, (parseFloat(clear.value) || 0) * unitMM), push: Math.max(3, (parseFloat(push.value) || 0) * unitMM), guide: guide.checked, notch: notch.checked, gap: 6, font: font.value, upper: up.checked, back: back.checked });
     const refresh = () => {
       const o = opts(), first = o.names.split(/\n+/).map(n => n.trim()).filter(Boolean)[0];
       const g = first && namePuzzleGeometry(o, o.upper ? first.toUpperCase() : first);
       if (!g) { prev.textContent = 'Escribe un nombre.'; return; }
       const d = pl => 'M' + pl.pts.map(q => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + 'Z', rows = o.back ? 3 : 2, st = g.H + g.gap, sw = Math.max(0.3, g.W / 500);
       const rect = yy => `<rect x="0" y="${yy}" width="${g.W}" height="${g.H}" rx="${Math.min(10, g.H / 6)}" fill="#fff" stroke="#d33" stroke-width="${sw}"/>`;
-      let s = rect(0) + `<path d="${g.letters.map(l => d(g.mv(l.outer))).join('')}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>`;
+      let s = rect(0) + `<path d="${g.letters.map(l => d(g.mv(l.outer))).join('')}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>` + (o.notch ? g.letters.map(l => `<circle cx="${l.top[0] + g.dx}" cy="${l.top[1] + g.dy - g.push * 0.1}" r="${g.push / 2}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>`).join('') : '');
       if (o.back) s += rect(st) + (o.guide ? `<path d="${g.letters.map(l => d(g.mv(l.outer, 0, st))).join('')}" fill="#eef3ff" stroke="#36c" stroke-width="${sw}" stroke-dasharray="${sw * 4} ${sw * 3}"/>` : '') + g.letters.map(l => `<circle cx="${l.hole[0] + g.dx}" cy="${l.hole[1] + g.dy + st}" r="${g.push / 2}" fill="#ddd" stroke="#d33" stroke-width="${sw}"/>`).join('');
       s += `<path d="${g.letters.flatMap(l => l.pcs.map(pl => d(g.mv(pl, 0, (rows - 1) * st)))).join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${sw}"/>`;
       prev.innerHTML = `<svg viewBox="-2 -2 ${g.W + 4} ${rows * st + 2}" width="100%">${s}</svg>`;
     };
     let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
-    for (const el of [names, size, margin, clear, push, font, up, back, guide]) el.addEventListener('input', later);
+    for (const el of [names, size, margin, clear, push, font, up, back, guide, notch]) el.addEventListener('input', later);
     const go = h('button', { class: 'primary' }, 'Crear el rompecabezas');
     go.onclick = async () => {
       const o = opts();
       try { await loadFont(o.font); } catch (e) { }
-      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, size: size.value, margin: margin.value, clear: clear.value, push: push.value, font: o.font, upper: o.upper, back: o.back, guide: o.guide })); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:rompecabezas', JSON.stringify({ names: names.value, size: size.value, margin: margin.value, clear: clear.value, push: push.value, font: o.font, upper: o.upper, back: o.back, guide: o.guide, notch: o.notch })); } catch (e) { }
       evaluateParams(); evaluateAll();
       const b = unionBox([...evalCache.values()].map(r => r.bbox));
       const made = namePuzzleShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
@@ -9073,7 +9076,7 @@
     dialog.append(h('h2', {}, 'Rompecabezas de nombre'),
       h('p', { class: 'tip' }, 'Un tablero con el hueco de cada letra, un fondo, y las letras sueltas que encajan. Cada letra se pinta de un color distinto.'),
       h('div', { class: 'cw-grid' },
-        h('div', { class: 'cw-form' }, row('Nombre (uno por línea)', names), row('Tipografía (mejor gruesa)', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Margen del tablero (${unitLabel()})`, margin), row(`Holgura de los huecos (${unitLabel()})`, clear), row(`Agujero para empujar (${unitLabel()})`, push), upL, backL, guideL),
+        h('div', { class: 'cw-form' }, row('Nombre (uno por línea)', names), row('Tipografía (mejor gruesa)', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Margen del tablero (${unitLabel()})`, margin), row(`Holgura de los huecos (${unitLabel()})`, clear), row(`Agujero para empujar (${unitLabel()})`, push), upL, notchL, backL, guideL),
         prev),
       h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
     document.body.append(dialog); dialog.showModal();
