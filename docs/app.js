@@ -8895,12 +8895,21 @@
     let x = 0, y = 0, rowH = 0;
     const barY = S * 0.62, H = barY + 2 * bt + g;
     for (const name of names) {
+      // Clip curvo: una U con el doblez redondeado (el vidrio entra por la ranura entre las dos barras)
+      const clipU = (W, clip) => {
+        const Ro = bt + g / 2, Ri = g / 2, cu = Ro, X0 = ox + x, Y0 = oy + y + barY, pts = [[X0 + W, Y0], [X0 + cu, Y0]];
+        for (let i = 1; i <= 20; i++) { const a = -Math.PI / 2 - Math.PI * i / 20; pts.push([X0 + cu + Ro * Math.cos(a), Y0 + Ro + Ro * Math.sin(a)]); }
+        pts.push([X0 + clip, Y0 + 2 * Ro], [X0 + clip, Y0 + 2 * Ro - bt], [X0 + cu, Y0 + 2 * Ro - bt]);
+        for (let i = 1; i <= 20; i++) { const a = Math.PI / 2 + Math.PI * i / 20; pts.push([X0 + cu + Ri * Math.cos(a), Y0 + Ro + Ri * Math.sin(a)]); }
+        pts.push([X0 + W, Y0 + bt]);
+        return pts;
+      };
       const nw = measureTextWidth(name, S, o.font), W = bt + nw + bt, clip = Math.min(Math.max(nw * 0.7, S * 1.5), W);
       if (x > 0 && x + W > o.rowW) { x = 0; y += rowH + 6; rowH = 0; }
       const mkRect = (rx, ry, w, h) => ({ id: uid(), type: 'rect', name: 'Barra', op: 'corte', p: { x: f(ox + x + rx), y: f(oy + y + ry), w: f(w), h: f(h), r: f(Math.min(bt / 2, h / 2)), rot: '0' } });
       const txt = { id: uid(), type: 'text', name: name, op: 'corte', p: { texto: name, fuente: o.font, x: f(ox + x + bt), y: f(oy + y + S * 0.74), tam: f(S), rot: '0' } };
       out.push({ id: uid(), type: 'group', name: 'Marcador ' + name, op: 'corte', p: { mode: 'unir', x: '0', y: '0', rot: '0', off: f(ofs) },
-        children: [txt, mkRect(0, barY, W, bt), mkRect(0, barY, bt, 2 * bt + g), mkRect(0, barY + bt + g, clip, bt)] });
+        children: o.clip === 'curvo' ? [txt, importObject('Clip', [{ closed: true, op: 'corte', pts: clipU(W, clip) }], [])] : [txt, mkRect(0, barY, W, bt), mkRect(0, barY, bt, 2 * bt + g), mkRect(0, barY + bt + g, clip, bt)] });
       x += W + 6; rowH = Math.max(rowH, H);
     }
     return out;
@@ -8916,8 +8925,9 @@
     const rowW = h('input', { type: 'number', step: 'any', min: '40', value: saved.rowW || (isInch() ? '8' : '200') });
     const font = h('select', {}, ...FONTS.map(f => h('option', { value: f.id }, f.name))); font.value = saved.font || 'bebas';
     const up = h('input', { type: 'checkbox' }); up.checked = saved.upper !== false;
+    const clipSel = h('select', {}, h('option', { value: 'recto' }, 'Recto (esquinas cuadradas)'), h('option', { value: 'curvo' }, 'Curvo (doblez redondeado)')); clipSel.value = saved.clip || 'recto';
     const prev = h('div', { class: 'cw-preview dm-preview' });
-    const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked });
+    const opts = () => ({ names: names.value, size: Math.max(5, (parseFloat(size.value) || 0) * unitMM), glass: Math.max(0.5, (parseFloat(glass.value) || 0) * unitMM), rowW: Math.max(40, (parseFloat(rowW.value) || 0) * unitMM), font: font.value, upper: up.checked, clip: clipSel.value });
     const refresh = () => {
       const shapes = drinkTagShapes(opts(), 0, 0), paths = [];
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -8931,12 +8941,12 @@
       prev.innerHTML = `<svg viewBox="${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${y1 - y0 + 2 * pad}" width="100%"><path d="${paths.join('')}" fill="#fff" fill-rule="evenodd" stroke="#d33" stroke-width="${Math.max(0.3, w / 400)}"/></svg>`;
     };
     let tm = 0; const later = () => { clearTimeout(tm); tm = setTimeout(async () => { try { await loadFont(font.value); } catch (e) { } refresh(); }, 150); };
-    for (const el of [names, size, glass, rowW, font, up]) el.addEventListener('input', later);
+    for (const el of [names, size, glass, rowW, font, up, clipSel]) el.addEventListener('input', later);
     const go = h('button', { class: 'primary' }, 'Crear los marcadores');
     go.onclick = async () => {
       const o = opts();
       try { await loadFont(o.font); } catch (e) { }
-      try { localStorage.setItem('evergreen-love-studio:marcadores', JSON.stringify({ names: names.value, size: size.value, glass: glass.value, rowW: rowW.value, font: o.font, upper: o.upper })); } catch (e) { }
+      try { localStorage.setItem('evergreen-love-studio:marcadores', JSON.stringify({ names: names.value, size: size.value, glass: glass.value, rowW: rowW.value, font: o.font, upper: o.upper, clip: o.clip })); } catch (e) { }
       const b = unionBox([...evalCache.values()].map(r => r.bbox));
       const made = drinkTagShapes(o, b ? b.x + b.w + 10 : 0, b ? b.y : 0);
       if (!made.length) { msg('Escribe al menos un nombre.'); return; }
@@ -8948,7 +8958,7 @@
     dialog.append(h('h2', {}, 'Marcadores para copas'),
       h('p', { class: 'tip' }, 'Cada nombre queda como una sola pieza con un clip debajo: el borde de la copa entra entre las dos barras.'),
       h('div', { class: 'cw-grid' },
-        h('div', { class: 'cw-form' }, row('Nombres (uno por línea)', names), row('Tipografía', font), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del vidrio (${unitLabel()})`, glass), row(`Ancho de la fila (${unitLabel()})`, rowW), h('label', { class: 'check' }, up, ' Todo en mayúsculas')),
+        h('div', { class: 'cw-form' }, row('Nombres (uno por línea)', names), row('Tipografía', font), row('Forma del clip', clipSel), row(`Alto de las letras (${unitLabel()})`, size), row(`Grosor del vidrio (${unitLabel()})`, glass), row(`Ancho de la fila (${unitLabel()})`, rowW), h('label', { class: 'check' }, up, ' Todo en mayúsculas')),
         prev),
       h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
     document.body.append(dialog); dialog.showModal();
