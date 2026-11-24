@@ -7734,6 +7734,8 @@
   /* ================= Cajas de dominó (plantillas) ================= */
   // Caja sin tapa con dedos; el frente lleva el diseño grabado y los dominós se cortan aparte para pegarlos encima
   const DOMINO_PIPS = { 0: [], 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
+  const DOMINO_DEFAULTS = { 1: [[3, 5], [6, 4], [2, 5]], 2: [[6, 3], [4, 6]], 3: [[5, 3], [6, 2], [3, 4]] };
+  const dominoNums = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:dominos') || '{}'); } catch (e) { return {}; } })();
   function dominoTemplate(variant) {
     return (units, sheet) => {
       const d = boxTemplate('dedos', units, sheet, 'no'), K = units === 'in' ? 25.4 : 1, f = mm => fmt(mm / K, 4);
@@ -7744,7 +7746,8 @@
         evaluateParams();
         const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
         let fp = null, maxX = 0, minY = Infinity;
-        for (const [q, [px, py]] of placed) { if (q.name === 'Frente') fp = { x: px, y: py, w: q.w, h: q.h }; maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
+        const sides = [];
+        for (const [q, [px, py]] of placed) { if (q.name === 'Frente') fp = { x: px, y: py, w: q.w, h: q.h }; if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
         if (!fp) return d;
         const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
         const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
@@ -7754,13 +7757,14 @@
         const domOnFront = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
         const foot = (cx, cy, rot, k) => grp('Hueco de ficha', 'grabado', 'grupo', [mkRect('Ficha', 'grabado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k)], rot);
         const cx0 = fp.x + fp.w / 2, cy0 = fp.y + fp.h / 2;
+        const nums = (dominoNums[variant] && dominoNums[variant].length === DOMINO_DEFAULTS[variant].length ? dominoNums[variant] : DOMINO_DEFAULTS[variant]).map(p => [Math.max(0, Math.min(6, p[0] | 0)), Math.max(0, Math.min(6, p[1] | 0))]);
         let doms, base = [];
         if (variant === 1) {
-          doms = [[cx0 - 32, cy0 + 2, -22, 3, 5], [cx0, cy0 - 2, 0, 6, 4], [cx0 + 32, cy0 + 2, 22, 2, 5]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.95 }));
+          doms = [[cx0 - 32, cy0 + 2, -22], [cx0, cy0 - 2, 0], [cx0 + 32, cy0 + 2, 22]].map((a, i) => ({ cx: a[0], cy: a[1], rot: a[2], a: nums[i][0], b: nums[i][1], k: 0.95 }));
         } else if (variant === 2) {
-          doms = [[cx0 - 17, cy0, -28, 6, 3], [cx0 + 17, cy0, 24, 4, 6]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.85 }));
+          doms = [[cx0 - 17, cy0, -28], [cx0 + 17, cy0, 24]].map((a, i) => ({ cx: a[0], cy: a[1], rot: a[2], a: nums[i][0], b: nums[i][1], k: 0.85 }));
         } else {
-          doms = [[cx0 - 32, cy0 + 12, -26, 5, 3], [cx0, cy0 + 8, 8, 6, 2], [cx0 + 32, cy0 + 12, 28, 3, 4]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.9 }));
+          doms = [[cx0 - 32, cy0 + 12, -26], [cx0, cy0 + 8, 8], [cx0 + 32, cy0 + 12, 28]].map((a, i) => ({ cx: a[0], cy: a[1], rot: a[2], a: nums[i][0], b: nums[i][1], k: 0.9 }));
         }
         const feet = () => doms.map(o => foot(o.cx, o.cy, o.rot, o.k));
         if (variant === 1 || variant === 2) {
@@ -7786,7 +7790,9 @@
         const front = doms.map((o, i) => domOnFront('Dominó ' + (i + 1), o.cx, o.cy, o.rot, o.a, o.b, o.k));
         // Fichas de dominó para cortar y pegar encima (puntos calados), en fila a la derecha de las piezas de la caja
         const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
-        d.shapes.push(...base, ...front, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
+        // Asas: una ranura redondeada recortada en cada costado, cerca del borde de arriba
+        const asas = sides.map(sd => mkRect('Asa', 'corte', sd.x + (sd.w - 44) / 2, sd.y + 14, 44, 12, 6));
+        d.shapes.push(...asas, ...base, ...front, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
       } finally { doc = old; }
       return d;
     };
@@ -10154,9 +10160,28 @@
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
     if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
   }
+  // Antes de crear una caja de dominó se eligen los números de cada ficha
+  function openDominoDialog(key) {
+    const variant = +key.split('-')[1], cur = (dominoNums[variant] && dominoNums[variant].length === DOMINO_DEFAULTS[variant].length ? dominoNums[variant] : DOMINO_DEFAULTS[variant]);
+    const dialog = h('dialog', { class: 'batch-dialog', 'aria-label': 'Números de los dominós' });
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    const sel6 = v => { const e = h('select', {}, ...[0, 1, 2, 3, 4, 5, 6].map(n => h('option', { value: String(n) }, String(n)))); e.value = String(v); return e; };
+    const rows = cur.map((pr, i) => { const a = sel6(pr[0]), b = sel6(pr[1]); return { a, b, el: h('div', { class: 'cw-row', style: 'flex-direction:row;align-items:center;gap:10px' }, h('span', { style: 'min-width:90px' }, 'Ficha ' + (i + 1)), a, h('span', {}, '|'), b) }; });
+    const go = h('button', { class: 'primary' }, 'Crear la caja');
+    go.onclick = () => {
+      dominoNums[variant] = rows.map(r => [+r.a.value, +r.b.value]);
+      try { localStorage.setItem('evergreen-love-studio:dominos', JSON.stringify(dominoNums)); } catch (e) { }
+      close(); loadTemplate(key);
+    };
+    dialog.append(h('h2', {}, 'Números de los dominós'), h('p', { class: 'tip' }, 'Elige el número de puntos de cada mitad de las fichas (0 a 6). Se graban en el frente y se cortan aparte con sus puntos calados.'),
+      h('div', { class: 'cw-form' }, ...rows.map(r => r.el)), h('div', { class: 'dialog-actions' }, h('button', { onclick: close }, 'Cancelar'), go));
+    document.body.append(dialog); dialog.showModal();
+  }
   menu.addEventListener('click', e => {
     const b = e.target.closest('[data-template]');
     if (!b || !TEMPLATES[b.dataset.template]) return;
+    if (/^domino-\d$/.test(b.dataset.template)) { menu.hidden = true; openDominoDialog(b.dataset.template); return; }
     loadTemplate(b.dataset.template);
   });
 
