@@ -7741,13 +7741,15 @@
       const d = boxTemplate('dedos', units, sheet, 'no'), K = units === 'in' ? 25.4 : 1, f = mm => fmt(mm / K, 4);
       d.name = ['', 'Caja de dominó: rayas y abanico', 'Caja de dominó: medallón', 'Caja de dominó: montañas'][variant];
       d.params = [['ancho', tv(220, units)], ['profundo', tv(120, units)], ['alto', tv(100, units)], ['grosor', units === 'in' ? '0.125' : '3'], ['dedo', tv(10, units)], ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
+      // El diseño va sobre una cubierta de otra madera (chapa que se pega por fuera del frente) y los dominós encima
+      Object.assign(d.shapes[0].p, { cubierta: 'si', cubiertaCaras: 'frente', grosorCub: 'grosor' });
       const old = doc; doc = d;
       try {
         evaluateParams();
         const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
         let fp = null, maxX = 0, minY = Infinity;
         const sides = [];
-        for (const [q, [px, py]] of placed) { if (q.name === 'Frente') fp = { x: px, y: py, w: q.w, h: q.h }; if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
+        for (const [q, [px, py]] of placed) { if (q.name === 'Cubierta Frente') fp = { x: px, y: py, w: q.w, h: q.h }; if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
         if (!fp) return d;
         const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
         const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
@@ -7803,22 +7805,27 @@
     if (!box) return;
     separateMany([box]);
     evaluateParams(); evaluateAll();
-    const front = allShapes().find(x => x.type === 'import' && ((x.asm && x.asm.name === 'Frente') || /Frente$/.test(x.name)));
-    const r = front && evalCache.get(front.id);
-    if (!r || !r.bbox || !CL) return;
-    const b = r.bbox, wave = [];
-    for (let i = 0; i <= 60; i++) { const u = i / 60; wave.push([b.x + u * b.w, b.y + 16 * (1 - Math.cos(2 * Math.PI * u)) / 2 + 6 * Math.sin(4 * Math.PI * u) + 8]); }
-    const cutter = [[b.x - 5, b.y - 5], [b.x - 5, wave[0][1]], ...wave, [b.x + b.w + 5, wave[wave.length - 1][1]], [b.x + b.w + 5, b.y - 5]];
-    const outline = r.items.flatMap(it => it.polys.filter(p => p.closed)).sort((p, q) => q.pts.length - p.pts.length)[0];
-    if (!outline) return;
-    const cut = fromC(booleanOp('restar', [normalize(toC([outline])), normalize(toC([{ closed: true, pts: cutter }]))]));
-    if (!cut.length) return;
-    const o = importObject(front.name, cut.map(pl => ({ closed: true, op: 'corte', pts: pl.pts })), []);
-    o.from = front.from; o.asm = front.asm;
-    const list = listOf(front.id), i = list.indexOf(front);
-    list.splice(i, 1, o);
-    sel = new Set([o.id]);
-    checkpoint(); fullRender();
+    if (!CL) return;
+    // El frente y la cubierta que va encima se recortan con la misma onda
+    const fronts = allShapes().filter(x => x.type === 'import' && x.name && /Frente$/.test(x.name) && !/Atrás/.test(x.name));
+    let last = null;
+    for (const front of fronts) {
+      const r = evalCache.get(front.id);
+      if (!r || !r.bbox) continue;
+      const b = r.bbox, wave = [];
+      for (let i = 0; i <= 60; i++) { const u = i / 60; wave.push([b.x + u * b.w, b.y + 16 * (1 - Math.cos(2 * Math.PI * u)) / 2 + 6 * Math.sin(4 * Math.PI * u) + 8]); }
+      const cutter = [[b.x - 5, b.y - 5], [b.x - 5, wave[0][1]], ...wave, [b.x + b.w + 5, wave[wave.length - 1][1]], [b.x + b.w + 5, b.y - 5]];
+      const outline = r.items.flatMap(it => it.polys.filter(p => p.closed)).sort((p, q) => q.pts.length - p.pts.length)[0];
+      if (!outline) continue;
+      const cut = fromC(booleanOp('restar', [normalize(toC([outline])), normalize(toC([{ closed: true, pts: cutter }]))]));
+      if (!cut.length) continue;
+      const o = importObject(front.name, cut.map(pl => ({ closed: true, op: 'corte', pts: pl.pts })), []);
+      o.from = front.from; o.asm = front.asm;
+      const list = listOf(front.id), i = list.indexOf(front);
+      list.splice(i, 1, o);
+      last = o;
+    }
+    if (last) { sel = new Set([last.id]); checkpoint(); fullRender(); }
   }
   const TEMPLATES = {
     'domino-1': dominoTemplate(1),
