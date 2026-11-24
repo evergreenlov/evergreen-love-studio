@@ -8610,7 +8610,7 @@
     const R = Math.hypot(m.W, m.H, m.D), tg = v3.controls.target;
     if (kind === 'home') fit3D();
     else if (kind === 'top') v3.camera.position.set(tg.x, tg.y + R * 1.9, tg.z + 0.01);
-    else if (kind === 'front') v3.camera.position.set(tg.x, tg.y + R * 0.1, tg.z - R * 1.9);
+    else if (kind === 'front') v3.camera.position.set(tg.x + R * 0.55, tg.y + R * 0.4, tg.z - R * 2.3);   // de frente pero un poco de lado y desde arriba, para que se note el volumen
     v3.controls.update();
   }
   function saveImage3D() {
@@ -10170,7 +10170,7 @@
     sel.clear(); checkpoint(); fullRender(); fitView();
     if (key === 'domino-3') { try { dominoWaveFront(); } catch (e) { console.error(e); } }
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
-    if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
+    if (solid) { sel = new Set([solid.id]); open3D(solid.id); setCam3D('home'); }   // siempre en vista inclinada, aunque la sesión anterior se haya quedado de frente
   }
   // Antes de crear una caja de dominó se eligen los números de cada ficha
   function openDominoDialog(key) {
