@@ -7873,8 +7873,8 @@
       const front = doms.map((o, i) => domOn('Dominó ' + (i + 1), o.cx, o.cy, o.rot, o.a, o.b, o.k));
       // Costados: dos fichas verticales grabadas en la cubierta, en la parte baja (lejos del asa)
       const sideDoms = sides.flatMap((sd, si) => {
-        const cx = sd.x + sd.w * (sd.left ? 0.4 : 0.6), cy = sd.y + E + (sd.h - E) / 2;
-        return [[-21, 0, 3, 5], [21, 0, 6, 2]].map(([dx, dy, a, b], i) => domOn('Dominó lateral ' + (si * 2 + i + 1), cx + dx, cy + dy, 0, a, b, 1.5));
+        const cx = sd.x + sd.w * 0.5, cy = sd.y + E + (sd.h - E) / 2;
+        return [[-26, 0, 3, 5], [26, 0, 6, 2]].map(([dx, dy, a, b], i) => domOn('Dominó lateral ' + (si * 2 + i + 1), cx + dx, cy + dy, 0, a, b, 1.8));
       });
       const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
       d.shapes.push(...base, ...front, ...sideDoms, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
