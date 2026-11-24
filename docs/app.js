@@ -847,7 +847,7 @@
   // «Nombres»: etiqueta cada pieza de las cajas (Frente, Atrás, Lado izquierdo…) en el lienzo y en el 3D; solo para ver, no se exporta
   const NAMES_KEY = 'evergreen-love-studio:nombres-piezas';
   const showNames = (() => { try { return localStorage.getItem(NAMES_KEY) !== 'no'; } catch (e) { return true; } })();
-  const names = { on: showNames };
+  const names = { on: showNames, on3d: false };   // en la vista 3D los nombres de las piezas salen apagados; se prenden con el botón «Nombres» de esa vista
   const setNames = on => { names.on = on; try { localStorage.setItem(NAMES_KEY, on ? 'si' : 'no'); } catch (e) { /* sin almacenamiento */ } };
   const modelOf = (s, forView) => !s ? null
     : s.type === 'basket' ? basketModel(s, forView)
@@ -2175,14 +2175,14 @@
       if (!r || !r.items.length || s.hidden) continue;
       const grp = svgEl('g', { 'data-id': s.id, style: s.locked ? 'pointer-events:none' : null }, layerShapes);
       renderItems(r.items, grp, sel.has(s.id) ? ' selected' : '', true, s.color);
-      if (names.on && s.type === 'import' && s.from && s.name) {
+      if (names.on && !v3.open && s.type === 'import' && s.from && s.name) {
         const bb = bboxOfItems(worldCache.get(s.id) || []), lab = s.asm ? s.asm.name : s.name.replace(/^.*· /, '');
         if (bb && lab && bb.w * view.s >= 40 && bb.h * view.s >= 18) {
           const t = svgEl('text', { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2, 'font-size': 12 / view.s, class: 'piece-name' }, grp);
           t.textContent = lab;
         }
       }
-      if (names.on && ['box', 'taper', 'basket'].includes(s.type)) {
+      if (names.on && !v3.open && ['box', 'taper', 'basket'].includes(s.type)) {
         let m = null;
         try { m = modelOf(s, true); } catch (e) { m = null; }
         if (m && m.layout) {
@@ -7742,15 +7742,15 @@
       d.name = ['', 'Caja de dominó: rayas y abanico', 'Caja de dominó: medallón', 'Caja de dominó: montañas'][variant];
       d.params = [['ancho', tv(220, units)], ['profundo', tv(120, units)], ['alto', tv(100, units)], ['grosor', units === 'in' ? '0.125' : '3'], ['dedo', tv(10, units)], ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
       // El diseño va sobre una cubierta de otra madera (chapa que se pega por fuera del frente) y los dominós encima
-      Object.assign(d.shapes[0].p, { cubierta: 'si', cubiertaCaras: 'frente', grosorCub: 'grosor' });
+      Object.assign(d.shapes[0].p, { cubierta: 'si', cubiertaCaras: 'paredes', grosorCub: 'grosor' });
       const old = doc; doc = d;
       try {
         evaluateParams();
         const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
-        let fp = null, maxX = 0, minY = Infinity;
+        const fps = []; let maxX = 0, minY = Infinity;
         const sides = [];
-        for (const [q, [px, py]] of placed) { if (q.name === 'Cubierta Frente') fp = { x: px, y: py, w: q.w, h: q.h }; if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
-        if (!fp) return d;
+        for (const [q, [px, py]] of placed) { if (q.name === 'Cubierta Frente' || q.name === 'Cubierta Atrás') fps.push({ x: px, y: py, w: q.w, h: q.h }); if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
+        if (!fps.length) return d;
         const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
         const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
         const TW = 24, TH = 46, grp = (nm, op, mode, kids, rot) => node('group', nm, op, { mode, x: '0', y: '0', rot: String(rot || 0) }, kids);
@@ -7758,6 +7758,8 @@
         // Dominó dibujado sobre el frente: contorno marcado y puntos grabados (así se ve en la vista 3D)
         const domOnFront = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
         const foot = (cx, cy, rot, k) => grp('Hueco de ficha', 'grabado', 'grupo', [mkRect('Ficha', 'grabado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k)], rot);
+        // El mismo diseño va en el frente y en la cara de atrás
+        const decorate = fp => {
         const cx0 = fp.x + fp.w / 2, cy0 = fp.y + fp.h / 2;
         const nums = (dominoNums[variant] && dominoNums[variant].length === DOMINO_DEFAULTS[variant].length ? dominoNums[variant] : DOMINO_DEFAULTS[variant]).map(p => [Math.max(0, Math.min(6, p[0] | 0)), Math.max(0, Math.min(6, p[1] | 0))]);
         let doms, base = [];
@@ -7790,8 +7792,11 @@
           base.push(importObject('Vetas', veins, []));
         }
         const front = doms.map((o, i) => domOnFront('Dominó ' + (i + 1), o.cx, o.cy, o.rot, o.a, o.b, o.k));
+        return { doms, base, front };
+        };
+        const results = fps.map(decorate), allDoms = results.flatMap(r => r.doms), base = results.flatMap(r => r.base), front = results.flatMap(r => r.front);
         // Fichas de dominó para cortar y pegar encima (puntos calados), en fila a la derecha de las piezas de la caja
-        const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
+        const tiles = allDoms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
         // Asas: una ranura redondeada recortada en cada costado, cerca del borde de arriba
         const asas = sides.map(sd => mkRect('Asa', 'corte', sd.x + (sd.w - 44) / 2, sd.y + 14, 44, 12, 6));
         d.shapes.push(...asas, ...base, ...front, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
@@ -7807,7 +7812,7 @@
     evaluateParams(); evaluateAll();
     if (!CL) return;
     // El frente y la cubierta que va encima se recortan con la misma onda
-    const fronts = allShapes().filter(x => x.type === 'import' && x.name && /Frente$/.test(x.name) && !/Atrás/.test(x.name));
+    const fronts = allShapes().filter(x => x.type === 'import' && x.name && /(Frente|Atrás)$/.test(x.name));
     let last = null;
     for (const front of fronts) {
       const r = evalCache.get(front.id);
@@ -8146,7 +8151,7 @@
         if (decal) parts.push(decal);
       }
       for (const obj of parts) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
-      if (names.on && q.name) {
+      if (names.on3d && q.name) {
         const xs = q.pts.map(p => p[0]), ys = q.pts.map(p => p[1]), th = q.th || m.t;
         const c = new T.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, th / 2).applyMatrix4(mat4);
         const out = holder.userData.out, k = Math.hypot(m.W, m.H, m.D) * 0.02;
@@ -9859,10 +9864,10 @@
     if (cc) { cc.value = '#' + (woodPick.custom != null ? woodPick.custom : 0xdcb887).toString(16).padStart(6, '0'); cc.hidden = woodPick.main !== 'otro'; cc.addEventListener('input', onPick); }
     $('#woodMain').addEventListener('change', onPick); $('#woodCover').addEventListener('change', onPick);
   }
-  $('#v3Names').classList.toggle('active', names.on);
-  $('#v3Names').onclick = e => { setNames(!names.on); e.currentTarget.classList.toggle('active', names.on); $('#chkNames').checked = names.on; if (v3.open) build3D(); drawCanvas(); };
+  $('#v3Names').classList.toggle('active', names.on3d);
+  $('#v3Names').onclick = e => { names.on3d = !names.on3d; e.currentTarget.classList.toggle('active', names.on3d); if (v3.open) build3D(); };
   $('#chkNames').checked = names.on;
-  $('#chkNames').onchange = e => { setNames(e.target.checked); $('#v3Names').classList.toggle('active', names.on); drawCanvas(); if (v3.open) build3D(); };
+  $('#chkNames').onchange = e => { setNames(e.target.checked); drawCanvas(); };
   $('#v3Home').onclick = () => setCam3D('home');
   $('#v3Top').onclick = () => setCam3D('top');
   $('#v3Front').onclick = () => setCam3D('front');
