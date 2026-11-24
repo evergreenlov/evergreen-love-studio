@@ -7908,7 +7908,7 @@
         const cut = cutOut(r, [[b.x - 5, b.y - 5], [b.x + b.w + 5, b.y - 5], [b.x + b.w + 5, b.y + E], [b.x - 5, b.y + E]]);
         if (cut.length) swap(x, cut, E);
       } else if (/^(Cubierta )?Lado (izquierdo|derecho)$/.test(nm)) {
-        const left = /izquierdo/.test(nm), L = b.w, pts = [[b.x - 5, b.y - 5]];
+        const left = x.asm.ax.eu[2] > 0, L = b.w, pts = [[b.x - 5, b.y - 5]];   // «left»: el fondo de la caja queda a la derecha del dibujo (depende de cómo se arma cada pieza, no de su nombre)
         for (let i = 0; i <= 48; i++) {
           const xx = b.x - 5 + (L + 10) * i / 48, dist = left ? b.x + L - xx : xx - b.x;
           pts.push([xx, b.y + E * smooth((dist - 0.42 * L) / (0.34 * L))]);
