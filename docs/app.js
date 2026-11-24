@@ -1249,7 +1249,7 @@
         const { px, py } = sp, o = get(sp.q);
         const mv = ([x, y]) => [x - px, y - py];
         if (it.op === 'grabado' || it.op === 'marcado') {
-          for (const pl of it.polys) o.engr.polys.push({ closed: pl.closed, pts: pl.pts.map(mv) });
+          for (const pl of it.polys) o.engr.polys.push({ closed: pl.closed, pts: pl.pts.map(mv), ...(pl.fill ? { fill: pl.fill } : {}) });
           for (const t of it.texts) o.engr.texts.push({ ...t, x: t.x - px, y: t.y - py });
           for (const g of it.images || []) o.engr.images.push({ ...g, x: g.x - px, y: g.y - py });
         } else if (it.op === 'corte') {
@@ -1668,7 +1668,7 @@
         if (w < 0) { x += w; w = -w; }
         if (h < 0) { y += h; h = -h; }
         const r = Math.max(0, Math.min(len(s, 'r') || 0, w / 2, h / 2));
-        it.polys.push({ closed: true, pts: roundRect(x, y, w, h, r) });
+        it.polys.push({ closed: true, pts: roundRect(x, y, w, h, r), ...(s.p.relleno ? { fill: s.p.relleno } : {}) });   // «relleno»: solo para la vista 3D (p. ej. fichas de dominó blancas)
         break;
       }
       case 'circle': {
@@ -7756,7 +7756,7 @@
         const TW = 24, TH = 46, grp = (nm, op, mode, kids, rot) => node('group', nm, op, { mode, x: '0', y: '0', rot: String(rot || 0) }, kids);
         const pipsOf = (cx, cy, k, a, b, op) => [[a, -TH / 4], [b, TH / 4]].flatMap(([n, oy]) => DOMINO_PIPS[n].map(([px, py]) => mkCirc('Punto', op, cx + px * 5.2 * k, cy + (oy + py * 5.2) * k, 4.4 * k)));
         // Dominó dibujado sobre el frente: contorno marcado y puntos grabados (así se ve en la vista 3D)
-        const domOnFront = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
+        const domOnFront = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [Object.assign(mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k), { p: { ...mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k).p, relleno: 'blanco' } }), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
         const foot = (cx, cy, rot, k) => grp('Hueco de ficha', 'grabado', 'grupo', [mkRect('Ficha', 'grabado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k)], rot);
         // El mismo diseño va en el frente y en la cara de atrás
         const decorate = fp => {
@@ -8280,7 +8280,10 @@
       ctx.fillStyle = ctx.strokeStyle = 'rgba(58, 32, 14, 0.88)';
       const closed = it.polys.filter(pl => pl.closed), open = it.polys.filter(pl => !pl.closed);
       const trace = list => { ctx.beginPath(); for (const pl of list) { pl.pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); if (pl.closed) ctx.closePath(); } };
-      if (closed.length) { trace(closed); ctx.fill('evenodd'); }
+      // Figuras con «relleno» (fichas de dominó): se pintan de marfil con un borde fino y los puntos oscuros van encima
+      const white = closed.filter(pl => pl.fill), dark = closed.filter(pl => !pl.fill);
+      if (white.length) { ctx.save(); ctx.fillStyle = '#f7f1e2'; ctx.strokeStyle = 'rgba(58, 32, 14, 0.9)'; ctx.lineWidth = 0.4; trace(white); ctx.fill('evenodd'); ctx.stroke(); ctx.restore(); }
+      if (dark.length) { trace(dark); ctx.fill('evenodd'); }
       if (open.length) { trace(open); ctx.lineWidth = 0.3; ctx.stroke(); }
       for (const t of it.texts) {
         ctx.save();
