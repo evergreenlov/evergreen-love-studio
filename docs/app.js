@@ -7734,7 +7734,7 @@
   /* ================= Cajas de dominó (plantillas) ================= */
   // Caja sin tapa con dedos; el frente lleva el diseño grabado y los dominós se cortan aparte para pegarlos encima
   const DOMINO_PIPS = { 0: [], 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
-  const DOMINO_DEFAULTS = { 1: [[3, 5], [6, 4], [2, 5]], 2: [[6, 3], [4, 6]], 3: [[5, 3], [6, 2], [3, 4]] };
+  const DOMINO_DEFAULTS = { 1: [[3, 5], [6, 4], [2, 5]], 2: [[6, 3], [4, 6]], 3: [[5, 3], [6, 2], [3, 4]], 4: [[6, 4], [6, 6], [5, 3]] };
   const dominoNums = (() => { try { return JSON.parse(localStorage.getItem('evergreen-love-studio:dominos') || '{}'); } catch (e) { return {}; } })();
   function dominoTemplate(variant) {
     return (units, sheet) => {
@@ -7832,7 +7832,102 @@
     }
     if (last) { sel = new Set([last.id]); checkpoint(); fullRender(); }
   }
+  /* ----- Caja de dominó 4: atrás más alta, costados con curva y asa, rayos al frente ----- */
+  const TALL_E = 45;   // cuánto más alta es la parte de atrás (mm)
+  function dominoTallTemplate(units, sheet) {
+    const d = boxTemplate('dedos', units, sheet, 'no'), K = units === 'in' ? 25.4 : 1, f = mm => fmt(mm / K, 4), E = TALL_E;
+    d.name = 'Caja de dominó: atrás alta con rayos';
+    d.params = [['ancho', tv(220, units)], ['profundo', tv(130, units)], ['alto', tv(100 + E, units)], ['grosor', units === 'in' ? '0.125' : '3'], ['dedo', tv(10, units)], ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
+    Object.assign(d.shapes[0].p, { cubierta: 'si', cubiertaCaras: 'paredes', grosorCub: 'grosor' });
+    const old = doc; doc = d;
+    try {
+      evaluateParams();
+      const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
+      let fp = null, maxX = 0, minY = Infinity; const sides = [];
+      for (const [q, [px, py]] of placed) {
+        if (q.name === 'Cubierta Frente') fp = { x: px, y: py, w: q.w, h: q.h };
+        if (/^Cubierta Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h, left: /izquierdo/.test(q.name) });
+        maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py);
+      }
+      if (!fp) return d;
+      const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
+      const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
+      const TW = 24, TH = 46, grp = (nm, op, mode, kids, rot) => node('group', nm, op, { mode, x: '0', y: '0', rot: String(rot || 0) }, kids);
+      const pipsOf = (cx, cy, k, a, b, op) => [[a, -TH / 4], [b, TH / 4]].flatMap(([n, oy]) => DOMINO_PIPS[n].map(([px, py]) => mkCirc('Punto', op, cx + px * 5.2 * k, cy + (oy + py * 5.2) * k, 4.4 * k)));
+      const tile = (cx, cy, k) => { const r = mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k); r.p.relleno = 'blanco'; return r; };
+      const domOn = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [tile(cx, cy, k), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
+      const foot = (cx, cy, rot, k) => grp('Hueco de ficha', 'grabado', 'grupo', [mkRect('Ficha', 'grabado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k)], rot);
+      const nums = (dominoNums[4] && dominoNums[4].length === 3 ? dominoNums[4] : DOMINO_DEFAULTS[4]).map(p => [Math.max(0, Math.min(6, p[0] | 0)), Math.max(0, Math.min(6, p[1] | 0))]);
+      // Frente: la parte de arriba (45 mm) se recorta al armar la caja, así que el diseño va en lo que queda
+      const y0 = fp.y + E, Hf = fp.h - E, cx0 = fp.x + fp.w / 2, cy0 = y0 + Hf * 0.52;
+      const doms = [[cx0 - 40, cy0 + 4, -24], [cx0 + 2, cy0 - 6, 2], [cx0 + 44, cy0 + 2, 22]].map((a, i) => ({ cx: a[0], cy: a[1], rot: a[2], a: nums[i][0], b: nums[i][1], k: 1.12 }));
+      const frame = mkRect('Marco', 'marcado', fp.x + 6, y0 + 6, fp.w - 12, Hf - 12, 8);
+      const frameFill = mkRect('Marco del diseño', 'grabado', fp.x + 6, y0 + 6, fp.w - 12, Hf - 12, 8);
+      const rays = []; const N = 26, R = 600;
+      for (let i = 0; i < N; i += 2) {
+        const a0 = (i / N) * 2 * Math.PI, a1 = ((i + 1) / N) * 2 * Math.PI, ctr = [cx0, cy0 + 8];
+        rays.push({ closed: true, op: 'grabado', pts: [ctr, [ctr[0] + R * Math.cos(a0), ctr[1] + R * Math.sin(a0)], [ctr[0] + R * Math.cos(a1), ctr[1] + R * Math.sin(a1)]] });
+      }
+      const burst = grp('Rayos', 'grabado', 'intersectar', [frameFill, importObject('Rayos', rays, [])]);
+      const base = [grp('Rayos del frente', 'grabado', 'restar', [burst, ...doms.map(o => foot(o.cx, o.cy, o.rot, o.k))]), frame];
+      const front = doms.map((o, i) => domOn('Dominó ' + (i + 1), o.cx, o.cy, o.rot, o.a, o.b, o.k));
+      // Costados: dos fichas verticales grabadas en la cubierta, en la parte baja (lejos del asa)
+      const sideDoms = sides.flatMap((sd, si) => {
+        const cx = sd.x + sd.w * (sd.left ? 0.4 : 0.6), cy = sd.y + E + (sd.h - E) / 2;
+        return [[-15, 0, 3, 5], [15, 0, 6, 2]].map(([dx, dy, a, b], i) => domOn('Dominó lateral ' + (si * 2 + i + 1), cx + dx * 1.1, cy + dy, 0, a, b, 1.1));
+      });
+      const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
+      d.shapes.push(...base, ...front, ...sideDoms, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
+    } finally { doc = old; }
+    return d;
+  }
+  // Al armar: el frente se baja (se recorta la franja de arriba) y los costados bajan con una curva desde el asa de atrás
+  function dominoTallFinish() {
+    const box = doc.shapes.find(x => x.type === 'box');
+    if (!box || !CL) return;
+    const E = TALL_E;
+    separateMany([box]);
+    evaluateParams(); evaluateAll();
+    const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+    const pieces = allShapes().filter(x => x.type === 'import' && x.asm && x.from);
+    let last = null;
+    const swap = (x, polys, shiftV) => {
+      const o = importObject(x.name, polys.map(pl => ({ closed: true, op: 'corte', pts: pl.pts })), []);
+      o.from = x.from; o.asm = JSON.parse(JSON.stringify(x.asm));
+      if (shiftV && o.asm.ax) o.asm.ax.o = o.asm.ax.o.map((c, i) => c + o.asm.ax.ev[i] * shiftV);   // el origen de la pieza baja con su borde de arriba
+      const list = listOf(x.id); list.splice(list.indexOf(x), 1, o);
+      last = o; return o;
+    };
+    const cutOut = (r, cutter) => { const outline = r.items.flatMap(it => it.polys.filter(p => p.closed)).sort((p, q) => q.pts.length - p.pts.length)[0]; return outline ? fromC(booleanOp('restar', [normalize(toC([outline])), normalize(toC([{ closed: true, pts: cutter }]))])) : []; };
+    const ul = Math.min;
+    for (const x of pieces) {
+      const nm = x.asm.name || '', r = evalCache.get(x.id);
+      if (!r || !r.bbox) continue;
+      const b = r.bbox;
+      if (/^(Cubierta )?Frente$/.test(nm)) {
+        const cut = cutOut(r, [[b.x - 5, b.y - 5], [b.x + b.w + 5, b.y - 5], [b.x + b.w + 5, b.y + E], [b.x - 5, b.y + E]]);
+        if (cut.length) swap(x, cut, E);
+      } else if (/^(Cubierta )?Lado (izquierdo|derecho)$/.test(nm)) {
+        const left = /izquierdo/.test(nm), L = b.w, pts = [[b.x - 5, b.y - 5]];
+        for (let i = 0; i <= 48; i++) {
+          const xx = b.x - 5 + (L + 10) * i / 48, dist = left ? b.x + L - xx : xx - b.x;
+          pts.push([xx, b.y + E * smooth((dist - 0.3 * L) / (0.35 * L))]);
+        }
+        pts.push([b.x + L + 5, b.y - 5]);
+        const cut = cutOut(r, pts);
+        if (cut.length) {
+          const o = swap(x, cut, 0);
+          // asa: ranura redondeada en la parte alta de atrás
+          const sw = ul(30, 0.26 * L), sx = left ? b.x + L - 6 - sw : b.x + 6;
+          const asa = node('rect', 'Asa', 'corte', { x: fmt(sx / unitMM, 4), y: fmt((b.y + 11) / unitMM, 4), w: fmt(sw / unitMM, 4), h: fmt(11 / unitMM, 4), r: fmt(5.5 / unitMM, 4), rot: '0' });
+          doc.shapes.push(asa);
+        }
+      }
+    }
+    if (last) { sel = new Set([last.id]); checkpoint(); fullRender(); }
+  }
   const TEMPLATES = {
+    'domino-4': dominoTallTemplate,
     'domino-1': dominoTemplate(1),
     'domino-2': dominoTemplate(2),
     'domino-3': dominoTemplate(3),
@@ -10202,6 +10297,7 @@
     doc = TEMPLATES[key](doc.units, doc.sheet);
     doc.template = key; delete doc.userTpl;
     sel.clear(); checkpoint(); fullRender(); fitView();
+    if (key === 'domino-4') { try { dominoTallFinish(); const pc = allShapes().find(x => x.type === 'import' && x.asm && x.from); if (pc) { open3D(pc.from.gid); setCam3D('home'); } } catch (e) { console.error(e); } }
     if (key === 'domino-3') { try { dominoWaveFront(); const pc = allShapes().find(x => x.type === 'import' && x.asm && x.from); if (pc) { open3D(pc.from.gid); setCam3D('home'); } } catch (e) { console.error(e); } }
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
     if (solid) { sel = new Set([solid.id]); open3D(solid.id); setCam3D('home'); }   // siempre en vista inclinada, aunque la sesión anterior se haya quedado de frente
