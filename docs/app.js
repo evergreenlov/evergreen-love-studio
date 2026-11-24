@@ -7749,7 +7749,7 @@
         const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
         const fps = []; let maxX = 0, minY = Infinity;
         const sides = [];
-        for (const [q, [px, py]] of placed) { if (q.name === 'Cubierta Frente' || q.name === 'Cubierta Atrás') fps.push({ x: px, y: py, w: q.w, h: q.h }); if (/^Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
+        for (const [q, [px, py]] of placed) { if (q.name === 'Cubierta Frente' || q.name === 'Cubierta Atrás') fps.push({ x: px, y: py, w: q.w, h: q.h }); if (/^(Cubierta )?Lado (izquierdo|derecho)$/.test(q.name)) sides.push({ x: px, y: py, w: q.w, h: q.h }); maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
         if (!fps.length) return d;
         const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
         const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
@@ -7797,7 +7797,7 @@
         const results = fps.map(decorate), allDoms = results.flatMap(r => r.doms), base = results.flatMap(r => r.base), front = results.flatMap(r => r.front);
         // Fichas de dominó para cortar y pegar encima (puntos calados), en fila a la derecha de las piezas de la caja
         const tiles = allDoms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
-        // Asas: una ranura redondeada recortada en cada costado, cerca del borde de arriba
+        // Asas: una ranura redondeada recortada en cada costado y en su cubierta, cerca del borde de arriba (queda abierta de lado a lado)
         const asas = sides.map(sd => mkRect('Asa', 'corte', sd.x + (sd.w - 44) / 2, sd.y + 14, 44, 12, 6));
         d.shapes.push(...asas, ...base, ...front, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
       } finally { doc = old; }
