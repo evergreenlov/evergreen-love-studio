@@ -7731,7 +7731,93 @@
     return d;
   }
 
+  /* ================= Cajas de dominó (plantillas) ================= */
+  // Caja sin tapa con dedos; el frente lleva el diseño grabado y los dominós se cortan aparte para pegarlos encima
+  const DOMINO_PIPS = { 0: [], 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
+  function dominoTemplate(variant) {
+    return (units, sheet) => {
+      const d = boxTemplate('dedos', units, sheet, 'no'), K = units === 'in' ? 25.4 : 1, f = mm => fmt(mm / K, 4);
+      d.name = ['', 'Caja de dominó: rayas y abanico', 'Caja de dominó: medallón', 'Caja de dominó: montañas'][variant];
+      d.params = [['ancho', tv(220, units)], ['profundo', tv(120, units)], ['alto', tv(100, units)], ['grosor', units === 'in' ? '0.125' : '3'], ['dedo', tv(10, units)], ['kerf', units === 'in' ? '0.004' : '0.1'], ['sep', tv(5, units)]].map(([name, expr]) => ({ name, expr }));
+      const old = doc; doc = d;
+      try {
+        evaluateParams();
+        const box = d.shapes[0], m = modelOf(box, false), placed = boxPlacement(box, m);
+        let fp = null, maxX = 0, minY = Infinity;
+        for (const [q, [px, py]] of placed) { if (q.name === 'Frente') fp = { x: px, y: py, w: q.w, h: q.h }; maxX = Math.max(maxX, px + q.w); minY = Math.min(minY, py); }
+        if (!fp) return d;
+        const mkRect = (nm, op, x, y, w, h, r, rot) => node('rect', nm, op, { x: f(x), y: f(y), w: f(w), h: f(h), r: f(r || 0), rot: String(rot || 0) });
+        const mkCirc = (nm, op, x, y, dd) => node('circle', nm, op, { x: f(x), y: f(y), d: f(dd), rot: '0' });
+        const TW = 24, TH = 46, grp = (nm, op, mode, kids, rot) => node('group', nm, op, { mode, x: '0', y: '0', rot: String(rot || 0) }, kids);
+        const pipsOf = (cx, cy, k, a, b, op) => [[a, -TH / 4], [b, TH / 4]].flatMap(([n, oy]) => DOMINO_PIPS[n].map(([px, py]) => mkCirc('Punto', op, cx + px * 5.2 * k, cy + (oy + py * 5.2) * k, 4.4 * k)));
+        // Dominó dibujado sobre el frente: contorno marcado y puntos grabados (así se ve en la vista 3D)
+        const domOnFront = (nm, cx, cy, rot, a, b, k) => grp(nm, 'marcado', 'grupo', [mkRect('Ficha', 'marcado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k), node('line', 'Línea', 'marcado', { x: f(cx - TW * k * 0.33), y: f(cy), x2: f(cx + TW * k * 0.33), y2: f(cy) }), ...pipsOf(cx, cy, k, a, b, 'grabado')], rot);
+        const foot = (cx, cy, rot, k) => grp('Hueco de ficha', 'grabado', 'grupo', [mkRect('Ficha', 'grabado', cx - TW * k / 2, cy - TH * k / 2, TW * k, TH * k, 3 * k)], rot);
+        const cx0 = fp.x + fp.w / 2, cy0 = fp.y + fp.h / 2;
+        let doms, base = [];
+        if (variant === 1) {
+          doms = [[cx0 - 32, cy0 + 2, -22, 3, 5], [cx0, cy0 - 2, 0, 6, 4], [cx0 + 32, cy0 + 2, 22, 2, 5]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.95 }));
+        } else if (variant === 2) {
+          doms = [[cx0 - 17, cy0, -28, 6, 3], [cx0 + 17, cy0, 24, 4, 6]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.85 }));
+        } else {
+          doms = [[cx0 - 32, cy0 + 12, -26, 5, 3], [cx0, cy0 + 8, 8, 6, 2], [cx0 + 32, cy0 + 12, 28, 3, 4]].map(a => ({ cx: a[0], cy: a[1], rot: a[2], a: a[3], b: a[4], k: 0.9 }));
+        }
+        const feet = () => doms.map(o => foot(o.cx, o.cy, o.rot, o.k));
+        if (variant === 1 || variant === 2) {
+          // Tablillas grabadas, que se interrumpen donde van los dominós (y el medallón)
+          const x0 = fp.x + 10, x1 = fp.x + fp.w - 10, n = 5, h = 9, gap = (fp.h - 20 - n * h) / (n - 1);
+          const stripes = grp('Tablillas', 'grabado', 'grupo', Array.from({ length: n }, (_, i) => mkRect('Tablilla', 'grabado', x0, fp.y + 10 + i * (h + gap), x1 - x0, h, 1.5)));
+          const cut = variant === 2 ? [mkCirc('Hueco del medallón', 'grabado', cx0, cy0, Math.min(fp.h - 8, 92))] : feet();
+          base.push(grp('Tablillas del frente', 'grabado', 'restar', [stripes, ...cut]));
+          if (variant === 2) {
+            const R = Math.min(fp.h - 14, 84);
+            base.push(grp('Medallón', 'grabado', 'restar', [mkCirc('Medallón', 'grabado', cx0, cy0, R), ...feet()]), mkCirc('Aro del medallón', 'marcado', cx0, cy0, R + 6));
+          }
+        } else {
+          const X0 = fp.x + 6, W = fp.w - 12, Y1 = fp.y + fp.h - 8, Y0 = fp.y + fp.h * 0.42;
+          const peaks = [[0, 0.55], [0.17, 0.12], [0.3, 0.42], [0.47, 0], [0.62, 0.38], [0.8, 0.1], [1, 0.5]], pts = [[X0, Y1]];
+          peaks.forEach(([u, v]) => pts.push([X0 + u * W, Y0 + v * (Y1 - Y0) * 0.5]));
+          pts.push([X0 + W, Y1]);
+          const sc = importObject('Montañas', [{ closed: true, op: 'grabado', pts }], []);
+          base.push(grp('Montañas del frente', 'grabado', 'restar', [sc, ...feet()]));
+          const veins = [[[0.06, 0.78], [0.22, 0.62]], [[0.52, 0.8], [0.7, 0.62]], [[0.76, 0.9], [0.95, 0.74]]].map(([a, b]) => ({ closed: false, op: 'marcado', pts: [[X0 + a[0] * W, fp.y + a[1] * fp.h], [X0 + b[0] * W, fp.y + b[1] * fp.h]] }));
+          base.push(importObject('Vetas', veins, []));
+        }
+        const front = doms.map((o, i) => domOnFront('Dominó ' + (i + 1), o.cx, o.cy, o.rot, o.a, o.b, o.k));
+        // Fichas de dominó para cortar y pegar encima (puntos calados), en fila a la derecha de las piezas de la caja
+        const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
+        d.shapes.push(...base, ...front, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
+      } finally { doc = old; }
+      return d;
+    };
+  }
+  // Las montañas llevan el borde de arriba ondulado: hay que separar la caja en piezas y recortar el frente
+  function dominoWaveFront() {
+    const box = doc.shapes.find(x => x.type === 'box');
+    if (!box) return;
+    separateMany([box]);
+    evaluateParams(); evaluateAll();
+    const front = allShapes().find(x => x.type === 'import' && ((x.asm && x.asm.name === 'Frente') || /Frente$/.test(x.name)));
+    const r = front && evalCache.get(front.id);
+    if (!r || !r.bbox || !CL) return;
+    const b = r.bbox, wave = [];
+    for (let i = 0; i <= 60; i++) { const u = i / 60; wave.push([b.x + u * b.w, b.y + 16 * (1 - Math.cos(2 * Math.PI * u)) / 2 + 6 * Math.sin(4 * Math.PI * u) + 8]); }
+    const cutter = [[b.x - 5, b.y - 5], [b.x - 5, wave[0][1]], ...wave, [b.x + b.w + 5, wave[wave.length - 1][1]], [b.x + b.w + 5, b.y - 5]];
+    const outline = r.items.flatMap(it => it.polys.filter(p => p.closed)).sort((p, q) => q.pts.length - p.pts.length)[0];
+    if (!outline) return;
+    const cut = fromC(booleanOp('restar', [normalize(toC([outline])), normalize(toC([{ closed: true, pts: cutter }]))]));
+    if (!cut.length) return;
+    const o = importObject(front.name, cut.map(pl => ({ closed: true, op: 'corte', pts: pl.pts })), []);
+    o.from = front.from; o.asm = front.asm;
+    const list = listOf(front.id), i = list.indexOf(front);
+    list.splice(i, 1, o);
+    sel = new Set([o.id]);
+    checkpoint(); fullRender();
+  }
   const TEMPLATES = {
+    'domino-1': dominoTemplate(1),
+    'domino-2': dominoTemplate(2),
+    'domino-3': dominoTemplate(3),
     'box-gift-quarter': giftBoxQuarterTemplate,
     'box-dedos': (u, s) => boxTemplate('dedos', u, s),
     'box-planas': (u, s) => boxTemplate('planas', u, s),
@@ -10064,6 +10150,7 @@
     doc = TEMPLATES[key](doc.units, doc.sheet);
     doc.template = key; delete doc.userTpl;
     sel.clear(); checkpoint(); fullRender(); fitView();
+    if (key === 'domino-3') { try { dominoWaveFront(); } catch (e) { console.error(e); } }
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
     if (solid) { sel = new Set([solid.id]); open3D(solid.id); }
   }
