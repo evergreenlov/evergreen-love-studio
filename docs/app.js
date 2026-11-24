@@ -1249,7 +1249,7 @@
         const { px, py } = sp, o = get(sp.q);
         const mv = ([x, y]) => [x - px, y - py];
         if (it.op === 'grabado' || it.op === 'marcado') {
-          for (const pl of it.polys) o.engr.polys.push({ closed: pl.closed, pts: pl.pts.map(mv), ...(pl.fill ? { fill: pl.fill } : {}) });
+          for (const pl of it.polys) o.engr.polys.push({ closed: pl.closed, pts: pl.pts.map(mv), ...(pl.fill ? { fill: pl.fill } : {}), ...(it.op === 'marcado' ? { line: true } : {}) });
           for (const t of it.texts) o.engr.texts.push({ ...t, x: t.x - px, y: t.y - py });
           for (const g of it.images || []) o.engr.images.push({ ...g, x: g.x - px, y: g.y - py });
         } else if (it.op === 'corte') {
@@ -8281,9 +8281,11 @@
       const closed = it.polys.filter(pl => pl.closed), open = it.polys.filter(pl => !pl.closed);
       const trace = list => { ctx.beginPath(); for (const pl of list) { pl.pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); if (pl.closed) ctx.closePath(); } };
       // Figuras con «relleno» (fichas de dominó): se pintan de marfil con un borde fino y los puntos oscuros van encima
-      const white = closed.filter(pl => pl.fill), dark = closed.filter(pl => !pl.fill);
+      // Lo «marcado» (línea de score) se dibuja solo como línea, no como relleno oscuro
+      const white = closed.filter(pl => pl.fill), dark = closed.filter(pl => !pl.fill && !pl.line), scored = closed.filter(pl => pl.line && !pl.fill);
       if (white.length) { ctx.save(); ctx.fillStyle = '#f7f1e2'; ctx.strokeStyle = 'rgba(58, 32, 14, 0.9)'; ctx.lineWidth = 0.4; trace(white); ctx.fill('evenodd'); ctx.stroke(); ctx.restore(); }
       if (dark.length) { trace(dark); ctx.fill('evenodd'); }
+      if (scored.length) { trace(scored); ctx.lineWidth = 0.3; ctx.stroke(); }
       if (open.length) { trace(open); ctx.lineWidth = 0.3; ctx.stroke(); }
       for (const t of it.texts) {
         ctx.save();
