@@ -7874,7 +7874,7 @@
       // Costados: dos fichas verticales grabadas en la cubierta, en la parte baja (lejos del asa)
       const sideDoms = sides.flatMap((sd, si) => {
         const cx = sd.x + sd.w * (sd.left ? 0.4 : 0.6), cy = sd.y + E + (sd.h - E) / 2;
-        return [[-15, 0, 3, 5], [15, 0, 6, 2]].map(([dx, dy, a, b], i) => domOn('Dominó lateral ' + (si * 2 + i + 1), cx + dx * 1.1, cy + dy, 0, a, b, 1.1));
+        return [[-21, 0, 3, 5], [21, 0, 6, 2]].map(([dx, dy, a, b], i) => domOn('Dominó lateral ' + (si * 2 + i + 1), cx + dx, cy + dy, 0, a, b, 1.5));
       });
       const tiles = doms.map((o, i) => grp('Ficha de dominó ' + (i + 1), 'corte', 'restar', [mkRect('Ficha', 'corte', maxX + 15 + i * (TW * o.k + 6), minY, TW * o.k, TH * o.k, 3 * o.k), ...pipsOf(maxX + 15 + i * (TW * o.k + 6) + TW * o.k / 2, minY + TH * o.k / 2, o.k, o.a, o.b, 'corte')]));
       d.shapes.push(...base, ...front, ...sideDoms, grp('Fichas de dominó para pegar', 'corte', 'grupo', tiles));
@@ -7911,15 +7911,15 @@
         const left = /izquierdo/.test(nm), L = b.w, pts = [[b.x - 5, b.y - 5]];
         for (let i = 0; i <= 48; i++) {
           const xx = b.x - 5 + (L + 10) * i / 48, dist = left ? b.x + L - xx : xx - b.x;
-          pts.push([xx, b.y + E * smooth((dist - 0.3 * L) / (0.35 * L))]);
+          pts.push([xx, b.y + E * smooth((dist - 0.42 * L) / (0.34 * L))]);
         }
         pts.push([b.x + L + 5, b.y - 5]);
         const cut = cutOut(r, pts);
         if (cut.length) {
           const o = swap(x, cut, 0);
           // asa: ranura redondeada en la parte alta de atrás
-          const sw = ul(30, 0.26 * L), sx = left ? b.x + L - 6 - sw : b.x + 6;
-          const asa = node('rect', 'Asa', 'corte', { x: fmt(sx / unitMM, 4), y: fmt((b.y + 11) / unitMM, 4), w: fmt(sw / unitMM, 4), h: fmt(11 / unitMM, 4), r: fmt(5.5 / unitMM, 4), rot: '0' });
+          const sw = ul(46, 0.34 * L), sx = left ? b.x + L - 6 - sw : b.x + 6;
+          const asa = node('rect', 'Asa', 'corte', { x: fmt(sx / unitMM, 4), y: fmt((b.y + 10) / unitMM, 4), w: fmt(sw / unitMM, 4), h: fmt(14 / unitMM, 4), r: fmt(7 / unitMM, 4), rot: '0' });
           doc.shapes.push(asa);
         }
       }
