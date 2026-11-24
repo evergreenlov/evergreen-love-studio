@@ -7967,7 +7967,25 @@
       if (!cuts.length) continue;
       const outer = cuts.reduce((p, q) => polyArea(q) > polyArea(p) ? q : p);
       const holeSrc = orn ? cl.filter(c => c.op === 'corte').map(c => c.pts) : cuts;
-      items.push({ x, outer, holes: holeSrc.filter(c => c !== outer && inPoly(c[0], outer)) });
+      const ox = len(x, 'x'), oy = len(x, 'y'), holes = holeSrc.filter(c => c !== outer && inPoly(c[0], outer)), engr = [];
+      // Lo grabado del propio archivo y los dibujos que están encima de la pieza en el lienzo (grabado, marcado, recortes)
+      for (const c of cl) if (c.op !== 'corte') engr.push({ closed: true, pts: c.pts, ...(c.op === 'marcado' ? { line: true } : {}) });
+      for (const id of evalCache.keys()) {
+        const sh = byId(id);
+        if (!sh || sh === x || sh.asm || SEPARABLE.has(sh.type)) continue;
+        for (const it of worldCache.get(id) || []) {
+          const b = bboxOfItems([it]);
+          if (!b || !inPoly([b.x + b.w / 2 - ox, b.y + b.h / 2 - oy], outer)) continue;
+          const mv = ([px, py]) => [px - ox, py - oy];
+          if (it.op === 'grabado' || it.op === 'marcado') {
+            for (const pl of it.polys) engr.push({ closed: pl.closed, pts: pl.pts.map(mv), ...(pl.fill ? { fill: pl.fill } : {}), ...(it.op === 'marcado' ? { line: true } : {}) });
+            for (const t of it.texts) engr.push({ text: { ...t, x: t.x - ox, y: t.y - oy } });
+          } else if (it.op === 'corte') {
+            for (const pl of it.polys) if (pl.closed && pl.pts.length >= 3 && pl.pts.every(pt => inPoly(mv(pt), outer))) holes.push(pl.pts.map(mv));
+          }
+        }
+      }
+      items.push({ x, outer, holes, engr, w, hh, cover: /Cubierta/.test(x.asm.name || '') });
     }
     if (!info || !items.length) { $('#view3dMsg').hidden = false; $('#view3dMsg').textContent = 'Ya no quedan piezas de esa caja. Usa «Volver a la caja con parámetros» o Deshacer.'; return; }
     $('#view3dMsg').hidden = true;
@@ -7976,7 +7994,7 @@
       v3.group.remove(c);
     }
     const k = kN ? kSum / kN : 1, pv = [info.W / 2, info.H / 2, info.D / 2];
-    for (const { x, outer, holes } of items) {
+    for (const { x, outer, holes, engr, w: pw, hh: ph, cover } of items) {
       const ax = x.asm.ax, o = [0, 1, 2].map(i => pv[i] + k * (ax.o[i] - pv[i])); // las posiciones crecen o se encogen con las piezas
       const shape = new T.Shape(outer.map(([u, v]) => new T.Vector2(u, v)));
       for (const hl of holes) shape.holes.push(new T.Path(hl.map(([u, v]) => new T.Vector2(u, v))));
@@ -7988,9 +8006,15 @@
         0, 0, 0, 1);
       const holder = new T.Group();
       holder.userData.out = ax.out;
-      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: pickWood(0xdcb887), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+      const mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: cover ? pickCover(0xa9743f) : pickWood(0xdcb887), roughness: 0.85, metalness: 0, side: T.DoubleSide }));
       const edges = new T.LineSegments(new T.EdgesGeometry(geo, 20), new T.LineBasicMaterial({ color: 0x6b4a2b }));
-      for (const obj of [mesh, edges]) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
+      const parts = [mesh, edges];
+      if (engr && engr.length) {
+        const it = fontOutlines({ op: 'grabado', polys: engr.filter(e => e.pts), texts: engr.filter(e => e.text).map(e => e.text), images: [] });
+        const decal = decalMesh(it, pw, ph, { eu: ax.eu, ev: ax.ev, ew: ax.ew }, false);
+        if (decal) parts.push(decal);
+      }
+      for (const obj of parts) { obj.matrixAutoUpdate = false; obj.matrix.copy(mat4); holder.add(obj); }
       v3.group.add(holder);
     }
     $('#view3dTitle').textContent = `${info.name} · piezas desagrupadas, armadas en 3D (${items.length})`;
@@ -8260,8 +8284,13 @@
     const it0 = base || has ? { op: 'grabado', polys: [...(base ? base.polys : []), ...(has ? extra.polys : [])], texts: [...(base ? base.texts : []), ...(has ? extra.texts : [])], images: [...(base ? base.images : []), ...(has ? extra.images : [])] } : null;
     const it = it0 && fontOutlines(it0);
     if (!it) return null;
-    const lid = q.name === 'Tapa deslizante';
-    const w0 = lid ? m.t + 0.06 : -0.06; // cara exterior (la tapa deslizante mira hacia +w)
+    return decalMesh(it, q.w, q.h, P, q.name === 'Tapa deslizante', m.t);
+  }
+  // Textura transparente con el grabado de una pieza (qw × qh mm), pegada a su cara de afuera
+  function decalMesh(it, qw, qh, P, lid, tt) {
+    const T = window.THREE;
+    const q = { w: qw, h: qh };
+    const w0 = lid ? tt + 0.06 : -0.06; // cara exterior (la tapa deslizante mira hacia +w)
     // En el modelo algunas piezas quedan reflejadas; se refleja la textura para que se lea igual que la pieza real
     const cross = [P.eu[1] * P.ev[2] - P.eu[2] * P.ev[1], P.eu[2] * P.ev[0] - P.eu[0] * P.ev[2], P.eu[0] * P.ev[1] - P.eu[1] * P.ev[0]];
     const dot = cross[0] * P.ew[0] + cross[1] * P.ew[1] + cross[2] * P.ew[2];
@@ -10173,7 +10202,7 @@
     doc = TEMPLATES[key](doc.units, doc.sheet);
     doc.template = key; delete doc.userTpl;
     sel.clear(); checkpoint(); fullRender(); fitView();
-    if (key === 'domino-3') { try { dominoWaveFront(); } catch (e) { console.error(e); } }
+    if (key === 'domino-3') { try { dominoWaveFront(); const pc = allShapes().find(x => x.type === 'import' && x.asm && x.from); if (pc) { open3D(pc.from.gid); setCam3D('home'); } } catch (e) { console.error(e); } }
     const solid = doc.shapes.find(x => ['box', 'taper', 'cone', 'basket', 'planter'].includes(x.type));
     if (solid) { sel = new Set([solid.id]); open3D(solid.id); setCam3D('home'); }   // siempre en vista inclinada, aunque la sesión anterior se haya quedado de frente
   }
